@@ -22,6 +22,7 @@ package v1beta2
 
 import (
 	"k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -871,6 +872,11 @@ func (in *BrokerSpec) DeepCopyInto(out *BrokerSpec) {
 		in, out := &in.Restricted, &out.Restricted
 		*out = new(bool)
 		**out = **in
+	}
+	if in.NetworkPolicy != nil {
+		in, out := &in.NetworkPolicy, &out.NetworkPolicy
+		*out = new(networkingv1.NetworkPolicySpec)
+		(*in).DeepCopyInto(*out)
 	}
 }
 

@@ -27,6 +27,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -1419,4 +1420,63 @@ func TestBrokerServiceConditionTransitionsOnRecovery(t *testing.T) {
 	assert.NotNil(t, deployedCond)
 	assert.Equal(t, metav1.ConditionTrue, deployedCond.Status)
 	assert.Equal(t, v1beta2.ReadyConditionReason, deployedCond.Reason)
+}
+
+func TestBuildBrokerServiceNetworkPolicy_NoApps(t *testing.T) {
+	spec := buildBrokerServiceNetworkPolicy("my-broker", nil)
+
+	assert.NotNil(t, spec)
+	assert.Equal(t, "my-broker", spec.PodSelector.MatchLabels["ActiveMQArtemis"])
+	assert.Contains(t, spec.PolicyTypes, netv1.PolicyTypeIngress)
+
+	ports := collectNetPolPorts(spec)
+	assert.Contains(t, ports, int32(8778), "Jolokia port")
+	assert.Contains(t, ports, int32(8888), "Prometheus port")
+	assert.Len(t, ports, 2)
+}
+
+func TestBuildBrokerServiceNetworkPolicy_WithAppPorts(t *testing.T) {
+	appPorts := []int32{61617, 5672}
+	spec := buildBrokerServiceNetworkPolicy("my-broker", appPorts)
+
+	ports := collectNetPolPorts(spec)
+	assert.Contains(t, ports, int32(8778), "Jolokia port")
+	assert.Contains(t, ports, int32(8888), "Prometheus port")
+	assert.Contains(t, ports, int32(61617), "first app port")
+	assert.Contains(t, ports, int32(5672), "second app port")
+	assert.Len(t, ports, 4)
+}
+
+func TestBuildBrokerServiceNetworkPolicy_DeduplicatesAppPorts(t *testing.T) {
+	appPorts := []int32{8778, 61617, 61617}
+	spec := buildBrokerServiceNetworkPolicy("my-broker", appPorts)
+
+	ports := collectNetPolPorts(spec)
+	assert.Contains(t, ports, int32(8778))
+	assert.Contains(t, ports, int32(8888))
+	assert.Contains(t, ports, int32(61617))
+	assert.Len(t, ports, 3, "duplicates removed")
+}
+
+func TestBuildBrokerServiceNetworkPolicy_AppUnbind(t *testing.T) {
+	specBefore := buildBrokerServiceNetworkPolicy("my-broker", []int32{61617})
+	portsBefore := collectNetPolPorts(specBefore)
+	assert.Contains(t, portsBefore, int32(61617))
+
+	specAfter := buildBrokerServiceNetworkPolicy("my-broker", nil)
+	portsAfter := collectNetPolPorts(specAfter)
+	assert.NotContains(t, portsAfter, int32(61617), "port removed after app unbind")
+	assert.Len(t, portsAfter, 2, "only restricted ports remain")
+}
+
+func collectNetPolPorts(spec *netv1.NetworkPolicySpec) []int32 {
+	var ports []int32
+	for _, rule := range spec.Ingress {
+		for _, p := range rule.Ports {
+			if p.Port != nil {
+				ports = append(ports, int32(p.Port.IntValue()))
+			}
+		}
+	}
+	return ports
 }

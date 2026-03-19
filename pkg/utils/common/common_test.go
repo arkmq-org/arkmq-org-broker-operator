@@ -190,6 +190,37 @@ var _ = Describe("Common Test", func() {
 			Expect(secret).To(BeNil())
 		})
 	})
+
+	Describe("OperandNetworkPolicyDisabled", func() {
+		AfterEach(func() {
+			os.Unsetenv("DISABLE_OPERAND_NETWORK_POLICY")
+		})
+
+		It("returns false when env var is unset", func() {
+			os.Unsetenv("DISABLE_OPERAND_NETWORK_POLICY")
+			Expect(OperandNetworkPolicyDisabled()).To(BeFalse())
+		})
+
+		It("returns true when env var is 'true'", func() {
+			os.Setenv("DISABLE_OPERAND_NETWORK_POLICY", "true")
+			Expect(OperandNetworkPolicyDisabled()).To(BeTrue())
+		})
+
+		It("returns true case-insensitively", func() {
+			os.Setenv("DISABLE_OPERAND_NETWORK_POLICY", "True")
+			Expect(OperandNetworkPolicyDisabled()).To(BeTrue())
+		})
+
+		It("returns false for non-true values", func() {
+			os.Setenv("DISABLE_OPERAND_NETWORK_POLICY", "false")
+			Expect(OperandNetworkPolicyDisabled()).To(BeFalse())
+		})
+
+		It("returns false for empty string", func() {
+			os.Setenv("DISABLE_OPERAND_NETWORK_POLICY", "")
+			Expect(OperandNetworkPolicyDisabled()).To(BeFalse())
+		})
+	})
 })
 
 // errorClient is a fake client that returns errors for Get operations

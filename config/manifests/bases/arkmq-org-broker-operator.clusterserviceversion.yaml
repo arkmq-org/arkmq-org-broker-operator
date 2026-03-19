@@ -7310,6 +7310,11 @@ spec:
         path: ingressDomain
         x-descriptors:
         - urn:alm:descriptor:com.tectonic.ui:text
+      - description: |-
+          Optional NetworkPolicy spec for the broker pods. When set, the operator
+          uses this spec directly instead of auto-generating a NetworkPolicy.
+        displayName: Network Policy
+        path: networkPolicy
       - description: Specifies the template for various resources that the operator
           controls
         displayName: Resource Templates
