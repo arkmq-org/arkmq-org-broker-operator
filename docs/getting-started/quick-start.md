@@ -34,11 +34,11 @@ There are multiple methods of installing the operator: [from releases](#install-
 ### Install the operator from releases
 In order to install the operator from the latest release is by running the following command:
 ```shell
-kubectl apply -f https://github.com/arkmq-org/activemq-artemis-operator/releases/latest/download/activemq-artemis-operator.yaml
+kubectl apply --server-side -f https://github.com/arkmq-org/activemq-artemis-operator/releases/latest/download/activemq-artemis-operator.yaml
 ```
 You can also install a specific operator version, i.e. to install the version `2.0.5`
 ```shell
-kubectl apply -f https://github.com/arkmq-org/activemq-artemis-operator/releases/download/v2.0.5/activemq-artemis-operator.yaml
+kubectl apply --server-side -f https://github.com/arkmq-org/activemq-artemis-operator/releases/download/v2.0.5/activemq-artemis-operator.yaml
 ```
 
 ### Install the operator from helm charts
