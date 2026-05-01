@@ -274,7 +274,6 @@ var _ = Describe("broker-service status conditions", func() {
 
 			By("creating an app")
 			appName := "status-test-app"
-			appPort := int32(61620)
 			app := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "BrokerApp",
@@ -288,10 +287,9 @@ var _ = Describe("broker-service status conditions", func() {
 					ServiceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"test": "status"},
 					},
-					Acceptor: broker.AppAcceptorType{Port: appPort},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "STATUS.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "STATUS.QUEUE"}},
 						},
 					},
 				},
@@ -416,7 +414,6 @@ var _ = Describe("broker-service status conditions", func() {
 
 			By("creating app with initial capabilities")
 			appName := "config-app"
-			appPort := int32(61621)
 			app := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "BrokerApp",
@@ -430,11 +427,10 @@ var _ = Describe("broker-service status conditions", func() {
 					ServiceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"config": "test"},
 					},
-					Acceptor: broker.AppAcceptorType{Port: appPort},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "INITIAL.QUEUE"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "INITIAL.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "INITIAL.QUEUE"}},
+							ConsumerOf: []broker.AddressRef{{Address: "INITIAL.QUEUE"}},
 						},
 					},
 				},
@@ -481,10 +477,10 @@ var _ = Describe("broker-service status conditions", func() {
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, appKey, createdApp)).Should(Succeed())
 				createdApp.Spec.Capabilities = append(createdApp.Spec.Capabilities, broker.AppCapabilityType{
-					ProducerOf: []broker.AppAddressType{
+					ProducerOf: []broker.AddressRef{
 						{Address: "UPDATED.QUEUE"},
 					},
-					ConsumerOf: []broker.AppAddressType{
+					ConsumerOf: []broker.AddressRef{
 						{Address: "UPDATED.QUEUE"},
 					},
 				})

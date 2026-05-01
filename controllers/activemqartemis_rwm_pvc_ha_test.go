@@ -45,7 +45,7 @@ var _ = Describe("shared store fast failover", func() {
 	})
 
 	Context("two peer crs", Label("slow"), func() {
-		It("with shared store", func() {
+		It("with shared store", Label("verySlow"), func() {
 			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
 
 				By("deploying shared volume")

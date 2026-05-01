@@ -50,7 +50,7 @@ var _ = Describe("jdbc fast failover", func() {
 	})
 
 	Context("artemis", Label("slow"), func() {
-		It("cr with db store", func() {
+		It("cr with db store", Label("verySlow"), func() {
 			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
 
 				By("deploying db and service to unrestricted  default namespace")

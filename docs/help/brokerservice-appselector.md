@@ -35,8 +35,8 @@ CEL expressions have access to:
 
 - **`app`**: The complete BrokerApp object being evaluated
   - All metadata: `app.metadata.name`, `app.metadata.namespace`, `app.metadata.labels`, `app.metadata.annotations`, etc.
-  - All spec fields: `app.spec.acceptor.port`, `app.spec.serviceSelector`, etc.
-  - All status fields: `app.status.conditions`, etc.
+  - All spec fields: `app.spec.serviceSelector`, `app.spec.capabilities`, etc.
+  - All status fields: `app.status.conditions`, `app.status.service.assignedPort`, etc.
 
 - **`service`**: The complete BrokerService object
   - All metadata: `service.metadata.name`, `service.metadata.namespace`, `service.metadata.labels`, etc.

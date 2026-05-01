@@ -200,7 +200,7 @@ var _ = Describe("Address controller tests", func() {
 
 	Context("address controller test with reconcile", func() {
 
-		It("Deploy CR with size 5 (pods)", func() {
+		It("Deploy CR with size 5 (pods)", Label("verySlow"), func() {
 
 			ctx := context.Background()
 

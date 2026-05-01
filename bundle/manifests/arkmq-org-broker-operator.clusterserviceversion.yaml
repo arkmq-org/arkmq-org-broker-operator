@@ -297,9 +297,6 @@ metadata:
             "name": "wq-app"
           },
           "spec": {
-            "acceptor": {
-              "port": 61616
-            },
             "capabilities": [
               {
                 "producerOf": [
@@ -5630,8 +5627,11 @@ spec:
         name: ""
         version: v1
       specDescriptors:
-      - displayName: Acceptor
-        path: acceptor
+      - description: |-
+          Addresses owned by this app (lifecycle tied to this app)
+          Other apps can reference these via appNamespace/appName in their capabilities
+        displayName: Addresses
+        path: addresses
       - displayName: Messaging Capabilities
         path: capabilities
       - displayName: Resources
@@ -6745,6 +6745,9 @@ spec:
       - displayName: Resources
         path: resources
       statusDescriptors:
+      - description: Port pool discovered from NetworkPolicy or default range
+        displayName: Available Ports
+        path: availablePorts
       - description: |-
           Current state of the resource
           Conditions represent the latest available observations of an object's state
@@ -7161,6 +7164,14 @@ spec:
           - get
           - list
           - update
+          - watch
+        - apiGroups:
+          - networking.k8s.io
+          resources:
+          - networkpolicies
+          verbs:
+          - get
+          - list
           - watch
         - apiGroups:
           - policy

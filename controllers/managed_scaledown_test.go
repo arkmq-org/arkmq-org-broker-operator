@@ -49,7 +49,7 @@ var _ = Describe("artemis as scaledown controller", func() {
 	})
 
 	Context("managed scale down test", func() {
-		It("deploy plan 3 clustered messages on ordinal 1", Label("managed-scaledown-check"), func() {
+		It("deploy plan 3 clustered messages on ordinal 1", Label("managed-scaledown-check", "verySlow"), func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
 

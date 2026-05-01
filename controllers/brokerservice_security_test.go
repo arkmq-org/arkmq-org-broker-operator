@@ -23,6 +23,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -40,6 +41,7 @@ func TestBrokerServiceRejectsManuallyAnnotatedApp(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = networkingv1.AddToScheme(scheme)
 
 	// Data
 	svcNs := "broker-services"
@@ -70,7 +72,6 @@ func TestBrokerServiceRejectsManuallyAnnotatedApp(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 		Status: v1beta2.BrokerAppStatus{
 			Service: &v1beta2.BrokerServiceBindingStatus{
@@ -170,6 +171,7 @@ func TestBrokerServiceAllowsMatchingApp(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = networkingv1.AddToScheme(scheme)
 
 	// Data
 	svcNs := "broker-services"
@@ -202,6 +204,15 @@ func TestBrokerServiceAllowsMatchingApp(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			AppSelectorExpression: `app.metadata.namespace == "trusted-team"`,
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+		},
 	}
 
 	// Create legitimate BrokerApp from ALLOWED namespace with status binding set by controller
@@ -214,13 +225,13 @@ func TestBrokerServiceAllowsMatchingApp(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 		Status: v1beta2.BrokerAppStatus{
 			Service: &v1beta2.BrokerServiceBindingStatus{
-				Name:      svcName,
-				Namespace: svcNs,
-				Secret:    "binding-secret",
+				Name:         svcName,
+				Namespace:    svcNs,
+				Secret:       "binding-secret",
+				AssignedPort: 61616,
 			},
 		},
 	}
@@ -285,6 +296,7 @@ func TestBrokerServiceRejectsLabelMismatch(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = networkingv1.AddToScheme(scheme)
 
 	// Data
 	svcNs := "broker-services"
@@ -334,7 +346,6 @@ func TestBrokerServiceRejectsLabelMismatch(t *testing.T) {
 					"tier": "basic", // App wants BASIC, not premium!
 				},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 		Status: v1beta2.BrokerAppStatus{
 			Service: &v1beta2.BrokerServiceBindingStatus{
@@ -416,6 +427,7 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = networkingv1.AddToScheme(scheme)
 
 	// Data
 	svcNs := "broker-services"
@@ -445,6 +457,15 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			AppSelectorExpression: `app.metadata.namespace.startsWith("team-")`,
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+		},
 	}
 
 	// Create multiple apps - some matching, some not
@@ -453,14 +474,13 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 			Name:      "app1",
 			Namespace: "team-a", // Matches
 		},
-		Spec: v1beta2.BrokerAppSpec{
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
-		},
+		Spec: v1beta2.BrokerAppSpec{},
 		Status: v1beta2.BrokerAppStatus{
 			Service: &v1beta2.BrokerServiceBindingStatus{
-				Name:      svcName,
-				Namespace: svcNs,
-				Secret:    "binding-secret",
+				Name:         svcName,
+				Namespace:    svcNs,
+				Secret:       "binding-secret",
+				AssignedPort: 61616,
 			},
 		},
 	}
@@ -470,14 +490,13 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 			Name:      "app2",
 			Namespace: "team-b", // Matches
 		},
-		Spec: v1beta2.BrokerAppSpec{
-			Acceptor: v1beta2.AppAcceptorType{Port: 61617},
-		},
+		Spec: v1beta2.BrokerAppSpec{},
 		Status: v1beta2.BrokerAppStatus{
 			Service: &v1beta2.BrokerServiceBindingStatus{
-				Name:      svcName,
-				Namespace: svcNs,
-				Secret:    "binding-secret",
+				Name:         svcName,
+				Namespace:    svcNs,
+				Secret:       "binding-secret",
+				AssignedPort: 61617,
 			},
 		},
 	}
@@ -494,9 +513,7 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 				Secret:    "binding-secret",
 			},
 		},
-		Spec: v1beta2.BrokerAppSpec{
-			Acceptor: v1beta2.AppAcceptorType{Port: 61618},
-		},
+		Spec: v1beta2.BrokerAppSpec{},
 	}
 
 	// Setup fake client
@@ -577,6 +594,7 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = networkingv1.AddToScheme(scheme)
 
 	// Data
 	svcNs := "broker-services"
@@ -608,6 +626,15 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			AppSelectorExpression: `app.metadata.namespace == "trusted-team"`,
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+		},
 	}
 
 	// Create VALID app from allowed namespace with ConsumerOf queues
@@ -617,10 +644,9 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 			Namespace: allowedNs,
 		},
 		Spec: v1beta2.BrokerAppSpec{
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 			Capabilities: []v1beta2.AppCapabilityType{
 				{
-					ConsumerOf: []v1beta2.AppAddressType{
+					ConsumerOf: []v1beta2.AddressRef{
 						{Address: "VALID.QUEUE.ONE"},
 						{Address: "VALID.QUEUE.TWO"},
 					},
@@ -629,9 +655,10 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 		},
 		Status: v1beta2.BrokerAppStatus{
 			Service: &v1beta2.BrokerServiceBindingStatus{
-				Name:      svcName,
-				Namespace: svcNs,
-				Secret:    "binding-secret",
+				Name:         svcName,
+				Namespace:    svcNs,
+				Secret:       "binding-secret",
+				AssignedPort: 61616,
 			},
 		},
 	}
@@ -651,10 +678,9 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 			},
 		},
 		Spec: v1beta2.BrokerAppSpec{
-			Acceptor: v1beta2.AppAcceptorType{Port: 61617},
 			Capabilities: []v1beta2.AppCapabilityType{
 				{
-					ConsumerOf: []v1beta2.AppAddressType{
+					ConsumerOf: []v1beta2.AddressRef{
 						// SENSITIVE: These should NOT appear in Prometheus config
 						{Address: "ATTACKER.SECRET.QUEUE"},
 						{Address: "ATTACKER.RECON.QUEUE"},

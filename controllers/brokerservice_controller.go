@@ -29,8 +29,12 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/secrets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/namer"
+	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/networkpolicy"
 	"github.com/go-logr/logr"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,11 +47,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-)
-
-const (
-	DefaultServicePort int32 = 61616
-	EmptyBrokerXml           = "empty-broker-xml"
 )
 
 type BrokerServiceReconciler struct {
@@ -72,6 +71,7 @@ func NewBrokerServiceReconciler(client client.Client, scheme *runtime.Scheme, co
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps,verbs=get;list;watch
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps/status,verbs=get;list;watch
+//+kubebuilder:rbac:groups=networking.k8s.io,namespace=arkmq-org-broker-operator,resources=networkpolicies,verbs=get;list;watch
 
 func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
 	reqLogger := reconciler.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "BrokerService")
@@ -164,10 +164,26 @@ func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processSpec() (err error) {
-	if err = reconciler.processBroker(); err == nil {
-		err = reconciler.processService()
+	if err = reconciler.processBroker(); err != nil {
+		return err
 	}
-	return err
+
+	poolInfo, err := reconciler.discoverAvailablePorts()
+	if err != nil {
+		return err
+	}
+
+	if poolInfo != nil {
+		reconciler.status.AvailablePorts = poolInfo
+		// Validate assigned ports are still in the pool
+		if err = reconciler.validateAssignedPorts(poolInfo); err != nil {
+			return err
+		}
+	}
+	// If poolInfo is nil: pods don't exist yet, will be populated on next reconcile
+
+	// Stage 3: Process service
+	return reconciler.processService()
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
@@ -183,8 +199,13 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 	desired.Spec.DeploymentPlan.PersistenceEnabled = false
 	desired.Spec.DeploymentPlan.Clustered = common.NewFalse()
 	desired.Spec.DeploymentPlan.Labels = map[string]string{
-		fmt.Sprintf("%s-peer-index", reconciler.instance.Name): fmt.Sprintf("%v", 0),
-		getPeerLabelKey(reconciler.instance):                   reconciler.instance.Name,
+		// Standard Kubernetes labels
+		common.LabelAppKubernetesInstance:  reconciler.instance.Name,
+		common.LabelAppKubernetesComponent: "broker-service",
+		common.LabelAppKubernetesManagedBy: "arkmq-org-broker-operator",
+		// Domain-specific labels
+		common.LabelBrokerService:   reconciler.instance.Name,
+		common.LabelBrokerPeerIndex: "0",
 	}
 	desired.Spec.Env = reconciler.instance.Spec.Env
 	desired.Spec.DeploymentPlan.Resources = reconciler.instance.Spec.Resources
@@ -333,8 +354,16 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 
 			if brokerDeployed != nil {
 				if brokerDeployed.Status == metav1.ConditionTrue {
-					deployedCondition.Status = metav1.ConditionTrue
-					deployedCondition.Reason = broker.ReadyConditionReason
+					// Port discovery must be complete before service is deployed
+					if reconciler.status.AvailablePorts == nil {
+						deployedCondition.Status = metav1.ConditionFalse
+						deployedCondition.Reason = broker.DeployedConditionPortDiscoveryPendingReason
+						deployedCondition.Message = "Port discovery pending: waiting for StatefulSet deployment"
+					} else {
+						// Both Broker deployed AND ports discovered
+						deployedCondition.Status = metav1.ConditionTrue
+						deployedCondition.Reason = broker.ReadyConditionReason
+					}
 				} else {
 					deployedCondition.Message = fmt.Sprintf("not ready broker status %v", deployed.Status)
 				}
@@ -388,10 +417,6 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 	return err, retry
 }
 
-func getPeerLabelKey(cr *broker.BrokerService) string {
-	return fmt.Sprintf("%s-peers", cr.Name)
-}
-
 // appName returns the formatted name of an app for logging (namespace/name).
 func appName(app *broker.BrokerApp) string {
 	return app.Namespace + "/" + app.Name
@@ -400,6 +425,164 @@ func appName(app *broker.BrokerApp) string {
 // serviceName returns the formatted name of a service for logging (namespace/name).
 func serviceName(service *broker.BrokerService) string {
 	return service.Namespace + "/" + service.Name
+}
+
+func (reconciler *BrokerServiceInstanceReconciler) discoverAvailablePorts() (*broker.PortPoolInfo, error) {
+	// Check if Broker CR is deployed (StatefulSet exists)
+	brokerCR := &broker.Broker{}
+	err := reconciler.Client.Get(context.TODO(), types.NamespacedName{
+		Namespace: reconciler.instance.Namespace,
+		Name:      reconciler.instance.Name,
+	}, brokerCR)
+
+	if errors.IsNotFound(err) {
+		// Broker CR not created yet - initial reconcile
+		reconciler.log.V(1).Info("Broker CR not created yet, skipping NetworkPolicy discovery")
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Broker CR: %v", err)
+	}
+
+	// Check if Broker is deployed (Deployed=True means StatefulSet exists)
+	deployedCondition := meta.FindStatusCondition(brokerCR.Status.Conditions, broker.DeployedConditionType)
+	if deployedCondition == nil || deployedCondition.Status != metav1.ConditionTrue {
+		// StatefulSet not created yet - return nil to preserve existing AvailablePorts
+		reconciler.log.V(1).Info("Broker not deployed yet, skipping NetworkPolicy discovery")
+		return nil, nil
+	}
+
+	// Get StatefulSet to read pod template labels
+	ss := &appsv1.StatefulSet{}
+	ssName := namer.CrToSS(reconciler.instance.Name)
+	if err := reconciler.Client.Get(context.TODO(), types.NamespacedName{
+		Namespace: reconciler.instance.Namespace,
+		Name:      ssName,
+	}, ss); err != nil {
+		return nil, fmt.Errorf("failed to get StatefulSet %s: %v", ssName, err)
+	}
+
+	// Use StatefulSet pod template labels
+	podLabels := ss.Spec.Template.Labels
+
+	reconciler.log.V(1).Info("Using StatefulSet pod template labels for NetworkPolicy discovery",
+		"statefulset", ssName,
+		"labelCount", len(podLabels))
+
+	// Query NetworkPolicies in namespace
+	npList := &networkingv1.NetworkPolicyList{}
+	if err := reconciler.Client.List(context.TODO(), npList, client.InNamespace(reconciler.instance.Namespace)); err != nil {
+		return nil, fmt.Errorf("failed to list NetworkPolicies: %v", err)
+	}
+
+	ports, foundPolicy, err := networkpolicy.DiscoverPorts(npList.Items, podLabels)
+	if err != nil {
+		// NetworkPolicy denies all ingress or other error
+		return nil, fmt.Errorf("NetworkPolicy discovery failed: %v", err)
+	}
+
+	if foundPolicy {
+		// NetworkPolicy found and applied
+		return &broker.PortPoolInfo{
+			Source: "NetworkPolicy",
+			Ports:  ports,
+		}, nil
+	}
+
+	// No NetworkPolicy restrictions - use default pool with explicit range
+	return &broker.PortPoolInfo{
+		Source: "Default",
+		PortRange: &broker.PortRange{
+			Start: DefaultStartPort,
+			End:   DefaultStartPort + MaxPortOffset - 1,
+		},
+	}, nil
+}
+
+// validateAssignedPorts checks if all apps bound to this service have ports
+// that are still valid in the current port pool. This handles the case where
+// a NetworkPolicy is updated to restrict the allowed port range.
+func (reconciler *BrokerServiceInstanceReconciler) validateAssignedPorts(poolInfo *broker.PortPoolInfo) error {
+	// List all apps bound to this service
+	apps := &broker.BrokerAppList{}
+	listOpts := []client.ListOption{
+		client.MatchingFields{common.AppServiceBindingField: serviceKey(reconciler.instance)},
+	}
+	if err := reconciler.Client.List(context.TODO(), apps, listOpts...); err != nil {
+		return fmt.Errorf("failed to list apps for port validation: %v", err)
+	}
+
+	var orphanedApps []broker.RejectedApp
+	for _, app := range apps.Items {
+		if app.Status.Service == nil {
+			continue // No binding yet, nothing to validate
+		}
+		assignedPort := app.Status.Service.AssignedPort
+		if assignedPort == UnassignedPort {
+			continue // No port assigned yet, nothing to validate
+		}
+
+		if !isPortInPool(assignedPort, poolInfo) {
+			reconciler.log.Info("Detected orphaned port - port no longer in allowed pool",
+				"app", AppIdentity(&app),
+				"port", assignedPort,
+				"poolSource", poolInfo.Source,
+				"allowedPorts", poolInfo.Ports)
+
+			orphanedApps = append(orphanedApps, broker.RejectedApp{
+				Name:      app.Name,
+				Namespace: app.Namespace,
+				Reason:    fmt.Sprintf("assigned port %d no longer in allowed pool (source: %s)", assignedPort, poolInfo.Source),
+			})
+		}
+	}
+
+	// Update RejectedApps status with orphaned ports to trigger app reconcile
+	if len(orphanedApps) > 0 {
+		// Merge with existing rejections (but replace duplicates)
+		existingRejects := make(map[string]broker.RejectedApp)
+		for _, rejected := range reconciler.status.RejectedApps {
+			key := rejected.Namespace + "/" + rejected.Name
+			existingRejects[key] = rejected
+		}
+		for _, orphaned := range orphanedApps {
+			key := orphaned.Namespace + "/" + orphaned.Name
+			existingRejects[key] = orphaned
+		}
+
+		rejectedList := make([]broker.RejectedApp, 0, len(existingRejects))
+		for _, rejected := range existingRejects {
+			rejectedList = append(rejectedList, rejected)
+		}
+		reconciler.status.RejectedApps = rejectedList
+	}
+
+	return nil
+}
+
+// isPortInPool checks if a port is allowed by the given pool info
+func isPortInPool(port int32, poolInfo *broker.PortPoolInfo) bool {
+	if poolInfo == nil {
+		return false
+	}
+
+	// Case 1: Port range (default pool)
+	if poolInfo.PortRange != nil {
+		return port >= poolInfo.PortRange.Start && port <= poolInfo.PortRange.End
+	}
+
+	// Case 2: Explicit list (NetworkPolicy pool)
+	if poolInfo.Ports != nil {
+		for _, allowedPort := range poolInfo.Ports {
+			if port == allowedPort {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Neither Ports nor PortRange specified - invalid state
+	return false
 }
 
 // getBindingValue returns the string value of a service binding, or "<none>" if nil.
@@ -416,10 +599,6 @@ func getBindingValue(service *broker.BrokerServiceBindingStatus) string {
 func (reconciler *BrokerServiceInstanceReconciler) appMatchesSelector(app *broker.BrokerApp) bool {
 	matches, err := appselector.Matches(app, reconciler.instance, reconciler.Client)
 	if err != nil {
-		reconciler.log.Error(err, "Failed to evaluate appSelectorExpression, excluding app",
-			"app", appName(app),
-			"service", serviceName(reconciler.instance),
-			"expression", reconciler.instance.Spec.AppSelectorExpression)
 		return false
 	}
 	return matches
@@ -485,7 +664,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processService() error {
 	}
 
 	desired.Spec.Selector = map[string]string{
-		getPeerLabelKey(reconciler.instance): reconciler.instance.Name,
+		common.LabelBrokerService: reconciler.instance.Name,
 	}
 	reconciler.TrackDesired(desired)
 	return nil
@@ -561,6 +740,52 @@ func (h *appToServiceHandler) getServiceRequest(obj client.Object) *reconcile.Re
 	return nil
 }
 
+func (r *BrokerServiceReconciler) enqueueServicesForNetworkPolicy() *networkPolicyToServiceHandler {
+	return &networkPolicyToServiceHandler{client: r.Client, log: r.log}
+}
+
+type networkPolicyToServiceHandler struct {
+	client client.Client
+	log    logr.Logger
+}
+
+func (h *networkPolicyToServiceHandler) Create(ctx context.Context, evt event.CreateEvent, q workqueue.RateLimitingInterface) {
+	h.enqueueServices(ctx, evt.Object, q)
+}
+
+func (h *networkPolicyToServiceHandler) Update(ctx context.Context, evt event.UpdateEvent, q workqueue.RateLimitingInterface) {
+	h.enqueueServices(ctx, evt.ObjectNew, q)
+}
+
+func (h *networkPolicyToServiceHandler) Delete(ctx context.Context, evt event.DeleteEvent, q workqueue.RateLimitingInterface) {
+	h.enqueueServices(ctx, evt.Object, q)
+}
+
+func (h *networkPolicyToServiceHandler) Generic(ctx context.Context, evt event.GenericEvent, q workqueue.RateLimitingInterface) {
+	h.enqueueServices(ctx, evt.Object, q)
+}
+
+func (h *networkPolicyToServiceHandler) enqueueServices(ctx context.Context, obj client.Object, q workqueue.RateLimitingInterface) {
+	np := obj.(*networkingv1.NetworkPolicy)
+
+	// Find all BrokerServices in same namespace
+	serviceList := &broker.BrokerServiceList{}
+	if err := h.client.List(ctx, serviceList, client.InNamespace(np.Namespace)); err != nil {
+		h.log.Error(err, "Failed to list services for NetworkPolicy", "policy", np.Name)
+		return
+	}
+
+	// Enqueue all services - they will re-discover ports
+	for _, svc := range serviceList.Items {
+		q.Add(reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: svc.Namespace,
+				Name:      svc.Name,
+			},
+		})
+	}
+}
+
 func (r *BrokerServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Note: Namespace informer is set up in main.go for CEL evaluation
 
@@ -579,35 +804,44 @@ func (r *BrokerServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&broker.BrokerService{}).
 		Owns(&broker.Broker{}).
 		Watches(&broker.BrokerApp{}, &appToServiceHandler{}).
+		Watches(&networkingv1.NetworkPolicy{}, r.enqueueServicesForNetworkPolicy()).
 		Complete(r)
 }
 
 type AddressConfig struct {
 	senderRoles   map[string]string
 	consumerRoles map[string]string
+	// isOwned indicates this app should generate addressConfigurations for this address.
+	// True when appNamespace/appName are empty (local reference).
+	// False when appNamespace/appName are set (cross-app reference - owner generates config).
+	isOwned bool
 }
 
 type AddressTracker struct {
-	names map[string]AddressConfig
+	names map[string]*AddressConfig
 }
 
 func newAddressTracker() *AddressTracker {
-	return &AddressTracker{names: map[string]AddressConfig{}}
+	return &AddressTracker{names: map[string]*AddressConfig{}}
 }
 
-func (t *AddressTracker) newAddressConfig() AddressConfig {
-	return AddressConfig{senderRoles: map[string]string{}, consumerRoles: map[string]string{}}
+func (t *AddressTracker) newAddressConfig() *AddressConfig {
+	return &AddressConfig{senderRoles: map[string]string{}, consumerRoles: map[string]string{}, isOwned: false}
 }
 
-func (t *AddressTracker) track(address *broker.AppAddressType) *AddressConfig {
-
-	var present bool
-	var entry AddressConfig
-	if entry, present = t.names[address.Address]; !present {
+func (t *AddressTracker) track(address *broker.AddressRef) *AddressConfig {
+	entry, present := t.names[address.Address]
+	if !present {
 		entry = t.newAddressConfig()
 		t.names[address.Address] = entry
 	}
-	return &entry
+
+	// If AppNamespace and AppName are empty, this app owns the address
+	if address.AppNamespace == "" && address.AppName == "" {
+		entry.isOwned = true
+	}
+
+	return entry
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *corev1.Secret, app *broker.BrokerApp) (err error) {
@@ -615,6 +849,18 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 
 	role := AppIdentity(app)
 
+	// First, track addresses declared in spec.addresses (these are owned by this app)
+	// This ensures addressConfigurations are generated even if the app has no capabilities
+	for _, addrType := range app.Spec.Addresses {
+		localAddr := &broker.AddressRef{
+			Address: addrType.Address,
+			// AppNamespace and AppName empty = owned/local address
+		}
+		addressTracker.track(localAddr)
+		// Note: No RBAC roles added here - capabilities define the roles
+	}
+
+	// Then, process capabilities to add RBAC roles
 	for _, capability := range app.Spec.Capabilities {
 
 		var entry *AddressConfig
@@ -637,18 +883,23 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 
 	props := map[string]string{} // need to dedup
 	for addressName, addr := range addressTracker.names {
-		fqqn := strings.SplitN(addressName, "::", 2)
-		if len(fqqn) > 1 {
-			address := escapeForProperties(fqqn[0])
-			queueName := escapeForProperties(fqqn[1])
-			props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=ANYCAST,MULTICAST\n", address)] = ""
-			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".routingType=MULTICAST\n", address, queueName)] = ""
-			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".address=%s\n", address, queueName, address)] = ""
-		} else {
-			props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=ANYCAST,MULTICAST\n", addressName)] = ""
-			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".routingType=ANYCAST\n", addressName, addressName)] = ""
+		// Only generate addressConfigurations for addresses owned by this app
+		// (not cross-app references where AppNamespace/AppName are set)
+		if addr.isOwned {
+			fqqn := strings.SplitN(addressName, "::", 2)
+			if len(fqqn) > 1 {
+				address := escapeForProperties(fqqn[0])
+				queueName := escapeForProperties(fqqn[1])
+				props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=ANYCAST,MULTICAST\n", address)] = ""
+				props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".routingType=MULTICAST\n", address, queueName)] = ""
+				props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".address=%s\n", address, queueName, address)] = ""
+			} else {
+				props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=ANYCAST,MULTICAST\n", addressName)] = ""
+				props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".routingType=ANYCAST\n", addressName, addressName)] = ""
+			}
 		}
 
+		// Always generate RBAC roles (for both owned and referenced addresses)
 		// use fqqn as is for RBAC
 		addressName = escapeForProperties(addressName)
 
@@ -747,7 +998,15 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 
 	buf := NewPropsWithHeader()
 
-	name := fmt.Sprintf("%d", app.Spec.Acceptor.Port)
+	if app.Status.Service == nil {
+		return fmt.Errorf("app %s has no service binding", AppIdentity(app))
+	}
+	port := app.Status.Service.AssignedPort
+	if port == UnassignedPort {
+		return fmt.Errorf("app %s has no assigned port", AppIdentity(app))
+	}
+
+	name := fmt.Sprintf("%d", port)
 	fmt.Fprintln(buf, "# tls acceptor")
 
 	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".factoryClassName=org.apache.activemq.artemis.core.remoting.impl.netty.NettyAcceptorFactory\n", name)
@@ -755,7 +1014,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.securityDomain=%s\n", name, realmName)
 
 	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.host=${HOSTNAME}\n", name)
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.port=%d\n", name, app.Spec.Acceptor.Port)
+	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.port=%d\n", name, port)
 
 	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.sslEnabled=true\n", name)
 
@@ -805,8 +1064,11 @@ func (reconciler *BrokerServiceInstanceReconciler) makePemCfgProps(service *brok
 }
 
 func jaasConfigRealmName(app *broker.BrokerApp) string {
-	realmName := fmt.Sprintf("port-%d", app.Spec.Acceptor.Port)
-	return realmName
+	port := int32(DefaultStartPort)
+	if app.Status.Service != nil && app.Status.Service.AssignedPort != UnassignedPort {
+		port = app.Status.Service.AssignedPort
+	}
+	return fmt.Sprintf("port-%d", port)
 }
 
 func escapeForProperties(s string) string {

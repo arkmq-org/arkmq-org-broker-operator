@@ -114,7 +114,7 @@ var _ = Describe("tests regarding controller manager", func() {
 			})
 		})
 
-		It("test watching restricted namespace", func() {
+		It("test watching restricted namespace", Label("verySlow"), func() {
 			testWatchNamespace("restricted", Default, func(g Gomega) {
 				By("deploying broker in to target namespace")
 				cr, createdCr := DeployCustomBroker(restrictedNamespace, func(c *brokerv1beta1.ActiveMQArtemis) {

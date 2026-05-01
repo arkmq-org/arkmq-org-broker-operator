@@ -224,6 +224,37 @@ spec:
             type: object
           status:
             properties:
+              availablePorts:
+                description: Port pool discovered from NetworkPolicy or default range
+                properties:
+                  portRange:
+                    description: Port range for default pool (mutually exclusive with
+                      Ports)
+                    properties:
+                      end:
+                        description: End port of the range (inclusive)
+                        format: int32
+                        type: integer
+                      start:
+                        description: Start port of the range (inclusive)
+                        format: int32
+                        type: integer
+                    required:
+                    - end
+                    - start
+                    type: object
+                  ports:
+                    description: Discovered ports from NetworkPolicy (explicit list)
+                    items:
+                      format: int32
+                      type: integer
+                    type: array
+                  source:
+                    description: Source of port discovery
+                    type: string
+                required:
+                - source
+                type: object
               conditions:
                 description: |-
                   Current state of the resource

@@ -3093,10 +3093,8 @@ func (reconciler *BrokerReconcilerImpl) addResourceForBrokerProperties(customRes
 		desired.Data = data
 	}
 
-	reconciler.log.V(1).Info("Requesting secret for broker properties", "name", resourceName.Name)
 	reconciler.trackDesired(desired)
 
-	reconciler.log.V(1).Info("Requesting mount for broker properties secret")
 	return resourceName.Name, true, data, nil
 }
 

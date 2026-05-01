@@ -202,6 +202,7 @@ spec:
   commonName: messaging-service
   dnsNames:
   - messaging-service
+  - messaging-service.service-app-project.svc.cluster.local
   - '*.messaging-service-hdls-svc.service-app-project.svc.cluster.local'
   issuerRef:
     name: broker-ca-issuer
@@ -240,7 +241,7 @@ Wait for the resource to be ready.
 kubectl wait BrokerService messaging-service -n service-app-project --for=condition=Ready --timeout=300s
 ```
 
-#### Create Service Certificate
+#### Create Application Certificate
 
 ```bash {"stage":"deploy_app", "label":"create app cert", "runtime":"bash"}
 kubectl apply -f - <<EOF
@@ -260,6 +261,10 @@ EOF
 
 #### Deploy `BrokerApp`
 
+The `BrokerApp` connects to a `BrokerService` using label selectors and declares
+its messaging capabilities. The operator automatically assigns a port from the
+service's port pool for the application's acceptor.
+
 ```bash {"stage":"deploy_app", "label":"deploy app crd", "runtime":"bash"}
 kubectl apply -f - <<EOF
 apiVersion: broker.arkmq.org/v1beta2
@@ -271,13 +276,11 @@ spec:
   selector:
     matchLabels:
       forWorkQueue: "true"
-  acceptor:
-    port: 61616
   capabilities:
-  - producerOf:
-    - address: "APP.JOBS"
-  - consumerOf:
-    - address: "APP.JOBS"
+    - producerOf:
+        - address: "APP.JOBS"
+      consumerOf:
+        - address: "APP.JOBS"
 EOF
 ```
 
@@ -285,6 +288,14 @@ Wait for the resource to be ready.
 
 ```bash {"stage":"deploy_app", "label":"wait for app", "runtime":"bash"}
 kubectl wait BrokerApp first-app -n service-app-project --for=condition=Ready --timeout=300s
+```
+
+#### Verify Port Assignment
+
+You can check the automatically assigned port in the app's status:
+
+```bash {"stage":"deploy_app", "label":"check assigned port", "runtime":"bash"}
+kubectl get BrokerApp first-app -n service-app-project -o jsonpath='{.status.service.assignedPort}'
 ```
 
 ### 4. Test Messaging
@@ -313,6 +324,10 @@ until kubectl get secret cert-pemcfg -n service-app-project &> /dev/null; do ech
 
 #### Run Producer Job
 
+The producer job uses environment variables from the binding secret to connect to the
+correct host and port assigned by the operator. The binding secret name follows the
+pattern `{app-name}-binding-secret`.
+
 ```bash {"stage":"test_messaging", "label":"run producer", "runtime":"bash"}
 cat <<'EOT' | kubectl apply -f -
 apiVersion: batch/v1
@@ -329,10 +344,20 @@ spec:
         command:
         - "/bin/sh"
         - "-c"
-        - exec java -classpath /opt/amq/lib/*:/opt/amq/lib/extra/* org.apache.activemq.artemis.cli.Artemis producer --protocol=AMQP --url 'amqps://messaging-service:61616?transport.trustStoreType=PEMCA&transport.trustStoreLocation=/app/tls/ca/ca.pem&transport.keyStoreType=PEMCFG&transport.keyStoreLocation=/app/tls/pem/tls.pemcfg' --message-count 1 --destination queue://APP.JOBS;
+        - exec java -classpath /opt/amq/lib/*:/opt/amq/lib/extra/* org.apache.activemq.artemis.cli.Artemis producer --protocol=AMQP --url amqps://${BROKER_SERVICE_HOST}:${BROKER_SERVICE_PORT}\?transport.trustStoreType=PEMCA\&transport.trustStoreLocation=/app/tls/ca/ca.pem\&transport.keyStoreType=PEMCFG\&transport.keyStoreLocation=/app/tls/pem/tls.pemcfg --message-count 1 --destination queue://APP.JOBS;
         env:
         - name: JDK_JAVA_OPTIONS
           value: "-Djava.security.properties=/app/tls/pem/java.security"
+        - name: BROKER_SERVICE_HOST
+          valueFrom:
+            secretKeyRef:
+              name: first-app-binding-secret
+              key: host
+        - name: BROKER_SERVICE_PORT
+          valueFrom:
+            secretKeyRef:
+              name: first-app-binding-secret
+              key: port
         volumeMounts:
         - name: trust
           mountPath: /app/tls/ca
@@ -356,6 +381,8 @@ EOT
 
 #### Run Consumer Job
 
+The consumer job also uses the binding secret to access the service endpoint.
+
 ```bash {"stage":"test_messaging", "label":"run consumer", "runtime":"bash"}
 cat <<'EOT' | kubectl apply -f -
 apiVersion: batch/v1
@@ -372,10 +399,20 @@ spec:
         command:
         - "/bin/sh"
         - "-c"
-        - exec java -classpath /opt/amq/lib/*:/opt/amq/lib/extra/* org.apache.activemq.artemis.cli.Artemis consumer --protocol=AMQP --url 'amqps://messaging-service:61616?transport.trustStoreType=PEMCA&transport.trustStoreLocation=/app/tls/ca/ca.pem&transport.keyStoreType=PEMCFG&transport.keyStoreLocation=/app/tls/pem/tls.pemcfg' --message-count 1 --destination queue://APP.JOBS --receive-timeout 10000;
+        - exec java -classpath /opt/amq/lib/*:/opt/amq/lib/extra/* org.apache.activemq.artemis.cli.Artemis consumer --protocol=AMQP --url amqps://${BROKER_SERVICE_HOST}:${BROKER_SERVICE_PORT}\?transport.trustStoreType=PEMCA\&transport.trustStoreLocation=/app/tls/ca/ca.pem\&transport.keyStoreType=PEMCFG\&transport.keyStoreLocation=/app/tls/pem/tls.pemcfg --message-count 1 --destination queue://APP.JOBS --receive-timeout 10000;
         env:
         - name: JDK_JAVA_OPTIONS
           value: "-Djava.security.properties=/app/tls/pem/java.security"
+        - name: BROKER_SERVICE_HOST
+          valueFrom:
+            secretKeyRef:
+              name: first-app-binding-secret
+              key: host
+        - name: BROKER_SERVICE_PORT
+          valueFrom:
+            secretKeyRef:
+              name: first-app-binding-secret
+              key: port
         volumeMounts:
         - name: trust
           mountPath: /app/tls/ca

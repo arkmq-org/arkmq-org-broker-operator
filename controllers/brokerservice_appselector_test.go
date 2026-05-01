@@ -66,6 +66,22 @@ func TestAppSelectorAllowedNamespace(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			AppSelectorExpression: fmt.Sprintf(`app.metadata.namespace == "%s"`, allowedNs),
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
+		},
 	}
 
 	// Create BrokerApp from allowed namespace
@@ -78,7 +94,6 @@ func TestAppSelectorAllowedNamespace(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 	}
 
@@ -160,6 +175,22 @@ func TestAppSelectorDeniedNamespace(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			AppSelectorExpression: fmt.Sprintf(`app.metadata.namespace == "%s"`, allowedNs),
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
+		},
 	}
 
 	// Create BrokerApp from denied namespace (team-b)
@@ -172,7 +203,6 @@ func TestAppSelectorDeniedNamespace(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 	}
 
@@ -188,8 +218,10 @@ func TestAppSelectorDeniedNamespace(t *testing.T) {
 
 	// Reconcile the app
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: deniedNs}}
-	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err, "Expected error due to unauthorized namespace")
+
+	res, err := r.Reconcile(context.TODO(), req)
+	assert.NoError(t, err) // err is reflected in the status
+	assert.True(t, res.Requeue)
 
 	// Verify BrokerApp status
 	updatedApp := &v1beta2.BrokerApp{}
@@ -208,8 +240,8 @@ func TestAppSelectorDeniedNamespace(t *testing.T) {
 	deployedCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
 	assert.NotNil(t, deployedCondition)
 	assert.Equal(t, v1.ConditionFalse, deployedCondition.Status)
-	assert.Equal(t, v1beta2.DeployedConditionDoesNotMatchReason, deployedCondition.Reason)
-	assert.Contains(t, deployedCondition.Message, deniedNs)
+	assert.Equal(t, v1beta2.DeployedConditionNoMatchingServiceReason, deployedCondition.Reason)
+	assert.Contains(t, deployedCondition.Message, "no services")
 
 	// Ready should be False
 	readyCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.ReadyConditionType)
@@ -245,6 +277,22 @@ func TestAppSelectorEmptyAllowlist(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			// Empty expression = default: app.metadata.namespace == service.metadata.namespace
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
+		},
 	}
 
 	// Create BrokerApp from SAME namespace
@@ -257,7 +305,6 @@ func TestAppSelectorEmptyAllowlist(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 	}
 
@@ -326,6 +373,22 @@ func TestAppSelectorEmptyAllowlistDifferentNamespace(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			// Empty = default: same namespace only
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
+		},
 	}
 
 	// Create BrokerApp from DIFFERENT namespace
@@ -338,7 +401,6 @@ func TestAppSelectorEmptyAllowlistDifferentNamespace(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 	}
 
@@ -354,8 +416,9 @@ func TestAppSelectorEmptyAllowlistDifferentNamespace(t *testing.T) {
 
 	// Reconcile the app
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: appNs}}
-	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err, "Expected error due to unauthorized namespace")
+	res, err := r.Reconcile(context.TODO(), req)
+	assert.NoError(t, err) // err is reflected in the status
+	assert.True(t, res.Requeue)
 
 	// Verify BrokerApp status
 	updatedApp := &v1beta2.BrokerApp{}
@@ -369,7 +432,7 @@ func TestAppSelectorEmptyAllowlistDifferentNamespace(t *testing.T) {
 	deployedCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
 	assert.NotNil(t, deployedCondition)
 	assert.Equal(t, v1.ConditionFalse, deployedCondition.Status)
-	assert.Equal(t, v1beta2.DeployedConditionDoesNotMatchReason, deployedCondition.Reason)
+	assert.Equal(t, v1beta2.DeployedConditionNoMatchingServiceReason, deployedCondition.Reason)
 }
 
 // TestAppSelectorRevokedAccess verifies that an app loses access when removed from allowlist
@@ -406,6 +469,22 @@ func TestAppSelectorRevokedAccess(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			AppSelectorExpression: fmt.Sprintf(`app.metadata.namespace == "%s"`, appNs),
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
+		},
 	}
 
 	// Create BrokerApp that's already bound to the service
@@ -418,13 +497,13 @@ func TestAppSelectorRevokedAccess(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 		Status: v1beta2.BrokerAppStatus{
 			Service: &v1beta2.BrokerServiceBindingStatus{
-				Name:      svcName,
-				Namespace: svcNs,
-				Secret:    "binding-secret",
+				Name:         svcName,
+				Namespace:    svcNs,
+				Secret:       "binding-secret",
+				AssignedPort: 61616,
 			},
 		},
 	}
@@ -460,8 +539,9 @@ func TestAppSelectorRevokedAccess(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Reconcile again - app should be unbound and unauthorized
-	_, err = r.Reconcile(context.TODO(), req)
-	assert.Error(t, err, "Expected error after authorization revoked")
+	res, err := r.Reconcile(context.TODO(), req)
+	assert.NoError(t, err) // err is reflected in the status
+	assert.True(t, res.Requeue)
 
 	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
 	assert.NoError(t, err)
@@ -470,7 +550,7 @@ func TestAppSelectorRevokedAccess(t *testing.T) {
 	deployedCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
 	assert.NotNil(t, deployedCondition)
 	assert.Equal(t, v1.ConditionFalse, deployedCondition.Status)
-	assert.Equal(t, v1beta2.DeployedConditionDoesNotMatchReason, deployedCondition.Reason)
+	assert.Equal(t, v1beta2.DeployedConditionNoMatchingServiceReason, deployedCondition.Reason)
 }
 
 // TestAppSelectorMultipleNamespaces verifies that multiple namespaces can be in the allowlist
@@ -500,6 +580,22 @@ func TestAppSelectorMultipleNamespaces(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			AppSelectorExpression: `app.metadata.namespace in ["team-a", "team-b", "team-c"]`,
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
+		},
 	}
 
 	teamANsObj := &corev1.Namespace{
@@ -517,7 +613,6 @@ func TestAppSelectorMultipleNamespaces(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 	}
 
@@ -536,7 +631,6 @@ func TestAppSelectorMultipleNamespaces(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61617},
 		},
 	}
 
@@ -555,7 +649,6 @@ func TestAppSelectorMultipleNamespaces(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61618},
 		},
 	}
 
@@ -593,8 +686,9 @@ func TestAppSelectorMultipleNamespaces(t *testing.T) {
 
 	// Reconcile app-denied (should fail)
 	reqDenied := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app-denied", Namespace: "team-d"}}
-	_, err = r.Reconcile(context.TODO(), reqDenied)
-	assert.Error(t, err, "Expected error for unauthorized app")
+	res, err := r.Reconcile(context.TODO(), reqDenied)
+	assert.NoError(t, err) // err is reflected in the status
+	assert.True(t, res.Requeue)
 
 	updatedAppDenied := &v1beta2.BrokerApp{}
 	err = cl.Get(context.TODO(), reqDenied.NamespacedName, updatedAppDenied)
@@ -605,7 +699,7 @@ func TestAppSelectorMultipleNamespaces(t *testing.T) {
 	deployedCondition := meta.FindStatusCondition(updatedAppDenied.Status.Conditions, v1beta2.DeployedConditionType)
 	assert.NotNil(t, deployedCondition)
 	assert.Equal(t, v1.ConditionFalse, deployedCondition.Status)
-	assert.Equal(t, v1beta2.DeployedConditionDoesNotMatchReason, deployedCondition.Reason)
+	assert.Equal(t, v1beta2.DeployedConditionNoMatchingServiceReason, deployedCondition.Reason)
 }
 
 // TestAppSelectorAllowAll verifies that "true" allows all namespaces
@@ -642,6 +736,22 @@ func TestAppSelectorAllowAll(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			AppSelectorExpression: "true", // Allow all namespaces
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
+		},
 	}
 
 	// Create BrokerApp from any namespace
@@ -654,7 +764,6 @@ func TestAppSelectorAllowAll(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 	}
 
@@ -710,6 +819,22 @@ func TestAppSelectorPrefix(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			AppSelectorExpression: `app.metadata.namespace.startsWith("team-")`, // Matches team-a-prod, team-b, etc.
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
+		},
 	}
 
 	teamAProdNsObj := &corev1.Namespace{
@@ -727,7 +852,6 @@ func TestAppSelectorPrefix(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 	}
 
@@ -745,7 +869,6 @@ func TestAppSelectorPrefix(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61617},
 		},
 	}
 
@@ -772,8 +895,10 @@ func TestAppSelectorPrefix(t *testing.T) {
 
 	// Reconcile non-matching app - should fail
 	reqNoMatch := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app-nomatch", Namespace: "other-namespace"}}
-	_, err = r.Reconcile(context.TODO(), reqNoMatch)
-	assert.Error(t, err, "Expected error for non-matching namespace")
+
+	res, err := r.Reconcile(context.TODO(), reqNoMatch)
+	assert.NoError(t, err) // err is reflected in the status
+	assert.True(t, res.Requeue)
 
 	updatedNoMatch := &v1beta2.BrokerApp{}
 	err = cl.Get(context.TODO(), reqNoMatch.NamespacedName, updatedNoMatch)
@@ -809,6 +934,22 @@ func TestAppSelectorSuffix(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			AppSelectorExpression: `app.metadata.namespace.endsWith("-prod")`, // Matches team-a-prod, api-prod, etc.
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
+		},
 	}
 
 	teamAProdNsObj := &corev1.Namespace{
@@ -826,7 +967,6 @@ func TestAppSelectorSuffix(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 	}
 
@@ -844,7 +984,6 @@ func TestAppSelectorSuffix(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61617},
 		},
 	}
 
@@ -871,8 +1010,9 @@ func TestAppSelectorSuffix(t *testing.T) {
 
 	// Reconcile non-matching app
 	reqNoMatch := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app-nomatch", Namespace: "team-a-dev"}}
-	_, err = r.Reconcile(context.TODO(), reqNoMatch)
-	assert.Error(t, err)
+	res, err := r.Reconcile(context.TODO(), reqNoMatch)
+	assert.NoError(t, err)
+	assert.True(t, res.Requeue)
 
 	updatedNoMatch := &v1beta2.BrokerApp{}
 	err = cl.Get(context.TODO(), reqNoMatch.NamespacedName, updatedNoMatch)
@@ -907,6 +1047,22 @@ func TestAppSelectorPrefixAndSuffix(t *testing.T) {
 		Spec: v1beta2.BrokerServiceSpec{
 			AppSelectorExpression: `app.metadata.namespace.startsWith("team-") && app.metadata.namespace.endsWith("-prod")`,
 		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
+		},
 	}
 
 	teamAProdNsObj := &corev1.Namespace{
@@ -924,7 +1080,6 @@ func TestAppSelectorPrefixAndSuffix(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61616},
 		},
 	}
 
@@ -942,7 +1097,6 @@ func TestAppSelectorPrefixAndSuffix(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61617},
 		},
 	}
 
@@ -961,7 +1115,6 @@ func TestAppSelectorPrefixAndSuffix(t *testing.T) {
 			ServiceSelector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"type": "broker"},
 			},
-			Acceptor: v1beta2.AppAcceptorType{Port: 61618},
 		},
 	}
 
@@ -987,6 +1140,9 @@ func TestAppSelectorPrefixAndSuffix(t *testing.T) {
 
 	// Test no match
 	reqNoMatch := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app-nomatch", Namespace: "team-a-dev"}}
-	_, err = r.Reconcile(context.TODO(), reqNoMatch)
-	assert.Error(t, err)
+
+	res, err := r.Reconcile(context.TODO(), reqNoMatch)
+	assert.NoError(t, err)
+	assert.True(t, res.Requeue)
+
 }

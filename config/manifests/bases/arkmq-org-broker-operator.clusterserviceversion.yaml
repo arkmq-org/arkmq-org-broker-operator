@@ -6337,8 +6337,11 @@ spec:
         name: ""
         version: v1
       specDescriptors:
-      - displayName: Acceptor
-        path: acceptor
+      - description: |-
+          Addresses owned by this app (lifecycle tied to this app)
+          Other apps can reference these via appNamespace/appName in their capabilities
+        displayName: Addresses
+        path: addresses
       - displayName: Messaging Capabilities
         path: capabilities
       - displayName: Resources
@@ -7452,6 +7455,9 @@ spec:
       - displayName: Resources
         path: resources
       statusDescriptors:
+      - description: Port pool discovered from NetworkPolicy or default range
+        displayName: Available Ports
+        path: availablePorts
       - description: |-
           Current state of the resource
           Conditions represent the latest available observations of an object's state

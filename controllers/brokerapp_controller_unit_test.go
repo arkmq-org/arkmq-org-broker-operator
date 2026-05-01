@@ -55,12 +55,28 @@ func TestSimpleReconcile(t *testing.T) {
 		},
 	}
 
-	// Create BrokerService
+	// Create BrokerService (with Deployed=True since ports are discovered)
 	svc := &v1beta2.BrokerService{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      svcName,
 			Namespace: ns,
 			Labels:    map[string]string{"type": "broker"},
+		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
 		},
 	}
 
@@ -112,8 +128,8 @@ func TestSimpleReconcile(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equal(t, fmt.Sprintf("%s.%s.svc.%s", svcName, ns, common.GetClusterDomain()), string(bindingSecret.Data["host"]))
-	assert.Equal(t, fmt.Sprintf("%d", app.Spec.Acceptor.Port), string(bindingSecret.Data["port"]))
-	assert.Equal(t, fmt.Sprintf("amqps://%s.%s.svc.%s:%d", svcName, ns, common.GetClusterDomain(), app.Spec.Acceptor.Port), string(bindingSecret.Data["uri"]))
+	assert.Equal(t, fmt.Sprintf("%d", updatedApp.Status.Service.AssignedPort), string(bindingSecret.Data["port"]))
+	assert.Equal(t, fmt.Sprintf("amqps://%s.%s.svc.%s:%d", svcName, ns, common.GetClusterDomain(), updatedApp.Status.Service.AssignedPort), string(bindingSecret.Data["uri"]))
 
 	// update broker service status to reflect ready with deployed app
 	svc.Status.ProvisionedApps = []string{AppIdentity(app)}
@@ -167,8 +183,9 @@ func TestReconcileNoMatchingService(t *testing.T) {
 
 	// Reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err)
+	res, err := r.Reconcile(context.TODO(), req)
+	assert.NoError(t, err) // err is reflected in the status
+	assert.True(t, res.Requeue)
 
 	// Verify BrokerApp status
 	updatedApp := &v1beta2.BrokerApp{}
@@ -206,12 +223,28 @@ func TestReconcileValidConditionTransition(t *testing.T) {
 	}
 	appName := "my-app"
 
-	// Create BrokerService
+	// Create BrokerService (with Deployed=True since ports are discovered)
 	svc := &v1beta2.BrokerService{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      svcName,
 			Namespace: ns,
 			Labels:    map[string]string{"type": "broker"},
+		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
 		},
 	}
 
@@ -248,7 +281,9 @@ func TestReconcileValidConditionTransition(t *testing.T) {
 	// 1. Reconcile with non-matching selector
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err) // Expect error because no service found
+	res, err := r.Reconcile(context.TODO(), req)
+	assert.NoError(t, err) // err is reflected in the status
+	assert.True(t, res.Requeue)
 
 	// Verify Valid condition is True (selector syntax is valid)
 	updatedApp := &v1beta2.BrokerApp{}
@@ -311,12 +346,28 @@ func TestReconcileStatusUpdateFailure(t *testing.T) {
 		},
 	}
 
-	// Create BrokerService
+	// Create BrokerService (with Deployed=True since ports are discovered)
 	svc := &v1beta2.BrokerService{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      svcName,
 			Namespace: ns,
 			Labels:    map[string]string{"type": "broker"},
+		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
 		},
 	}
 
@@ -382,7 +433,7 @@ func TestReconcileAddressTypeError(t *testing.T) {
 			},
 			Capabilities: []v1beta2.AppCapabilityType{
 				{
-					SubscriberOf: []v1beta2.AppAddressType{
+					SubscriberOf: []v1beta2.AddressRef{
 						{Address: "simple-address"}, // Missing "::"
 					},
 				},
@@ -415,7 +466,7 @@ func TestReconcileAddressTypeError(t *testing.T) {
 	assert.NotNil(t, validCondition)
 	assert.Equal(t, v1.ConditionFalse, validCondition.Status)
 	assert.Equal(t, v1beta2.ValidConditionAddressTypeError, validCondition.Reason)
-	assert.Contains(t, validCondition.Message, "must specify a FQQN")
+	assert.Contains(t, validCondition.Message, "FQQN")
 }
 
 func TestReconcileDeployedConditionFromBrokerServiceStatus(t *testing.T) {
@@ -436,12 +487,28 @@ func TestReconcileDeployedConditionFromBrokerServiceStatus(t *testing.T) {
 	}
 	appName := "my-app"
 
-	// Create BrokerService
+	// Create BrokerService (with Deployed=True since ports are discovered)
 	svc := &v1beta2.BrokerService{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      svcName,
 			Namespace: ns,
 			Labels:    map[string]string{"type": "broker"},
+		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
 		},
 	}
 
@@ -526,12 +593,28 @@ func TestReconcileIdempotentStatus(t *testing.T) {
 	}
 	appName := "my-app"
 
-	// Create BrokerService
+	// Create BrokerService (with Deployed=True since ports are discovered)
 	svc := &v1beta2.BrokerService{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      svcName,
 			Namespace: ns,
 			Labels:    map[string]string{"type": "broker"},
+		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
 		},
 	}
 
@@ -708,12 +791,28 @@ func TestReconcileMatchedServiceNotFound(t *testing.T) {
 	}
 	appName := "my-app"
 
-	// Create BrokerService
+	// Create BrokerService (with Deployed=True since ports are discovered)
 	svc := &v1beta2.BrokerService{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      svcName,
 			Namespace: ns,
 			Labels:    map[string]string{"type": "broker"},
+		},
+		Status: v1beta2.BrokerServiceStatus{
+			AvailablePorts: &v1beta2.PortPoolInfo{
+				Source: "Default",
+				PortRange: &v1beta2.PortRange{
+					Start: 61616,
+					End:   62615,
+				},
+			},
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+					Reason: v1beta2.ReadyConditionReason,
+				},
+			},
 		},
 	}
 
@@ -730,9 +829,10 @@ func TestReconcileMatchedServiceNotFound(t *testing.T) {
 		},
 		Status: v1beta2.BrokerAppStatus{
 			Service: &v1beta2.BrokerServiceBindingStatus{
-				Name:      svcName,
-				Namespace: ns,
-				Secret:    "binding-secret",
+				Name:         svcName,
+				Namespace:    ns,
+				Secret:       "binding-secret",
+				AssignedPort: 61616,
 			},
 		},
 	}

@@ -173,7 +173,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			By("creating first app with queue capabilities")
 			app1Name := "queue-app"
-			app1Port := int32(61616)
 			app1 := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "BrokerApp",
@@ -187,11 +186,10 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					ServiceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"tier": "backend"},
 					},
-					Acceptor: broker.AppAcceptorType{Port: app1Port},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "APP1.QUEUE"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "APP1.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "APP1.QUEUE"}},
+							ConsumerOf: []broker.AddressRef{{Address: "APP1.QUEUE"}},
 						},
 					},
 				},
@@ -213,7 +211,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			By("creating second app with topic capabilities")
 			app2Name := "topic-app"
-			app2Port := int32(61617)
 			app2 := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "BrokerApp",
@@ -227,11 +224,10 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					ServiceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"env": "test"},
 					},
-					Acceptor: broker.AppAcceptorType{Port: app2Port},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "APP2.TOPIC"}},
-							SubscriberOf: []broker.AppAddressType{
+							ProducerOf: []broker.AddressRef{{Address: "APP2.TOPIC"}},
+							SubscriberOf: []broker.AddressRef{
 								{Address: "APP2.TOPIC::client-a.sub-a"},
 							},
 						},
@@ -430,7 +426,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			By("creating app that matches service1 (env=dev)")
 			appName := "mobile-app"
-			appPort := int32(61618)
 			app := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "BrokerApp",
@@ -444,11 +439,10 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					ServiceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"env": "dev"},
 					},
-					Acceptor: broker.AppAcceptorType{Port: appPort},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "MOBILE.TASKS"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "MOBILE.TASKS"}},
+							ProducerOf: []broker.AddressRef{{Address: "MOBILE.TASKS"}},
+							ConsumerOf: []broker.AddressRef{{Address: "MOBILE.TASKS"}},
 						},
 					},
 				},
@@ -542,7 +536,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 	Context("cross-namespace app provisioning", func() {
 
-		It("should provision apps from multiple namespaces on same service", func() {
+		It("should provision apps from multiple namespaces on same service with sharing", Label("verySlow"), func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -617,7 +611,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			By("creating app in default namespace with 512Mi memory request")
 			app1Name := "app-ns-test"
-			app1Port := int32(61710)
+			var app1Port int32
 			app1CertName := "app1-tls-cert"
 			InstallCert(app1CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
 				candidate.Spec.SecretName = app1CertName
@@ -641,17 +635,15 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					ServiceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"cross-ns": "test"},
 					},
-					Acceptor: broker.AppAcceptorType{
-						Port: app1Port,
-					},
 					Resources: corev1.ResourceRequirements{
 						Requests: corev1.ResourceList{
 							corev1.ResourceMemory: resource.MustParse("512Mi"),
 						},
 					},
+					Addresses: []broker.AddressType{{Address: "shared.address"}},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							SubscriberOf: []broker.AppAddressType{
+							SubscriberOf: []broker.AddressRef{
 								{Address: "app1.address::queue1"},
 								{Address: "shared.address::app1-client.app1-shared-queue"},
 							},
@@ -667,7 +659,17 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			By("waiting for app1 to be ready")
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, app1Key, createdApp1)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("App1 Status: %v\n", createdApp1.Status)
+				}
+
 				g.Expect(meta.IsStatusConditionTrue(createdApp1.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
+
+				// Verify port was assigned
+				g.Expect(createdApp1.Status.Service.AssignedPort).ShouldNot(BeZero())
+				app1Port = createdApp1.Status.Service.AssignedPort
+
 				if verbose {
 					fmt.Printf("App1 Ready, binding: %v\n", createdApp1.Status.Service)
 				}
@@ -675,7 +677,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			By("creating app in other namespace with 1Gi memory request")
 			app2Name := "app-ns-other"
-			app2Port := int32(61711)
+			var app2Port int32
 			app2CertName := "app2-tls-cert"
 			InstallCert(app2CertName, otherNamespace, func(candidate *cmv1.Certificate) {
 				candidate.Spec.SecretName = app2CertName
@@ -699,9 +701,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					ServiceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"cross-ns": "test"},
 					},
-					Acceptor: broker.AppAcceptorType{
-						Port: app2Port,
-					},
 					Resources: corev1.ResourceRequirements{
 						Requests: corev1.ResourceList{
 							corev1.ResourceMemory: resource.MustParse("1Gi"),
@@ -709,9 +708,9 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							SubscriberOf: []broker.AppAddressType{
+							SubscriberOf: []broker.AddressRef{
 								{Address: "app2.address::queue2"},
-								{Address: "shared.address::app2-client.app2-shared-queue"},
+								{Address: "shared.address::app2-client.app2-shared-queue", AppNamespace: defaultNamespace, AppName: app1Name},
 							},
 						},
 					},
@@ -725,7 +724,17 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			By("waiting for app2 to be ready")
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, app2Key, createdApp2)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("App2 Status: %v\n", createdApp2.Status)
+				}
+
 				g.Expect(meta.IsStatusConditionTrue(createdApp2.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
+
+				// Verify port was assigned
+				g.Expect(createdApp2.Status.Service.AssignedPort).ShouldNot(BeZero())
+				app2Port = createdApp2.Status.Service.AssignedPort
+
 				if verbose {
 					fmt.Printf("App2 Ready, binding: %v\n", createdApp2.Status.Service)
 				}
@@ -755,7 +764,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			By("verifying capacity tracking across namespaces - third app should fail")
 			app3Name := "app-ns-test-too-big"
-			app3Port := int32(61712)
+			var app3Port int32
 			app3CertName := "app3-tls-cert"
 			InstallCert(app3CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
 				candidate.Spec.SecretName = app3CertName
@@ -779,9 +788,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					ServiceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"cross-ns": "test"},
 					},
-					Acceptor: broker.AppAcceptorType{
-						Port: app3Port,
-					},
 					Resources: corev1.ResourceRequirements{
 						Requests: corev1.ResourceList{
 							corev1.ResourceMemory: resource.MustParse("1Gi"), // Total would be 2.5Gi > 2Gi limit
@@ -789,7 +795,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							SubscriberOf: []broker.AppAddressType{
+							SubscriberOf: []broker.AddressRef{
 								{Address: "app3.address::queue3"},
 							},
 						},
@@ -834,8 +840,8 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				createdApp3.Spec.Resources.Requests[corev1.ResourceMemory] = resource.MustParse("256Mi")
 				createdApp3.Spec.Capabilities = []broker.AppCapabilityType{
 					{
-						ProducerOf: []broker.AppAddressType{{Address: "shared.address"}},
-						SubscriberOf: []broker.AppAddressType{
+						ProducerOf: []broker.AddressRef{{Address: "shared.address", AppNamespace: defaultNamespace, AppName: app1Name}},
+						SubscriberOf: []broker.AddressRef{
 							{Address: "app3.address::queue3"},
 						},
 					},
@@ -846,7 +852,17 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			By("verifying app3 becomes ready after modification")
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, app3Key, createdApp3)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("App3 Status: %v\n", createdApp3.Status)
+				}
+
 				g.Expect(meta.IsStatusConditionTrue(createdApp3.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
+
+				// Verify port was assigned
+				g.Expect(createdApp3.Status.Service.AssignedPort).ShouldNot(BeZero())
+				app3Port = createdApp3.Status.Service.AssignedPort
+
 				if verbose {
 					fmt.Printf("App3 now ready, binding: %v\n", createdApp3.Status.Service)
 				}
@@ -1104,10 +1120,9 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					ServiceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"nonexistent": "label"},
 					},
-					Acceptor: broker.AppAcceptorType{Port: 61619},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "TEST.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "TEST.QUEUE"}},
 						},
 					},
 				},
@@ -1150,7 +1165,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			UninstallCert(appCertName, defaultNamespace)
 		})
 
-		It("should detect and reject port clash between apps", func() {
+		It("should auto-assign unique ports to apps and handle pool exhaustion", func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -1158,7 +1173,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			ctx := context.Background()
 			serviceName := NextSpecResourceName()
-			conflictingPort := int32(61620)
 
 			By("setting up certificates for service")
 			certName := serviceName + "-" + common.DefaultOperandCertSecretName
@@ -1191,7 +1205,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      serviceName,
 					Namespace: defaultNamespace,
-					Labels:    map[string]string{"portclash": "test"},
+					Labels:    map[string]string{"auto-port-test": "true"},
 				},
 				Spec: broker.BrokerServiceSpec{},
 			}
@@ -1200,14 +1214,30 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			serviceKey := types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}
 			createdService := &broker.BrokerService{}
 
-			By("waiting for service to be ready")
+			By("waiting for service to be ready and verify port pool discovery")
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, serviceKey, createdService)).Should(Succeed())
 				g.Expect(meta.IsStatusConditionTrue(createdService.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
+
+				// Verify AvailablePorts status is set
+				g.Expect(createdService.Status.AvailablePorts).ShouldNot(BeNil())
+				g.Expect(createdService.Status.AvailablePorts.Source).Should(Or(Equal("Default"), Equal("NetworkPolicy")))
+				if verbose {
+					if createdService.Status.AvailablePorts.PortRange != nil {
+						fmt.Printf("Port pool: Source=%s, PortRange=[%d-%d]\n",
+							createdService.Status.AvailablePorts.Source,
+							createdService.Status.AvailablePorts.PortRange.Start,
+							createdService.Status.AvailablePorts.PortRange.End)
+					} else {
+						fmt.Printf("Port pool: Source=%s, Ports=%v\n",
+							createdService.Status.AvailablePorts.Source,
+							createdService.Status.AvailablePorts.Ports)
+					}
+				}
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("creating first app with port 61620")
-			app1Name := "app1-port-clash"
+			By("creating first app - should get auto-assigned port")
+			app1Name := "app1-auto-port"
 			app1CertName := app1Name + common.AppCertSecretSuffix
 			InstallCert(app1CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
 				candidate.Spec.SecretName = app1CertName
@@ -1231,12 +1261,11 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				},
 				Spec: broker.BrokerAppSpec{
 					ServiceSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{"portclash": "test"},
+						MatchLabels: map[string]string{"auto-port-test": "true"},
 					},
-					Acceptor: broker.AppAcceptorType{Port: conflictingPort},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "APP1.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "APP1.QUEUE"}},
 						},
 					},
 				},
@@ -1246,17 +1275,23 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			app1Key := types.NamespacedName{Name: app1Name, Namespace: defaultNamespace}
 			createdApp1 := &broker.BrokerApp{}
 
-			By("waiting for first app to be ready")
+			var app1Port int32
+			By("waiting for first app to be ready with assigned port")
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, app1Key, createdApp1)).Should(Succeed())
 				g.Expect(meta.IsStatusConditionTrue(createdApp1.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
+
+				// Verify port was assigned
+				g.Expect(createdApp1.Status.Service.AssignedPort).ShouldNot(BeZero())
+				app1Port = createdApp1.Status.Service.AssignedPort
+
 				if verbose {
-					fmt.Printf("App1 Ready, conditions: %v\n", createdApp1.Status.Conditions)
+					fmt.Printf("App1 assigned port: %d\n", app1Port)
 				}
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("creating second app with SAME port 61620 - should be rejected")
-			app2Name := "app2-port-clash"
+			By("creating second app - should get different auto-assigned port")
+			app2Name := "app2-auto-port"
 			app2CertName := app2Name + common.AppCertSecretSuffix
 			InstallCert(app2CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
 				candidate.Spec.SecretName = app2CertName
@@ -1280,12 +1315,11 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				},
 				Spec: broker.BrokerAppSpec{
 					ServiceSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{"portclash": "test"},
+						MatchLabels: map[string]string{"auto-port-test": "true"},
 					},
-					Acceptor: broker.AppAcceptorType{Port: conflictingPort}, // Same port!
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "APP2.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "APP2.QUEUE"}},
 						},
 					},
 				},
@@ -1295,83 +1329,49 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			app2Key := types.NamespacedName{Name: app2Name, Namespace: defaultNamespace}
 			createdApp2 := &broker.BrokerApp{}
 
-			By("verifying second app is NOT ready due to port clash")
+			var app2Port int32
+			By("waiting for second app to be ready with different assigned port")
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, app2Key, createdApp2)).Should(Succeed())
+				g.Expect(meta.IsStatusConditionTrue(createdApp2.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
 
-				// Valid condition should be True (spec is valid)
-				validCond := meta.FindStatusCondition(createdApp2.Status.Conditions, broker.ValidConditionType)
-				if validCond != nil {
-					if verbose {
-						fmt.Printf("App2 Valid condition: Status=%s, Reason=%s\n",
-							validCond.Status, validCond.Reason)
-					}
-					g.Expect(validCond.Status).Should(Equal(metav1.ConditionTrue))
-					g.Expect(validCond.Reason).Should(Equal(broker.ValidConditionSuccessReason))
-				}
+				// Verify port was assigned and is different from app1
+				g.Expect(createdApp2.Status.Service.AssignedPort).ShouldNot(BeZero())
+				g.Expect(createdApp2.Status.Service.AssignedPort).ShouldNot(Equal(app1Port))
+				app2Port = createdApp2.Status.Service.AssignedPort
 
-				// Deployed condition should be False with NoServiceCapacity reason
-				deployedCond := meta.FindStatusCondition(createdApp2.Status.Conditions, broker.DeployedConditionType)
-				if deployedCond != nil {
-					if verbose {
-						fmt.Printf("App2 Deployed condition: Status=%s, Reason=%s, Message=%s\n",
-							deployedCond.Status, deployedCond.Reason, deployedCond.Message)
-					}
-					g.Expect(deployedCond.Status).Should(Equal(metav1.ConditionFalse))
-					g.Expect(deployedCond.Reason).Should(Equal(broker.DeployedConditionNoServiceCapacityReason))
-					g.Expect(deployedCond.Message).Should(ContainSubstring("port"))
-					g.Expect(deployedCond.Message).Should(ContainSubstring(fmt.Sprintf("%d", conflictingPort)))
-				}
-
-				// Ready should be False
-				readyCond := meta.FindStatusCondition(createdApp2.Status.Conditions, broker.ReadyConditionType)
-				if readyCond != nil {
-					g.Expect(readyCond.Status).Should(Equal(metav1.ConditionFalse))
+				if verbose {
+					fmt.Printf("App2 assigned port: %d (different from app1: %d)\n", app2Port, app1Port)
 				}
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("verifying service still has only first app provisioned (second rejected)")
-			Consistently(func(g Gomega) {
+			By("verifying both apps are provisioned on the service")
+			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, serviceKey, createdService)).Should(Succeed())
 				if verbose {
 					fmt.Printf("Service ProvisionedApps: %v\n", createdService.Status.ProvisionedApps)
 				}
-				// Only app1 should be provisioned, app2 should be rejected due to port clash
-				g.Expect(len(createdService.Status.ProvisionedApps)).Should(BeNumerically("<=", 1))
-			}, "10s", "1s").Should(Succeed())
-
-			By("changing second app to use different port - should become ready")
-			differentPort := int32(61621)
-			Eventually(func(g Gomega) {
-				g.Expect(k8sClient.Get(ctx, app2Key, createdApp2)).Should(Succeed())
-				createdApp2.Spec.Acceptor.Port = differentPort
-				g.Expect(k8sClient.Update(ctx, createdApp2)).Should(Succeed())
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-
-			By("verifying second app becomes ready after port change")
-			Eventually(func(g Gomega) {
-				g.Expect(k8sClient.Get(ctx, app2Key, createdApp2)).Should(Succeed())
-
-				validCond := meta.FindStatusCondition(createdApp2.Status.Conditions, broker.ValidConditionType)
-				if validCond != nil {
-					if verbose {
-						fmt.Printf("App2 Valid condition after fix: Status=%s, Reason=%s\n",
-							validCond.Status, validCond.Reason)
-					}
-					g.Expect(validCond.Status).Should(Equal(metav1.ConditionTrue))
-					g.Expect(validCond.Reason).Should(Equal(broker.ValidConditionSuccessReason))
-				}
-
-				g.Expect(meta.IsStatusConditionTrue(createdApp2.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-
-			By("verifying both apps are now provisioned on the service")
-			Eventually(func(g Gomega) {
-				g.Expect(k8sClient.Get(ctx, serviceKey, createdService)).Should(Succeed())
-				if verbose {
-					fmt.Printf("Service ProvisionedApps after fix: %v\n", createdService.Status.ProvisionedApps)
-				}
 				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(2))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("verifying ports are unique across both apps")
+			Expect(app1Port).ShouldNot(Equal(app2Port), "Apps should have unique auto-assigned ports")
+
+			By("verifying binding secrets contain correct assigned ports")
+			app1BindingSecret := &corev1.Secret{}
+			app1SecretKey := types.NamespacedName{Name: BindingsSecretName(app1Name), Namespace: defaultNamespace}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, app1SecretKey, app1BindingSecret)).Should(Succeed())
+				portStr := string(app1BindingSecret.Data["port"])
+				g.Expect(portStr).Should(Equal(fmt.Sprintf("%d", app1Port)))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			app2BindingSecret := &corev1.Secret{}
+			app2SecretKey := types.NamespacedName{Name: BindingsSecretName(app2Name), Namespace: defaultNamespace}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, app2SecretKey, app2BindingSecret)).Should(Succeed())
+				portStr := string(app2BindingSecret.Data["port"])
+				g.Expect(portStr).Should(Equal(fmt.Sprintf("%d", app2Port)))
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("cleanup")
@@ -1385,7 +1385,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 		})
 	})
 
-	Context("BrokerService CEL Expression Validation", func() {
+	Context("CEL Expression Validation", func() {
 		It("sets Valid=False when appSelectorExpression has syntax error", func() {
 			ctx := context.Background()
 

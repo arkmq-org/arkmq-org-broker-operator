@@ -327,14 +327,16 @@ var _ = Describe("CEL Expressions", func() {
 			}),
 		Entry("port-based authorization",
 			testCase{
-				expr: `app.spec.acceptor.port >= 62000`,
+				expr: `app.status.service.assignedPort >= 62000`,
 				app: &v1beta2.BrokerApp{
 					ObjectMeta: v1.ObjectMeta{
 						Name:      "myapp",
 						Namespace: "dev",
 					},
-					Spec: v1beta2.BrokerAppSpec{
-						Acceptor: v1beta2.AppAcceptorType{Port: 62100},
+					Status: v1beta2.BrokerAppStatus{
+						Service: &v1beta2.BrokerServiceBindingStatus{
+							AssignedPort: 62100,
+						},
 					},
 				},
 				service: &v1beta2.BrokerService{
@@ -347,14 +349,16 @@ var _ = Describe("CEL Expressions", func() {
 			}),
 		Entry("port too low",
 			testCase{
-				expr: `app.spec.acceptor.port >= 62000`,
+				expr: `app.status.service.assignedPort >= 62000`,
 				app: &v1beta2.BrokerApp{
 					ObjectMeta: v1.ObjectMeta{
 						Name:      "myapp",
 						Namespace: "dev",
 					},
-					Spec: v1beta2.BrokerAppSpec{
-						Acceptor: v1beta2.AppAcceptorType{Port: 61616},
+					Status: v1beta2.BrokerAppStatus{
+						Service: &v1beta2.BrokerServiceBindingStatus{
+							AssignedPort: 61616,
+						},
 					},
 				},
 				service: &v1beta2.BrokerService{

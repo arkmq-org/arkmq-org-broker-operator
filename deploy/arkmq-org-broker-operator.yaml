@@ -9023,21 +9023,37 @@ spec:
             type: object
           spec:
             properties:
-              acceptor:
-                properties:
-                  port:
-                    format: int32
-                    type: integer
-                required:
-                - port
-                type: object
+              addresses:
+                description: |-
+                  Addresses owned by this app (lifecycle tied to this app)
+                  Other apps can reference these via appNamespace/appName in their capabilities
+                items:
+                  description: AddressType defines a messaging address
+                  properties:
+                    address:
+                      description: Address is the address identifier (unique within a broker service)
+                      type: string
+                  required:
+                  - address
+                  type: object
+                type: array
               capabilities:
                 items:
                   properties:
                     consumerOf:
                       items:
+                        description: AddressRef references an address for use in capabilities
                         properties:
                           address:
+                            description: |-
+                              Address is the address identifier (required)
+                              Can be simple name ("orders") or FQQN ("events::queue1" for SubscriberOf)
+                            type: string
+                          appName:
+                            description: AppName of owning app - for cross-app references  (optional)
+                            type: string
+                          appNamespace:
+                            description: AppNamespace of owning app - for cross-app references  (optional)
                             type: string
                         required:
                         - address
@@ -9045,8 +9061,18 @@ spec:
                       type: array
                     producerOf:
                       items:
+                        description: AddressRef references an address for use in capabilities
                         properties:
                           address:
+                            description: |-
+                              Address is the address identifier (required)
+                              Can be simple name ("orders") or FQQN ("events::queue1" for SubscriberOf)
+                            type: string
+                          appName:
+                            description: AppName of owning app - for cross-app references  (optional)
+                            type: string
+                          appNamespace:
+                            description: AppNamespace of owning app - for cross-app references  (optional)
                             type: string
                         required:
                         - address
@@ -9054,8 +9080,18 @@ spec:
                       type: array
                     subscriberOf:
                       items:
+                        description: AddressRef references an address for use in capabilities
                         properties:
                           address:
+                            description: |-
+                              Address is the address identifier (required)
+                              Can be simple name ("orders") or FQQN ("events::queue1" for SubscriberOf)
+                            type: string
+                          appName:
+                            description: AppName of owning app - for cross-app references  (optional)
+                            type: string
+                          appNamespace:
+                            description: AppNamespace of owning app - for cross-app references  (optional)
                             type: string
                         required:
                         - address
@@ -9161,8 +9197,6 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
-            required:
-            - acceptor
             type: object
           status:
             properties:
@@ -9227,6 +9261,10 @@ spec:
               service:
                 description: Service references the BrokerService this app is bound to and its binding secret
                 properties:
+                  assignedPort:
+                    description: AssignedPort is the port allocated from the service's pool for this app's acceptor
+                    format: int32
+                    type: integer
                   name:
                     description: Name of the BrokerService this app is bound to
                     type: string
@@ -9237,6 +9275,7 @@ spec:
                     description: Secret is the name of the binding secret containing connection details
                     type: string
                 required:
+                - assignedPort
                 - name
                 - namespace
                 - secret
@@ -14151,6 +14190,36 @@ spec:
             type: object
           status:
             properties:
+              availablePorts:
+                description: Port pool discovered from NetworkPolicy or default range
+                properties:
+                  portRange:
+                    description: Port range for default pool (mutually exclusive with Ports)
+                    properties:
+                      end:
+                        description: End port of the range (inclusive)
+                        format: int32
+                        type: integer
+                      start:
+                        description: Start port of the range (inclusive)
+                        format: int32
+                        type: integer
+                    required:
+                    - end
+                    - start
+                    type: object
+                  ports:
+                    description: Discovered ports from NetworkPolicy (explicit list)
+                    items:
+                      format: int32
+                      type: integer
+                    type: array
+                  source:
+                    description: Source of port discovery
+                    type: string
+                required:
+                - source
+                type: object
               conditions:
                 description: |-
                   Current state of the resource
@@ -14436,6 +14505,14 @@ rules:
   - get
   - list
   - update
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - policy

@@ -210,6 +210,21 @@ func TestResolveBrokerService(t *testing.T) {
 			objs := make([]runtime.Object, 0, len(tt.services)+1)
 			objs = append(objs, tt.app)
 			for i := range tt.services {
+				// Add Deployed condition and AvailablePorts to all services
+				tt.services[i].Status.Conditions = []metav1.Condition{
+					{
+						Type:   broker.DeployedConditionType,
+						Status: metav1.ConditionTrue,
+						Reason: broker.ReadyConditionReason,
+					},
+				}
+				tt.services[i].Status.AvailablePorts = &broker.PortPoolInfo{
+					Source: "Default",
+					PortRange: &broker.PortRange{
+						Start: 61616,
+						End:   62615,
+					},
+				}
 				objs = append(objs, &tt.services[i])
 			}
 			objs = append(objs, &corev1.Namespace{

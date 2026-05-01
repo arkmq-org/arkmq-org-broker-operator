@@ -82,6 +82,15 @@ const (
 	// BrokerService and BrokerApp controller constants
 	BrokerPropsSuffix = "-bp"
 	SecretPathBase    = "/amq/extra/secrets/"
+
+	// Standard Kubernetes label keys
+	LabelAppKubernetesInstance  = "app.kubernetes.io/instance"
+	LabelAppKubernetesComponent = "app.kubernetes.io/component"
+	LabelAppKubernetesManagedBy = "app.kubernetes.io/managed-by"
+
+	// Domain-specific label keys
+	LabelBrokerService   = "broker.arkmq.org/service"
+	LabelBrokerPeerIndex = "broker.arkmq.org/peer-index"
 )
 
 var lastStatusMap map[types.NamespacedName]olm.DeploymentStatus = make(map[types.NamespacedName]olm.DeploymentStatus)

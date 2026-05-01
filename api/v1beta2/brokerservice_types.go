@@ -65,6 +65,26 @@ type RejectedApp struct {
 	Reason string `json:"reason"`
 }
 
+// PortRange defines an inclusive range of ports [Start, End]
+type PortRange struct {
+	// Start port of the range (inclusive)
+	Start int32 `json:"start"`
+	// End port of the range (inclusive)
+	End int32 `json:"end"`
+}
+
+// PortPoolInfo describes the available port pool for app acceptors
+type PortPoolInfo struct {
+	// Source of port discovery
+	Source string `json:"source"` // "NetworkPolicy" | "Default"
+	// Discovered ports from NetworkPolicy (explicit list)
+	//+optional
+	Ports []int32 `json:"ports,omitempty"`
+	// Port range for default pool (mutually exclusive with Ports)
+	//+optional
+	PortRange *PortRange `json:"portRange,omitempty"`
+}
+
 type BrokerServiceStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
@@ -85,6 +105,11 @@ type BrokerServiceStatus struct {
 	//+optional
 	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Rejected Applications"
 	RejectedApps []RejectedApp `json:"rejectedApps,omitempty"`
+
+	// Port pool discovered from NetworkPolicy or default range
+	//+optional
+	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Available Ports"
+	AvailablePorts *PortPoolInfo `json:"availablePorts,omitempty"`
 }
 
 //+kubebuilder:object:root=true
