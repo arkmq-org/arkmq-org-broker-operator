@@ -413,10 +413,9 @@ var _ = Describe("artemis controller", Label("do"), func() {
 						strings.TrimSpace(*currentMemoryText), 10, 64)
 					g.Expect(err).To(BeNil())
 
-					// 256Mi threshold is set below the 384Mi limit to ensure adequate
-					// headroom for memory spikes and to verify the operator runs
-					// efficiently when managing 1000 broker CRs
-					thresholdMemoryMegaBytes := int64(256 * 1024 * 1024)
+					// 288Mi threshold accounts for per-CR NetworkPolicy objects while
+					// staying well below the 384Mi container limit
+					thresholdMemoryMegaBytes := int64(288 * 1024 * 1024)
 					g.Expect(currentMemoryBytes < thresholdMemoryMegaBytes).Should(BeTrue(),
 						"memory usage %d bytes exceeds threshold of %d bytes",
 						currentMemoryBytes, thresholdMemoryMegaBytes)

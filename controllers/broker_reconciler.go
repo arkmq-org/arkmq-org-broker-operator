@@ -19,6 +19,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/containers"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/ingresses"
+	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/networkpolicies"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/persistentvolumeclaims"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/pods"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/routes"
@@ -190,6 +191,10 @@ func (reconciler *BrokerReconcilerImpl) Process(customResource *v1beta2.Broker, 
 	if err != nil {
 		reconciler.log.Error(err, "Error processing console")
 		return err
+	}
+
+	if !common.OperandNetworkPolicyDisabled() {
+		reconciler.applyNetworkPolicy(customResource)
 	}
 
 	// mods to env var values sourced from secrets are not detected by process resources
@@ -546,6 +551,22 @@ func (reconciler *BrokerReconcilerImpl) applyPodDisruptionBudget(customResource 
 		MatchLabels: matchLabels,
 	}
 
+	reconciler.trackDesired(desired)
+}
+
+func (reconciler *BrokerReconcilerImpl) applyNetworkPolicy(customResource *v1beta2.Broker) {
+
+	var existing *netv1.NetworkPolicy
+	if obj := reconciler.cloneOfDeployed(reflect.TypeFor[netv1.NetworkPolicy](), customResource.Name+"-netpol"); obj != nil {
+		existing = obj.(*netv1.NetworkPolicy)
+	}
+
+	var desired *netv1.NetworkPolicy
+	if customResource.Spec.NetworkPolicy != nil {
+		desired = networkpolicies.NewNetworkPolicyFromSpec(existing, customResource)
+	} else {
+		desired = networkpolicies.NewNetworkPolicyForCR(existing, customResource)
+	}
 	reconciler.trackDesired(desired)
 }
 
@@ -1923,7 +1944,7 @@ var orderedTypes *([]reflect.Type)
 
 func getOrderedTypeList() []reflect.Type {
 	if orderedTypes == nil {
-		types := make([]reflect.Type, 7)
+		types := make([]reflect.Type, 8)
 
 		// we want to create/update in this order
 		types[0] = reflect.TypeOf(corev1.Secret{})
@@ -1933,6 +1954,7 @@ func getOrderedTypeList() []reflect.Type {
 		types[4] = reflect.TypeOf(netv1.Ingress{})
 		types[5] = reflect.TypeOf(routev1.Route{})
 		types[6] = reflect.TypeOf(policyv1.PodDisruptionBudget{})
+		types[7] = reflect.TypeOf(netv1.NetworkPolicy{})
 		orderedTypes = &types
 	}
 	return *orderedTypes

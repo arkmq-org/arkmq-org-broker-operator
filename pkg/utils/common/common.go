@@ -701,6 +701,7 @@ func GetDeployedResources(instance *v1beta2.Broker, client rtclient.Client, onOp
 			&corev1.ConfigMapList{},
 			&policyv1.PodDisruptionBudgetList{},
 			&netv1.IngressList{},
+			&netv1.NetworkPolicyList{},
 		)
 	} else {
 		resourceMap, err = reader.ListAll(
@@ -710,6 +711,7 @@ func GetDeployedResources(instance *v1beta2.Broker, client rtclient.Client, onOp
 			&corev1.SecretList{},
 			&corev1.ConfigMapList{},
 			&policyv1.PodDisruptionBudgetList{},
+			&netv1.NetworkPolicyList{},
 		)
 	}
 	if err != nil {
@@ -872,6 +874,14 @@ func FindFirstDotPemKey(secret *corev1.Secret) (string, error) {
 	}
 
 	return "", fmt.Errorf("no keys with the suffix .pem found in the secret %s", secret.Name)
+}
+
+// OperandNetworkPolicyDisabled returns true when the DISABLE_OPERAND_NETWORK_POLICY
+// env var is set to "true", allowing administrators to opt out of operator-managed
+// NetworkPolicies for broker pods.
+func OperandNetworkPolicyDisabled() bool {
+	val, found := os.LookupEnv("DISABLE_OPERAND_NETWORK_POLICY")
+	return found && strings.EqualFold(val, "true")
 }
 
 func fromEnv(envVarName, defaultValue string) *string {

@@ -140,6 +140,7 @@ func (r *ActiveMQArtemisReconciler) toBrokerParent() *BrokerReconciler {
 //+kubebuilder:rbac:groups=apps,namespace=arkmq-org-broker-operator,resources=deployments/finalizers,verbs=update
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,namespace=arkmq-org-broker-operator,resources=roles;rolebindings,verbs=create;get;delete
 //+kubebuilder:rbac:groups=policy,namespace=arkmq-org-broker-operator,resources=poddisruptionbudgets,verbs=create;get;delete;list;update;watch
+//+kubebuilder:rbac:groups=networking.k8s.io,namespace=arkmq-org-broker-operator,resources=networkpolicies,verbs=create;get;delete;list;update;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -245,7 +246,8 @@ func (r *ActiveMQArtemisReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ConfigMap{}).
 		Owns(&corev1.Service{}).
 		Owns(&netv1.Ingress{}).
-		Owns(&policyv1.PodDisruptionBudget{})
+		Owns(&policyv1.PodDisruptionBudget{}).
+		Owns(&netv1.NetworkPolicy{})
 
 	if r.isOnOpenShift {
 		builder.Owns(&routev1.Route{})
