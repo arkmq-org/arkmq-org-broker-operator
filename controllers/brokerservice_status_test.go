@@ -289,7 +289,7 @@ var _ = Describe("broker-service status conditions", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "STATUS.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "STATUS.QUEUE"}},
 						},
 					},
 				},
@@ -429,8 +429,8 @@ var _ = Describe("broker-service status conditions", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "INITIAL.QUEUE"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "INITIAL.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "INITIAL.QUEUE"}},
+							ConsumerOf: []broker.AddressRef{{Address: "INITIAL.QUEUE"}},
 						},
 					},
 				},
@@ -477,10 +477,10 @@ var _ = Describe("broker-service status conditions", func() {
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, appKey, createdApp)).Should(Succeed())
 				createdApp.Spec.Capabilities = append(createdApp.Spec.Capabilities, broker.AppCapabilityType{
-					ProducerOf: []broker.AppAddressType{
+					ProducerOf: []broker.AddressRef{
 						{Address: "UPDATED.QUEUE"},
 					},
-					ConsumerOf: []broker.AppAddressType{
+					ConsumerOf: []broker.AddressRef{
 						{Address: "UPDATED.QUEUE"},
 					},
 				})

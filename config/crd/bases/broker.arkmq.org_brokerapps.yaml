@@ -40,13 +40,45 @@ spec:
             type: object
           spec:
             properties:
+              addresses:
+                description: |-
+                  Addresses with a lifecycle tied to this app, independent from addressRefs.
+                  These are private addresses that cannot be referenced by other apps.
+                items:
+                  description: AddressType defines a messaging address
+                  properties:
+                    address:
+                      description: Address is the address identifier (unique within
+                        a broker service)
+                      type: string
+                    subscriptions:
+                      description: identities of subscription queues on a multicast
+                        address
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - address
+                  type: object
+                type: array
               capabilities:
                 items:
                   properties:
                     consumerOf:
                       items:
+                        description: AddressRef references an address for use in capabilities
                         properties:
                           address:
+                            description: |-
+                              Address is the address identifier (required)
+                              Can be simple name ("orders") or FQQN ("events::queue1" for SubscriberOf)
+                            type: string
+                          appName:
+                            description: AppName of owning app - for cross-app references  (optional)
+                            type: string
+                          appNamespace:
+                            description: AppNamespace of owning app - for cross-app
+                              references  (optional)
                             type: string
                         required:
                         - address
@@ -54,8 +86,19 @@ spec:
                       type: array
                     producerOf:
                       items:
+                        description: AddressRef references an address for use in capabilities
                         properties:
                           address:
+                            description: |-
+                              Address is the address identifier (required)
+                              Can be simple name ("orders") or FQQN ("events::queue1" for SubscriberOf)
+                            type: string
+                          appName:
+                            description: AppName of owning app - for cross-app references  (optional)
+                            type: string
+                          appNamespace:
+                            description: AppNamespace of owning app - for cross-app
+                              references  (optional)
                             type: string
                         required:
                         - address
@@ -63,8 +106,19 @@ spec:
                       type: array
                     subscriberOf:
                       items:
+                        description: AddressRef references an address for use in capabilities
                         properties:
                           address:
+                            description: |-
+                              Address is the address identifier (required)
+                              Can be simple name ("orders") or FQQN ("events::queue1" for SubscriberOf)
+                            type: string
+                          appName:
+                            description: AppName of owning app - for cross-app references  (optional)
+                            type: string
+                          appNamespace:
+                            description: AppNamespace of owning app - for cross-app
+                              references  (optional)
                             type: string
                         required:
                         - address
@@ -172,6 +226,28 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
+              sharedAddresses:
+                description: |-
+                  SharedAddresses with a lifecycle tied to this app, independent from addressRefs.
+                  These are public addresses that can be referenced by other apps
+                  via appNamespace/appName in their capabilities addressRefs.
+                items:
+                  description: AddressType defines a messaging address
+                  properties:
+                    address:
+                      description: Address is the address identifier (unique within
+                        a broker service)
+                      type: string
+                    subscriptions:
+                      description: identities of subscription queues on a multicast
+                        address
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - address
+                  type: object
+                type: array
             type: object
           status:
             properties:

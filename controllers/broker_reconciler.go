@@ -2294,12 +2294,13 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		foundationalProps := NewPropsWithHeader()
 		fmt.Fprintf(foundationalProps, "name=%s\n", environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name))
 		fmt.Fprintln(foundationalProps, "criticalAnalyzer=false")
+		fmt.Fprintln(foundationalProps, "literalMatchMarkers=()")
 
 		// with cert or token, jaas is cheap and a token will be cached while valid
 		// TODO - avoid AMQP SASL login and server login duplication, verify
 		fmt.Fprintln(foundationalProps, "authenticationCacheSize=0")
 
-		fmt.Fprintln(foundationalProps, "messageCounterEnabled=true")
+		fmt.Fprintln(foundationalProps, "messageCounterEnabled=false")
 		fmt.Fprintln(foundationalProps, "journalDirectory=/app/data")
 		fmt.Fprintln(foundationalProps, "bindingsDirectory=/app/data/bindings")
 		fmt.Fprintln(foundationalProps, "largeMessagesDirectory=/app/data/largemessages")
@@ -3093,10 +3094,8 @@ func (reconciler *BrokerReconcilerImpl) addResourceForBrokerProperties(customRes
 		desired.Data = data
 	}
 
-	reconciler.log.V(1).Info("Requesting secret for broker properties", "name", resourceName.Name)
 	reconciler.trackDesired(desired)
 
-	reconciler.log.V(1).Info("Requesting mount for broker properties secret")
 	return resourceName.Name, true, data, nil
 }
 

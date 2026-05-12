@@ -277,10 +277,10 @@ spec:
     matchLabels:
       forWorkQueue: "true"
   capabilities:
-  - producerOf:
-    - address: "APP.JOBS"
-  - consumerOf:
-    - address: "APP.JOBS"
+    - producerOf:
+        - address: "APP.JOBS"
+      consumerOf:
+        - address: "APP.JOBS"
 EOF
 ```
 

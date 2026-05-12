@@ -108,7 +108,7 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 
 	Context("namespace label-based authorization", func() {
 
-		It("should allow apps from authorized namespaces only", func() {
+		It("should allow apps from authorized namespaces only", Label("verySlow"), func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -118,9 +118,9 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 			serviceName := NextSpecResourceName()
 
 			// Create test namespaces with different labels
-			prodNamespace := serviceName + "-prod"
-			devNamespace := serviceName + "-dev"
-			qaNamespace := serviceName + "-qa"
+			prodNamespace := "test-" + serviceName + "-prod"
+			devNamespace := "test-" + serviceName + "-dev"
+			qaNamespace := "test-" + serviceName + "-qa"
 
 			By("creating namespace for production with environment=production label")
 			prodNs := &corev1.Namespace{
@@ -252,8 +252,8 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "PROD.QUEUE"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "PROD.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "PROD.QUEUE"}},
+							ConsumerOf: []broker.AddressRef{{Address: "PROD.QUEUE"}},
 						},
 					},
 					Resources: corev1.ResourceRequirements{
@@ -306,8 +306,8 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "DEV.QUEUE"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "DEV.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "DEV.QUEUE"}},
+							ConsumerOf: []broker.AddressRef{{Address: "DEV.QUEUE"}},
 						},
 					},
 					Resources: corev1.ResourceRequirements{
@@ -334,7 +334,7 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 				deployedCondition := meta.FindStatusCondition(createdDevApp.Status.Conditions, broker.DeployedConditionType)
 				if deployedCondition != nil {
 					g.Expect(deployedCondition.Status).Should(Equal(metav1.ConditionFalse))
-					g.Expect(deployedCondition.Reason).Should(Equal(broker.DeployedConditionDoesNotMatchReason))
+					g.Expect(deployedCondition.Reason).Should(Equal(broker.DeployedConditionNoMatchingServiceReason))
 				}
 			}, existingClusterConsistentlyTimeout, existingClusterInterval).Should(Succeed())
 
@@ -361,8 +361,8 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "QA.QUEUE"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "QA.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "QA.QUEUE"}},
+							ConsumerOf: []broker.AddressRef{{Address: "QA.QUEUE"}},
 						},
 					},
 					Resources: corev1.ResourceRequirements{
@@ -528,8 +528,8 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "PAYMENTS.QUEUE"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "PAYMENTS.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "PAYMENTS.QUEUE"}},
+							ConsumerOf: []broker.AddressRef{{Address: "PAYMENTS.QUEUE"}},
 						},
 					},
 					Resources: corev1.ResourceRequirements{
@@ -567,8 +567,8 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "ORDERS.QUEUE"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "ORDERS.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "ORDERS.QUEUE"}},
+							ConsumerOf: []broker.AddressRef{{Address: "ORDERS.QUEUE"}},
 						},
 					},
 					Resources: corev1.ResourceRequirements{

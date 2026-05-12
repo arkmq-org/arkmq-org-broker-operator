@@ -31,6 +31,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -41,6 +42,77 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+const (
+	// FQQNSeparator is the separator used in Fully Qualified Queue Names (address-name::queue-name)
+	FQQNSeparator = "::"
+)
+
+// extractBaseAddress extracts the base address from a potentially FQQN format address
+// E.g., "events::queue1" returns "events", "orders" returns "orders"
+func extractBaseAddress(address string) string {
+	if strings.Contains(address, FQQNSeparator) {
+		parts := strings.SplitN(address, FQQNSeparator, 2)
+		return parts[0]
+	}
+	return address
+}
+
+// collectOwnedAddresses returns all addresses "owned" by an app for clash detection purposes.
+//
+// An app owns an address if:
+//  1. Explicitly declared in spec.addresses (shareable with other apps)
+//  2. Implicitly used in capabilities with empty appNamespace/appName (private, not shareable)
+//
+// Both types count as "owned" to prevent address clashes between apps on the same service,
+// but only explicitly declared addresses (type 1) can be referenced by other apps via addressRef.
+//
+// This function is used for:
+//   - Clash detection: prevent two apps from using the same address name
+//   - AddressConfigurations generation: app needs broker config for all addresses it uses
+//
+// This function is NOT used for:
+// collectOwnedAddresses returns all addresses owned by this app (lifecycle tied to this app).
+// This is the union of:
+//   - spec.addresses (private addresses - cannot be referenced by other apps)
+//   - spec.sharedAddresses (public addresses - can be referenced by other apps)
+//   - addresses declared inline in capabilities (local addresses only)
+//
+// Sharing validation: checkAddressRefCapacity() checks spec.sharedAddresses (only explicit shared addresses are referenceable)
+func collectOwnedAddresses(app *broker.BrokerApp) map[string]bool {
+	addresses := make(map[string]bool)
+
+	// Add from spec.addresses (private)
+	for _, addrType := range app.Spec.Addresses {
+		addresses[addrType.Address] = true
+	}
+
+	// Add from spec.sharedAddresses (public)
+	for _, addrType := range app.Spec.SharedAddresses {
+		addresses[addrType.Address] = true
+	}
+
+	// Add from capabilities (local addresses only - where appNamespace and appName are empty)
+	for _, capability := range app.Spec.Capabilities {
+		allAddresses := [][]broker.AddressRef{
+			capability.ProducerOf,
+			capability.ConsumerOf,
+			capability.SubscriberOf,
+		}
+
+		for _, addrList := range allAddresses {
+			for _, addressRef := range addrList {
+				// Only count as owned if this is a local reference (no cross-app fields)
+				if addressRef.AppNamespace == "" && addressRef.AppName == "" {
+					baseAddr := extractBaseAddress(addressRef.Address)
+					addresses[baseAddr] = true
+				}
+			}
+		}
+	}
+
+	return addresses
+}
 
 type BrokerAppReconciler struct {
 	*ReconcilerLoop
@@ -59,13 +131,15 @@ func (reconciler BrokerAppInstanceReconciler) validateSpec() error {
 		return err
 	}
 
-	// Validate capability address types
+	// Validate capability address types (structural checks only)
 	if err := reconciler.verifyCapabilityAddressType(); err != nil {
 		return err
 	}
 
-	// Add additional spec validations here as needed
-	// Future validations would go here
+	// Validate that Addresses and SharedAddresses don't overlap
+	if err := reconciler.validateAddressesDisjoint(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -152,6 +226,11 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 	}
 
 	statusErr, retry := processor.processStatus(err)
+
+	if _, isCondErr := AsConditionError(err); isCondErr {
+		// reflected in status, don't return to the event loop
+		err = nil
+	}
 	if err == nil {
 		err = statusErr
 	}
@@ -321,10 +400,6 @@ func serviceKey(service *broker.BrokerService) string {
 func (reconciler *BrokerAppInstanceReconciler) matchesServiceSelector(service *broker.BrokerService) (bool, error) {
 	matches, err := appselector.Matches(reconciler.instance, service, reconciler.Client)
 	if err != nil {
-		reconciler.log.Error(err, "Failed to evaluate appSelectorExpression",
-			"app", reconciler.instance.Namespace+"/"+reconciler.instance.Name,
-			"service", service.Namespace+"/"+service.Name,
-			"expression", service.Spec.AppSelectorExpression)
 		return false, fmt.Errorf("failed to evaluate appSelectorExpression on service %s/%s: %v",
 			service.Namespace, service.Name, err)
 	}
@@ -345,6 +420,27 @@ func (reconciler *BrokerAppInstanceReconciler) matchesServiceSelector(service *b
 	return matches, nil
 }
 
+// RejectionCategory categorizes why a service cannot accept an app
+type RejectionCategory int
+
+const (
+	RejectionNotDeployed   RejectionCategory = iota // Service not deployed yet
+	RejectionSelector                               // Service selector doesn't match app
+	RejectionSelectorError                          // CEL evaluation error
+	RejectionAddressRef                             // AddressRef dependency not satisfied
+	RejectionAddressClash                           // Address name conflict with existing app
+	RejectionMemory                                 // Insufficient memory capacity
+	RejectionPortPool                               // Port pool exhausted or not configured
+	RejectionOther                                  // Other errors
+)
+
+// ServiceRejection tracks why a specific service rejected an app
+type ServiceRejection struct {
+	ServiceName string
+	Category    RejectionCategory
+	Message     string
+}
+
 func (reconciler *BrokerAppInstanceReconciler) findServiceWithCapacity(list *broker.BrokerServiceList) (chosen *broker.BrokerService, assignedPort int32, err error) {
 	if len(list.Items) == 0 {
 		return nil, UnassignedPort, fmt.Errorf("no services in list")
@@ -358,10 +454,7 @@ func (reconciler *BrokerAppInstanceReconciler) findServiceWithCapacity(list *bro
 	var maxAvailable int64 = -1
 
 	// Track why services were rejected for better error messages
-	rejectionReasons := make(map[string]string)
-	selectorRejectionCount := 0
-	portExhaustedCount := 0
-	var celEvaluationError error // Track first CEL error encountered
+	var rejections []ServiceRejection
 
 	for i := range list.Items {
 		service := &list.Items[i]
@@ -369,30 +462,63 @@ func (reconciler *BrokerAppInstanceReconciler) findServiceWithCapacity(list *bro
 		// Only consider deployed services (port discovery must be complete)
 		deployedCond := meta.FindStatusCondition(service.Status.Conditions, broker.DeployedConditionType)
 		if deployedCond == nil || deployedCond.Status != metav1.ConditionTrue {
-			rejectionReasons[service.Name] = "service not deployed yet (port discovery pending)"
+			rejections = append(rejections, ServiceRejection{
+				ServiceName: service.Name,
+				Category:    RejectionNotDeployed,
+				Message:     "service not deployed yet (port discovery pending)",
+			})
 			continue
 		}
 
 		// Check selector match first
 		matches, matchErr := reconciler.matchesServiceSelector(service)
 		if matchErr != nil {
-			// CEL evaluation error - track it and continue to check other services
+			// CEL evaluation error - continue to check other services
 			reconciler.log.V(1).Info("Failed to evaluate selector for service",
 				"service", service.Name,
 				"error", matchErr)
-			rejectionReasons[service.Name] = fmt.Sprintf("selector evaluation failed: %v", matchErr)
-			if celEvaluationError == nil {
-				celEvaluationError = matchErr // Keep first error for reporting
-			}
-			selectorRejectionCount++
+			rejections = append(rejections, ServiceRejection{
+				ServiceName: service.Name,
+				Category:    RejectionSelectorError,
+				Message:     fmt.Sprintf("selector evaluation failed: %v", matchErr),
+			})
 			continue
 		}
 		if !matches {
 			reconciler.log.V(1).Info("App does not match service selector",
 				"service", service.Name,
 				"app-namespace", reconciler.instance.Namespace)
-			rejectionReasons[service.Name] = "does not match selector"
-			selectorRejectionCount++
+			rejections = append(rejections, ServiceRejection{
+				ServiceName: service.Name,
+				Category:    RejectionSelector,
+				Message:     "does not match selector",
+			})
+			continue
+		}
+
+		// Check addressRef dependencies (cross-app address sharing)
+		if addrRefErr := reconciler.checkAddressRefCapacity(service); addrRefErr != nil {
+			reconciler.log.V(1).Info("Service does not satisfy addressRef dependencies",
+				"service", service.Name,
+				"error", addrRefErr)
+			rejections = append(rejections, ServiceRejection{
+				ServiceName: service.Name,
+				Category:    RejectionAddressRef,
+				Message:     addrRefErr.Error(),
+			})
+			continue
+		}
+
+		// Check for address clashes with apps already on this service
+		if clashErr := reconciler.checkAddressClashOnService(service); clashErr != nil {
+			reconciler.log.V(1).Info("Service has address clash",
+				"service", service.Name,
+				"error", clashErr)
+			rejections = append(rejections, ServiceRejection{
+				ServiceName: service.Name,
+				Category:    RejectionAddressClash,
+				Message:     clashErr.Error(),
+			})
 			continue
 		}
 
@@ -402,7 +528,11 @@ func (reconciler *BrokerAppInstanceReconciler) findServiceWithCapacity(list *bro
 			reconciler.log.V(1).Info("Failed to check capacity for service",
 				"service", service.Name,
 				"error", checkErr)
-			rejectionReasons[service.Name] = fmt.Sprintf("error checking capacity: %v", checkErr)
+			rejections = append(rejections, ServiceRejection{
+				ServiceName: service.Name,
+				Category:    RejectionOther,
+				Message:     fmt.Sprintf("error checking capacity: %v", checkErr),
+			})
 			continue
 		}
 
@@ -411,8 +541,11 @@ func (reconciler *BrokerAppInstanceReconciler) findServiceWithCapacity(list *bro
 				"service", service.Name,
 				"available", available,
 				"required", appMemoryRequest.Value())
-			rejectionReasons[service.Name] = fmt.Sprintf("insufficient memory (available: %d, required: %d)",
-				available, appMemoryRequest.Value())
+			rejections = append(rejections, ServiceRejection{
+				ServiceName: service.Name,
+				Category:    RejectionMemory,
+				Message:     fmt.Sprintf("insufficient memory (available: %d, required: %d)", available, appMemoryRequest.Value()),
+			})
 			continue
 		}
 
@@ -422,7 +555,11 @@ func (reconciler *BrokerAppInstanceReconciler) findServiceWithCapacity(list *bro
 			reconciler.log.V(1).Info("Failed to list apps for port capacity check",
 				"service", service.Name,
 				"error", listErr)
-			rejectionReasons[service.Name] = fmt.Sprintf("error checking port capacity: %v", listErr)
+			rejections = append(rejections, ServiceRejection{
+				ServiceName: service.Name,
+				Category:    RejectionOther,
+				Message:     fmt.Sprintf("error checking port capacity: %v", listErr),
+			})
 			continue
 		}
 
@@ -432,8 +569,11 @@ func (reconciler *BrokerAppInstanceReconciler) findServiceWithCapacity(list *bro
 			reconciler.log.V(1).Info("Service has no available ports",
 				"service", service.Name,
 				"error", portErr)
-			rejectionReasons[service.Name] = fmt.Sprintf("port pool exhausted: %v", portErr)
-			portExhaustedCount++
+			rejections = append(rejections, ServiceRejection{
+				ServiceName: service.Name,
+				Category:    RejectionPortPool,
+				Message:     fmt.Sprintf("port pool exhausted: %v", portErr),
+			})
 			continue
 		}
 
@@ -446,35 +586,7 @@ func (reconciler *BrokerAppInstanceReconciler) findServiceWithCapacity(list *bro
 	}
 
 	if bestService == nil {
-		// Build detailed error message with reasons
-		reasons := []string{}
-		for svcName, reason := range rejectionReasons {
-			reasons = append(reasons, fmt.Sprintf("%s: %s", svcName, reason))
-		}
-
-		// If we encountered CEL evaluation errors, surface them to user
-		if celEvaluationError != nil {
-			return nil, UnassignedPort, NewConditionError(broker.DeployedConditionSelectorEvaluationError,
-				"failed to evaluate service selector: %v", celEvaluationError)
-		}
-
-		// If all services were rejected due to selector mismatch, return specific error
-		if selectorRejectionCount > 0 && selectorRejectionCount == len(rejectionReasons) {
-			return nil, UnassignedPort, NewConditionError(broker.DeployedConditionDoesNotMatchReason,
-				"app in namespace %s does not match selector for any service", reconciler.instance.Namespace)
-		}
-
-		// If all services were rejected due to port exhaustion, return specific error
-		if portExhaustedCount > 0 && portExhaustedCount == len(rejectionReasons) {
-			return nil, UnassignedPort, NewConditionError(broker.DeployedConditionPortPoolExhaustedReason,
-				"all matching services have exhausted port pools: %s", strings.Join(reasons, "; "))
-		}
-
-		if len(reasons) > 0 {
-			return nil, UnassignedPort, fmt.Errorf("no service with capacity for memory %v: %s",
-				appMemoryRequest, strings.Join(reasons, "; "))
-		}
-		return nil, UnassignedPort, fmt.Errorf("no service with capacity for memory %v", appMemoryRequest)
+		return nil, UnassignedPort, reconciler.buildCapacityError(rejections, appMemoryRequest)
 	}
 
 	reconciler.log.V(1).Info("Selected service with capacity",
@@ -482,6 +594,142 @@ func (reconciler *BrokerAppInstanceReconciler) findServiceWithCapacity(list *bro
 		"available-memory", maxAvailable,
 		"assigned-port", bestServicePort)
 	return bestService, bestServicePort, nil
+}
+
+// buildCapacityError analyzes the structured rejection data and constructs an informative error message
+func (reconciler *BrokerAppInstanceReconciler) buildCapacityError(
+	rejections []ServiceRejection,
+	appMemoryRequest *resource.Quantity,
+) error {
+	if len(rejections) == 0 {
+		return fmt.Errorf("no services available")
+	}
+
+	// Count rejections by category to determine primary blocking issue
+	categoryCounts := make(map[RejectionCategory]int)
+	categoryServices := make(map[RejectionCategory][]string)
+	for _, r := range rejections {
+		categoryCounts[r.Category]++
+		categoryServices[r.Category] = append(categoryServices[r.Category], r.ServiceName)
+	}
+
+	totalServices := len(rejections)
+
+	// Special case: all services rejected due to selector issues (evaluation error or no match)
+	selectorIssues := categoryCounts[RejectionSelector] + categoryCounts[RejectionSelectorError]
+	if selectorIssues == totalServices {
+		// If all are CEL errors, return specific condition
+		if categoryCounts[RejectionSelectorError] == totalServices {
+			// Extract first CEL error message for the condition
+			var celErrMsg string
+			for _, r := range rejections {
+				if r.Category == RejectionSelectorError {
+					celErrMsg = r.Message
+					break
+				}
+			}
+			return NewConditionError(broker.DeployedConditionSelectorEvaluationError,
+				"no services match app selector: %s", celErrMsg)
+		}
+		return NewConditionError(broker.DeployedConditionNoMatchingServiceReason,
+			"no services match app selector")
+	}
+
+	// Special case: all services rejected due to port pool exhaustion
+	if categoryCounts[RejectionPortPool] == totalServices {
+		return fmt.Errorf("all services have exhausted their port pools")
+	}
+
+	// Determine primary blocking issue based on priority
+	// Priority: AddressRef > AddressClash > Memory > PortPool > Other
+	var primaryMessage string
+
+	switch {
+	case categoryCounts[RejectionAddressRef] > 0:
+		primaryMessage = "addressRef dependency not satisfied"
+
+	case categoryCounts[RejectionAddressClash] > 0:
+		primaryMessage = "address clash with existing apps"
+
+	case categoryCounts[RejectionMemory] > 0:
+		memoryStr := "unknown"
+		if appMemoryRequest != nil && !appMemoryRequest.IsZero() {
+			memoryStr = appMemoryRequest.String()
+		}
+		primaryMessage = fmt.Sprintf("insufficient memory capacity (app requires %s)", memoryStr)
+
+	case categoryCounts[RejectionPortPool] > 0:
+		primaryMessage = "port pool exhausted"
+
+	default:
+		primaryMessage = "other compatibility issues"
+	}
+
+	// Build comprehensive error message with all rejection details grouped by category
+	var errMsg strings.Builder
+	errMsg.WriteString(fmt.Sprintf("no service available: %s\n", primaryMessage))
+
+	// Helper to format service list
+	formatServices := func(services []string) string {
+		if len(services) == 1 {
+			return services[0]
+		}
+		return fmt.Sprintf("[%s]", strings.Join(services, ", "))
+	}
+
+	// Add details for each rejection category (in priority order)
+	if len(categoryServices[RejectionAddressRef]) > 0 {
+		errMsg.WriteString(fmt.Sprintf("  - AddressRef issues: %s\n",
+			formatServices(categoryServices[RejectionAddressRef])))
+		// Include specific messages for addressRef failures
+		for _, r := range rejections {
+			if r.Category == RejectionAddressRef {
+				errMsg.WriteString(fmt.Sprintf("      %s: %s\n", r.ServiceName, r.Message))
+			}
+		}
+	}
+
+	if len(categoryServices[RejectionAddressClash]) > 0 {
+		errMsg.WriteString(fmt.Sprintf("  - Address clashes: %s\n",
+			formatServices(categoryServices[RejectionAddressClash])))
+		for _, r := range rejections {
+			if r.Category == RejectionAddressClash {
+				errMsg.WriteString(fmt.Sprintf("      %s: %s\n", r.ServiceName, r.Message))
+			}
+		}
+	}
+
+	if len(categoryServices[RejectionMemory]) > 0 {
+		errMsg.WriteString(fmt.Sprintf("  - Insufficient memory: %s\n",
+			formatServices(categoryServices[RejectionMemory])))
+	}
+
+	if len(categoryServices[RejectionPortPool]) > 0 {
+		errMsg.WriteString(fmt.Sprintf("  - Port pool exhausted: %s\n",
+			formatServices(categoryServices[RejectionPortPool])))
+	}
+
+	if len(categoryServices[RejectionSelector]) > 0 {
+		errMsg.WriteString(fmt.Sprintf("  - Selector mismatch: %s\n",
+			formatServices(categoryServices[RejectionSelector])))
+	}
+
+	if len(categoryServices[RejectionNotDeployed]) > 0 {
+		errMsg.WriteString(fmt.Sprintf("  - Not deployed: %s\n",
+			formatServices(categoryServices[RejectionNotDeployed])))
+	}
+
+	if len(categoryServices[RejectionOther]) > 0 {
+		errMsg.WriteString(fmt.Sprintf("  - Other issues: %s\n",
+			formatServices(categoryServices[RejectionOther])))
+		for _, r := range rejections {
+			if r.Category == RejectionOther {
+				errMsg.WriteString(fmt.Sprintf("      %s: %s\n", r.ServiceName, r.Message))
+			}
+		}
+	}
+
+	return fmt.Errorf("%s", strings.TrimSpace(errMsg.String()))
 }
 
 func (reconciler *BrokerAppInstanceReconciler) listOtherAppsForService(service *broker.BrokerService) ([]broker.BrokerApp, error) {
@@ -534,14 +782,187 @@ func (reconciler *BrokerAppInstanceReconciler) getAvailableMemory(service *broke
 	return available, nil
 }
 
+// checkAddressRefCapacity verifies that all cross-app addressRefs in this app's capabilities
+// can be satisfied on the given service (referenced apps exist and are provisioned on same service).
+// Returns an error with details if any addressRef cannot be satisfied.
+// checkAddressClashOnService checks if this app's direct addresses conflict with
+// apps already provisioned on the given service
+func (reconciler *BrokerAppInstanceReconciler) checkAddressClashOnService(service *broker.BrokerService) error {
+	myDirectAddresses := collectOwnedAddresses(reconciler.instance)
+
+	// If this app doesn't use any direct addresses, no clash possible
+	if len(myDirectAddresses) == 0 {
+		return nil
+	}
+
+	// Get apps already provisioned on this service
+	apps, listErr := reconciler.listOtherAppsForService(service)
+	if listErr != nil {
+		return fmt.Errorf("failed to list apps for clash detection: %v", listErr)
+	}
+
+	// Check each provisioned app for address conflicts
+	for _, otherApp := range apps {
+		otherAddresses := collectOwnedAddresses(&otherApp)
+
+		// Check for clashes
+		for myAddr := range myDirectAddresses {
+			if otherAddresses[myAddr] {
+				return fmt.Errorf("address '%s' already declared by %s/%s (use addressRef to share addresses)",
+					myAddr, otherApp.Namespace, otherApp.Name)
+			}
+		}
+	}
+
+	return nil
+}
+
+// checkAddressRefCapacity validates that cross-app addressRefs can be satisfied by the referenced apps.
+//
+// IMPORTANT: Only addresses explicitly declared in spec.sharedAddresses can be referenced by other apps.
+// Both spec.addresses and spec.sharedAddresses define owned addresses (lifecycle tied to the app),
+// but only sharedAddresses grant sharing permission.
+//
+// For example:
+//
+//	App A: addresses: ["orders"], capabilities.producerOf[{address: "orders"}]  -> PRIVATE
+//	App B: capabilities.consumerOf[{address: "orders", appNamespace: "ns", appName: "A"}] -> REJECTED
+//
+//	App A: sharedAddresses: ["orders"], capabilities.producerOf[{address: "orders"}] -> PUBLIC
+//	App B: capabilities.consumerOf[{address: "orders", appNamespace: "ns", appName: "A"}] -> ALLOWED
+func (reconciler *BrokerAppInstanceReconciler) checkAddressRefCapacity(service *broker.BrokerService) error {
+	ctx := context.Background()
+
+	for _, capability := range reconciler.instance.Spec.Capabilities {
+		allAddresses := [][]broker.AddressRef{
+			capability.ProducerOf,
+			capability.ConsumerOf,
+			capability.SubscriberOf,
+		}
+
+		for _, addrList := range allAddresses {
+			for _, addressRef := range addrList {
+				// Only check cross-app references (where appNamespace and appName are set)
+				if addressRef.AppNamespace == "" || addressRef.AppName == "" {
+					continue // local reference, no dependency check needed
+				}
+
+				// Look up the referenced app
+				referencedApp := &broker.BrokerApp{}
+				refKey := types.NamespacedName{
+					Namespace: addressRef.AppNamespace,
+					Name:      addressRef.AppName,
+				}
+				if getErr := reconciler.Client.Get(ctx, refKey, referencedApp); getErr != nil {
+					if errors.IsNotFound(getErr) {
+						return fmt.Errorf("referenced app %s/%s not found",
+							addressRef.AppNamespace, addressRef.AppName)
+					}
+					return fmt.Errorf("failed to lookup referenced app %s/%s: %v",
+						addressRef.AppNamespace, addressRef.AppName, getErr)
+				}
+
+				// Check if the referenced app is provisioned on this same service
+				if referencedApp.Status.Service == nil {
+					return fmt.Errorf("referenced app %s/%s not yet provisioned on any service",
+						addressRef.AppNamespace, addressRef.AppName)
+				}
+
+				refServiceKey := referencedApp.Status.Service.Key()
+				thisServiceKey := serviceKey(service)
+				if refServiceKey != thisServiceKey {
+					// Verify the referenced service still exists to provide better error message
+					refService := &broker.BrokerService{}
+					refServiceName := types.NamespacedName{
+						Namespace: referencedApp.Status.Service.Namespace,
+						Name:      referencedApp.Status.Service.Name,
+					}
+					if getErr := reconciler.Client.Get(ctx, refServiceName, refService); getErr != nil {
+						if errors.IsNotFound(getErr) {
+							return fmt.Errorf("referenced app %s/%s was provisioned on service %s which no longer exists",
+								addressRef.AppNamespace, addressRef.AppName, refServiceKey)
+						}
+						return fmt.Errorf("failed to lookup service %s for referenced app %s/%s: %v",
+							refServiceKey, addressRef.AppNamespace, addressRef.AppName, getErr)
+					}
+					return fmt.Errorf("referenced app %s/%s is provisioned on different service %s (this app would bind to: %s)",
+						addressRef.AppNamespace, addressRef.AppName, refServiceKey, thisServiceKey)
+				}
+
+				// Extract base address from FQQN if present
+				baseAddr := extractBaseAddress(addressRef.Address)
+
+				// Check if the referenced app declares this address in spec.sharedAddresses
+				addressShared := false
+				for _, sharedAddrType := range referencedApp.Spec.SharedAddresses {
+					if sharedAddrType.Address == baseAddr {
+						addressShared = true
+						break
+					}
+				}
+
+				if !addressShared {
+					return fmt.Errorf("referenced app %s/%s does not share address '%s' (add to spec.sharedAddresses)",
+						addressRef.AppNamespace, addressRef.AppName, baseAddr)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 func (reconciler *BrokerAppInstanceReconciler) verifyCapabilityAddressType() (err error) {
 
 	for _, capability := range reconciler.instance.Spec.Capabilities {
-		for index, address := range capability.SubscriberOf {
-			if !strings.Contains(address.Address, "::") {
-				err = fmt.Errorf("Spec.Capability.SubscriberOf[%d] address must specify a FQQN, %v", index, err)
+		// Validate all address refs in capabilities
+		allAddresses := []struct {
+			addresses []broker.AddressRef
+			capType   string
+		}{
+			{capability.ProducerOf, "ProducerOf"},
+			{capability.ConsumerOf, "ConsumerOf"},
+			{capability.SubscriberOf, "SubscriberOf"},
+		}
+
+		for _, addrGroup := range allAddresses {
+			for index, addressRef := range addrGroup.addresses {
+				// Address field is required
+				if addressRef.Address == "" {
+					err = fmt.Errorf("Spec.Capability.%s[%d].address must be specified", addrGroup.capType, index)
+					break
+				}
+
+				// Validate cross-app reference consistency
+				// Both appNamespace and appName must be set together, or both must be empty
+				hasNamespace := addressRef.AppNamespace != ""
+				hasAppName := addressRef.AppName != ""
+
+				if hasNamespace != hasAppName {
+					err = fmt.Errorf("Spec.Capability.%s[%d]: appNamespace and appName must both be set (for cross-app reference) or both empty (for local reference)", addrGroup.capType, index)
+					break
+				}
+
+				// SubscriberOf validation: must use FQQN format
+				if addrGroup.capType == "SubscriberOf" {
+					if !strings.Contains(addressRef.Address, FQQNSeparator) {
+						err = fmt.Errorf("Spec.Capability.SubscriberOf[%d].address must use FQQN format (address::queue)", index)
+						break
+					}
+					// Validate exactly one separator with non-empty parts
+					parts := strings.SplitN(addressRef.Address, FQQNSeparator, 3)
+					if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+						err = fmt.Errorf("Spec.Capability.SubscriberOf[%d].address must have valid FQQN format 'address::queue'", index)
+						break
+					}
+				}
+			}
+			if err != nil {
 				break
 			}
+		}
+		if err != nil {
+			break
 		}
 	}
 	if err != nil {
@@ -553,6 +974,37 @@ func (reconciler *BrokerAppInstanceReconciler) verifyCapabilityAddressType() (er
 		})
 	}
 	return err
+}
+
+// validateAddressesDisjoint ensures Addresses and SharedAddresses don't overlap.
+// An address cannot be both private (Addresses) and public (SharedAddresses).
+func (reconciler *BrokerAppInstanceReconciler) validateAddressesDisjoint() error {
+	if len(reconciler.instance.Spec.Addresses) == 0 || len(reconciler.instance.Spec.SharedAddresses) == 0 {
+		return nil // No overlap possible
+	}
+
+	// Build a set from Addresses
+	privateAddresses := make(map[string]bool)
+	for _, addr := range reconciler.instance.Spec.Addresses {
+		privateAddresses[addr.Address] = true
+	}
+
+	// Check for overlap with SharedAddresses
+	for _, sharedAddr := range reconciler.instance.Spec.SharedAddresses {
+		if privateAddresses[sharedAddr.Address] {
+			err := fmt.Errorf("address '%s' appears in both spec.addresses and spec.sharedAddresses (cannot be both private and public)",
+				sharedAddr.Address)
+			meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
+				Type:    broker.ValidConditionType,
+				Status:  metav1.ConditionFalse,
+				Reason:  broker.ValidConditionAddressTypeError,
+				Message: err.Error(),
+			})
+			return err
+		}
+	}
+
+	return nil
 }
 
 // isAppRejectedByService checks if this app appears in the service's RejectedApps list

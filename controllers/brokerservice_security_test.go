@@ -622,7 +622,7 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 		Spec: v1beta2.BrokerAppSpec{
 			Capabilities: []v1beta2.AppCapabilityType{
 				{
-					ConsumerOf: []v1beta2.AppAddressType{
+					ConsumerOf: []v1beta2.AddressRef{
 						{Address: "VALID.QUEUE.ONE"},
 						{Address: "VALID.QUEUE.TWO"},
 					},
@@ -656,7 +656,7 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 		Spec: v1beta2.BrokerAppSpec{
 			Capabilities: []v1beta2.AppCapabilityType{
 				{
-					ConsumerOf: []v1beta2.AppAddressType{
+					ConsumerOf: []v1beta2.AddressRef{
 						// SENSITIVE: These should NOT appear in Prometheus config
 						{Address: "ATTACKER.SECRET.QUEUE"},
 						{Address: "ATTACKER.RECON.QUEUE"},

@@ -176,8 +176,9 @@ func TestReconcileNoMatchingService(t *testing.T) {
 
 	// Reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err)
+	res, err := r.Reconcile(context.TODO(), req)
+	assert.NoError(t, err) // err is reflected in the status
+	assert.True(t, res.Requeue)
 
 	// Verify BrokerApp status
 	updatedApp := &v1beta2.BrokerApp{}
@@ -266,7 +267,9 @@ func TestReconcileValidConditionTransition(t *testing.T) {
 	// 1. Reconcile with non-matching selector
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err) // Expect error because no service found
+	res, err := r.Reconcile(context.TODO(), req)
+	assert.NoError(t, err) // err is reflected in the status
+	assert.True(t, res.Requeue)
 
 	// Verify Valid condition is True (selector syntax is valid)
 	updatedApp := &v1beta2.BrokerApp{}
@@ -409,7 +412,7 @@ func TestReconcileAddressTypeError(t *testing.T) {
 			},
 			Capabilities: []v1beta2.AppCapabilityType{
 				{
-					SubscriberOf: []v1beta2.AppAddressType{
+					SubscriberOf: []v1beta2.AddressRef{
 						{Address: "simple-address"}, // Missing "::"
 					},
 				},
@@ -442,7 +445,7 @@ func TestReconcileAddressTypeError(t *testing.T) {
 	assert.NotNil(t, validCondition)
 	assert.Equal(t, v1.ConditionFalse, validCondition.Status)
 	assert.Equal(t, v1beta2.ValidConditionAddressTypeError, validCondition.Reason)
-	assert.Contains(t, validCondition.Message, "must specify a FQQN")
+	assert.Contains(t, validCondition.Message, "FQQN")
 }
 
 func TestReconcileDeployedConditionFromBrokerServiceStatus(t *testing.T) {

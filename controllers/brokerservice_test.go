@@ -115,7 +115,7 @@ var _ = Describe("broker-service-poc", func() {
 
 	Context("round trip simple", func() {
 
-		It("non persistent", func() {
+		It("non persistent", Label("verySlow"), func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -274,12 +274,12 @@ var _ = Describe("broker-service-poc", func() {
 
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "APP.JOBS"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "APP.JOBS"}},
+							ProducerOf: []broker.AddressRef{{Address: "APP.JOBS"}},
+							ConsumerOf: []broker.AddressRef{{Address: "APP.JOBS"}},
 						},
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "APP.COMMANDS"}},
-							SubscriberOf: []broker.AppAddressType{
+							ProducerOf: []broker.AddressRef{{Address: "APP.COMMANDS"}},
+							SubscriberOf: []broker.AddressRef{
 
 								// jms consumer queue of the form <address>::<connection client id>.<subscription name>
 								{Address: `APP.COMMANDS::client-1.sub-1`},
@@ -549,7 +549,7 @@ var _ = Describe("broker-service-poc", func() {
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, appKey, createdApp)).Should(Succeed())
 				createdApp.Spec.Capabilities = append(createdApp.Spec.Capabilities, broker.AppCapabilityType{
-					ProducerOf: []broker.AppAddressType{
+					ProducerOf: []broker.AddressRef{
 						{
 							Address: "brian",
 						},
@@ -714,11 +714,11 @@ var _ = Describe("broker-service-poc", func() {
 
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ConsumerOf: []broker.AppAddressType{
+							ConsumerOf: []broker.AddressRef{
 								{Address: "METRICS.QUEUE.ONE"},
 								{Address: "METRICS.QUEUE.TWO"},
 							},
-							ProducerOf: []broker.AppAddressType{
+							ProducerOf: []broker.AddressRef{
 								{Address: "METRICS.QUEUE.ONE"},
 								{Address: "METRICS.QUEUE.TWO"},
 							},

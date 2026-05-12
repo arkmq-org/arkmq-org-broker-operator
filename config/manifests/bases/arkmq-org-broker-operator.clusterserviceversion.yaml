@@ -6337,12 +6337,23 @@ spec:
         name: ""
         version: v1
       specDescriptors:
+      - description: |-
+          Addresses with a lifecycle tied to this app, independent from addressRefs.
+          These are private addresses that cannot be referenced by other apps.
+        displayName: Addresses
+        path: addresses
       - displayName: Messaging Capabilities
         path: capabilities
       - displayName: Resources
         path: resources
       - displayName: ServiceSelector
         path: selector
+      - description: |-
+          SharedAddresses with a lifecycle tied to this app, independent from addressRefs.
+          These are public addresses that can be referenced by other apps
+          via appNamespace/appName in their capabilities addressRefs.
+        displayName: Shared Addresses
+        path: sharedAddresses
       statusDescriptors:
       - description: |-
           Current state of the resource
