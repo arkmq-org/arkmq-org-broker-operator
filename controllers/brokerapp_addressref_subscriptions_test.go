@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 )
 
 // TestProcessCapabilities_AddressRefSubscriptions_ANYCAST tests ANYCAST queue (nil subscriptions)

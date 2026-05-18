@@ -1,4 +1,4 @@
-module github.com/arkmq-org/arkmq-org-broker-operator
+module github.com/arkmq-org/arkmq-org-broker-operator/v2
 
 go 1.25.9
 

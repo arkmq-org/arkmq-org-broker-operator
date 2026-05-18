@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
+	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"

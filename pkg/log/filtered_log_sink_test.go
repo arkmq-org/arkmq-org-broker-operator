@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/stretchr/testify/assert"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"

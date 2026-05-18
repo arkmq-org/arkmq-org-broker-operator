@@ -17,7 +17,7 @@ package controllers
 import (
 	"testing"
 
-	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
+	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 )
 
 func TestAddressTracker_OwnershipDetection(t *testing.T) {

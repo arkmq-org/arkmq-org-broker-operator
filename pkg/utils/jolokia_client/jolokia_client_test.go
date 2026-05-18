@@ -10,8 +10,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	ss "github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/statefulsets"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/jolokia_client"
+	ss "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/statefulsets"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/jolokia_client"
 )
 
 var _ = Describe("JolokiaClient", func() {

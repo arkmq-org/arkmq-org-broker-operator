@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/jolokia"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/jolokia"
 	rtclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 

@@ -18,8 +18,8 @@ package controllers
 import (
 	"os"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/namer"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -30,7 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
+	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
 )
 
 var _ = Describe("reconcile block with annotation", func() {

@@ -21,7 +21,7 @@ package externalversions
 import (
 	"fmt"
 
-	v2alpha1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha1"
+	v2alpha1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha1"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	cache "k8s.io/client-go/tools/cache"
 )

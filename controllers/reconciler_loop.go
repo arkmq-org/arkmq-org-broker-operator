@@ -23,8 +23,8 @@ import (
 	"github.com/RHsyseng/operator-utils/pkg/resource/compare"
 	"github.com/RHsyseng/operator-utils/pkg/resource/read"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"

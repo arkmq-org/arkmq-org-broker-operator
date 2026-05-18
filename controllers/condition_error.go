@@ -19,8 +19,8 @@ package controllers
 import (
 	"fmt"
 
-	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
+	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
 // ValidationError represents a spec validation error.

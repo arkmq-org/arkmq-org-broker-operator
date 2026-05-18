@@ -4,7 +4,7 @@ FROM registry.access.redhat.com/ubi9/go-toolset:1.25.9 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
-ENV GO_MODULE=github.com/arkmq-org/arkmq-org-broker-operator
+ENV GO_MODULE=github.com/arkmq-org/arkmq-org-broker-operator/v2
 
 ### BEGIN REMOTE SOURCE
 # Use the COPY instruction only inside the REMOTE SOURCE block

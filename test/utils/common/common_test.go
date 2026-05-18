@@ -3,7 +3,7 @@ package common_test
 import (
 	"testing"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 

@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	rtclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 

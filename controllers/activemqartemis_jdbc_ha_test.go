@@ -33,10 +33,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/configmaps"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
-	"github.com/arkmq-org/arkmq-org-broker-operator/version"
+	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/configmaps"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 )
 
 var _ = Describe("jdbc fast failover", func() {

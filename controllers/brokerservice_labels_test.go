@@ -20,8 +20,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"

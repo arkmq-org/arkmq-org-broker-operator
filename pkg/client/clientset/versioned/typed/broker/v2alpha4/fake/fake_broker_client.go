@@ -17,7 +17,7 @@ limitations under the License.
 package fake
 
 import (
-	v2alpha4 "github.com/arkmq-org/arkmq-org-broker-operator/pkg/client/clientset/versioned/typed/broker/v2alpha4"
+	v2alpha4 "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/client/clientset/versioned/typed/broker/v2alpha4"
 	rest "k8s.io/client-go/rest"
 	testing "k8s.io/client-go/testing"
 )

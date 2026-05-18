@@ -26,7 +26,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
 
-	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
+	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"

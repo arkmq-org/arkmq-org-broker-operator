@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
+	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 

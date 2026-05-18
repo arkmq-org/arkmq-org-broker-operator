@@ -35,10 +35,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/secrets"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
-	"github.com/arkmq-org/arkmq-org-broker-operator/version"
+	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 )
 
 var _ = Describe("broker-service multi-app scenarios", func() {

@@ -31,8 +31,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
+	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
 var _ = Describe("broker-service address post-binding validation", func() {

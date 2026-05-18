@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	corev1 "k8s.io/api/core/v1"
 )
 

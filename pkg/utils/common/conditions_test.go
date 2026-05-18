@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
+	. "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 

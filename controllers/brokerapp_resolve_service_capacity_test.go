@@ -17,7 +17,7 @@ package controllers
 import (
 	"testing"
 
-	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
+	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

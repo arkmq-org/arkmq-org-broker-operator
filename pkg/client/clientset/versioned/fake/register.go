@@ -17,12 +17,12 @@ limitations under the License.
 package fake
 
 import (
-	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
-	brokerv2alpha1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha1"
-	brokerv2alpha2 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha2"
-	brokerv2alpha3 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha3"
-	brokerv2alpha4 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha4"
-	brokerv2alpha5 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha5"
+	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
+	brokerv2alpha1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha1"
+	brokerv2alpha2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha2"
+	brokerv2alpha3 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha3"
+	brokerv2alpha4 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha4"
+	brokerv2alpha5 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha5"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"

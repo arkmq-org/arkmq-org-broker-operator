@@ -1,7 +1,7 @@
 package appselector
 
 import (
-	"github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"

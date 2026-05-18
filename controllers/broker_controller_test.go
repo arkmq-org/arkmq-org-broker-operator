@@ -23,7 +23,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/namer"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
 )
 
 var _ = Describe("broker controller", func() {

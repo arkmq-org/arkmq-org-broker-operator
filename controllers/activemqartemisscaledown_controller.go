@@ -21,8 +21,8 @@ import (
 	"os"
 	"time"
 
-	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/draincontroller"
+	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/draincontroller"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"

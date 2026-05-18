@@ -24,7 +24,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/version"
 	"github.com/go-logr/logr"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -52,20 +51,21 @@ import (
 
 	routev1 "github.com/openshift/api/route/v1"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/log"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/sdkk8sutil"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/log"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/sdkk8sutil"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 
-	brokerv1alpha1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1alpha1"
-	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
-	brokerv1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
-	brokerv2alpha1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha1"
-	brokerv2alpha2 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha2"
-	brokerv2alpha3 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha3"
-	brokerv2alpha4 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha4"
-	brokerv2alpha5 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha5"
-	"github.com/arkmq-org/arkmq-org-broker-operator/controllers"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/appselector"
+	brokerv1alpha1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1alpha1"
+	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
+	brokerv1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	brokerv2alpha1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha1"
+	brokerv2alpha2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha2"
+	brokerv2alpha3 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha3"
+	brokerv2alpha4 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha4"
+	brokerv2alpha5 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha5"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/controllers"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/appselector"
 	//+kubebuilder:scaffold:imports
 )
 

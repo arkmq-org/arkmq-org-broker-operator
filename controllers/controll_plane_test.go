@@ -38,8 +38,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
+	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
 var _ = Describe("minimal", func() {

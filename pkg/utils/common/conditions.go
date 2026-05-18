@@ -14,7 +14,7 @@ limitations under the License.
 package common
 
 import (
-	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
+	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

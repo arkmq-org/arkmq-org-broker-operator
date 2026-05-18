@@ -1,8 +1,8 @@
 package secrets
 
 import (
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/namer"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

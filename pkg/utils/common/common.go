@@ -20,12 +20,12 @@ import (
 
 	"github.com/RHsyseng/operator-utils/pkg/olm"
 	"github.com/RHsyseng/operator-utils/pkg/resource/read"
-	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/channels"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/namer"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/selectors"
-	"github.com/arkmq-org/arkmq-org-broker-operator/version"
+	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/channels"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 	"github.com/blang/semver/v4"
 
 	routev1 "github.com/openshift/api/route/v1"

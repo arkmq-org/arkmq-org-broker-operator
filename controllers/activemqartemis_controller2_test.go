@@ -23,9 +23,9 @@ import (
 	"reflect"
 	"strconv"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/volumes"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/namer"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/volumes"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -37,7 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 
-	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
+	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
 	routev1 "github.com/openshift/api/route/v1"
 )
 

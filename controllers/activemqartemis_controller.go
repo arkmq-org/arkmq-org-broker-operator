@@ -37,12 +37,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
 	"github.com/go-logr/logr"
 	routev1 "github.com/openshift/api/route/v1"
 
-	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
+	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
 var namespaceToConfigHandler = make(map[types.NamespacedName]common.ActiveMQArtemisConfigHandler)

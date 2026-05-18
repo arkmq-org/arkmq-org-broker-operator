@@ -19,9 +19,9 @@ import (
 	"os"
 	"strconv"
 
-	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/namer"
+	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"

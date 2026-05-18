@@ -17,7 +17,7 @@ limitations under the License.
 package v2alpha4
 
 import (
-	v2alpha4 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha4"
+	v2alpha4 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha4"
 	rest "k8s.io/client-go/rest"
 )
 

@@ -19,8 +19,8 @@ package v2alpha4
 import (
 	"context"
 
-	v2alpha4 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha4"
-	scheme "github.com/arkmq-org/arkmq-org-broker-operator/pkg/client/clientset/versioned/scheme"
+	v2alpha4 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha4"
+	scheme "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/client/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"

@@ -17,7 +17,7 @@ limitations under the License.
 package fake
 
 import (
-	v2alpha5 "github.com/arkmq-org/arkmq-org-broker-operator/api/v2alpha5"
+	v2alpha5 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v2alpha5"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
