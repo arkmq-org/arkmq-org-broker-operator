@@ -1,8 +1,8 @@
 package persistentvolumeclaims
 
 import (
-	"github.com/arkmq-org/activemq-artemis-operator/api/v1beta1"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/common"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/api/v1beta1"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/common"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

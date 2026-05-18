@@ -3,7 +3,7 @@ package lsrcrs
 import (
 	"time"
 
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/resources/secrets"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources/secrets"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"

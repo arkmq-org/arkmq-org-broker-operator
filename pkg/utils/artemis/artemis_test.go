@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/jolokia"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/jolokia"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 )

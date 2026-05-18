@@ -19,8 +19,8 @@ limitations under the License.
 package broker
 
 import (
-	v2alpha1 "github.com/arkmq-org/activemq-artemis-operator/pkg/client/informers/externalversions/broker/v2alpha1"
-	internalinterfaces "github.com/arkmq-org/activemq-artemis-operator/pkg/client/informers/externalversions/internalinterfaces"
+	v2alpha1 "github.com/arkmq-org/activemq-artemis-operator/v2/pkg/client/informers/externalversions/broker/v2alpha1"
+	internalinterfaces "github.com/arkmq-org/activemq-artemis-operator/v2/pkg/client/informers/externalversions/internalinterfaces"
 )
 
 // Interface provides access to each of this group's versions.

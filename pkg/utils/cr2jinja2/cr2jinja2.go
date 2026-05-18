@@ -3,10 +3,10 @@ package cr2jinja2
 import (
 	"hash/fnv"
 
-	"github.com/arkmq-org/activemq-artemis-operator/api/v1beta1"
-	"github.com/arkmq-org/activemq-artemis-operator/api/v2alpha3"
-	"github.com/arkmq-org/activemq-artemis-operator/api/v2alpha4"
-	"github.com/arkmq-org/activemq-artemis-operator/api/v2alpha5"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/api/v1beta1"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/api/v2alpha3"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/api/v2alpha4"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/api/v2alpha5"
 
 	//k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 	"fmt"

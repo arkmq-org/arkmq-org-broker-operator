@@ -23,9 +23,9 @@ import (
 	sync "sync"
 	time "time"
 
-	versioned "github.com/arkmq-org/activemq-artemis-operator/pkg/client/clientset/versioned"
-	broker "github.com/arkmq-org/activemq-artemis-operator/pkg/client/informers/externalversions/broker"
-	internalinterfaces "github.com/arkmq-org/activemq-artemis-operator/pkg/client/informers/externalversions/internalinterfaces"
+	versioned "github.com/arkmq-org/activemq-artemis-operator/v2/pkg/client/clientset/versioned"
+	broker "github.com/arkmq-org/activemq-artemis-operator/v2/pkg/client/informers/externalversions/broker"
+	internalinterfaces "github.com/arkmq-org/activemq-artemis-operator/v2/pkg/client/informers/externalversions/internalinterfaces"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
