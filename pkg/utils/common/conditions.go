@@ -14,7 +14,7 @@ limitations under the License.
 package common
 
 import (
-	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/api/v1beta1"
+	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v1beta1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

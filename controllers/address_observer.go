@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	ss "github.com/arkmq-org/activemq-artemis-operator/pkg/resources/statefulsets"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/namer"
+	ss "github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources/statefulsets"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/namer"
 	"github.com/go-logr/logr"
 
-	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/api/v1beta1"
+	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v1beta1"
 
-	jc "github.com/arkmq-org/activemq-artemis-operator/pkg/utils/jolokia_client"
+	jc "github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/jolokia_client"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

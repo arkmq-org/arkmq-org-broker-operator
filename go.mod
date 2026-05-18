@@ -1,4 +1,4 @@
-module github.com/arkmq-org/activemq-artemis-operator
+module github.com/arkmq-org/activemq-artemis-operator/v2
 
 go 1.25.9
 

@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arkmq-org/activemq-artemis-operator/version"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/version"
 	"github.com/go-logr/logr"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -51,18 +51,18 @@ import (
 
 	routev1 "github.com/openshift/api/route/v1"
 
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/log"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/sdkk8sutil"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/common"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/log"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/sdkk8sutil"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/common"
 
-	brokerv1alpha1 "github.com/arkmq-org/activemq-artemis-operator/api/v1alpha1"
-	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/api/v1beta1"
-	brokerv2alpha1 "github.com/arkmq-org/activemq-artemis-operator/api/v2alpha1"
-	brokerv2alpha2 "github.com/arkmq-org/activemq-artemis-operator/api/v2alpha2"
-	brokerv2alpha3 "github.com/arkmq-org/activemq-artemis-operator/api/v2alpha3"
-	brokerv2alpha4 "github.com/arkmq-org/activemq-artemis-operator/api/v2alpha4"
-	brokerv2alpha5 "github.com/arkmq-org/activemq-artemis-operator/api/v2alpha5"
-	"github.com/arkmq-org/activemq-artemis-operator/controllers"
+	brokerv1alpha1 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v1alpha1"
+	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v1beta1"
+	brokerv2alpha1 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v2alpha1"
+	brokerv2alpha2 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v2alpha2"
+	brokerv2alpha3 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v2alpha3"
+	brokerv2alpha4 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v2alpha4"
+	brokerv2alpha5 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v2alpha5"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/controllers"
 	//+kubebuilder:scaffold:imports
 )
 

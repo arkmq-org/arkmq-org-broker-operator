@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/api/v1beta1"
+	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v1beta1"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -29,10 +29,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	artemis_client "github.com/arkmq-org/activemq-artemis-operator/pkg/utils/artemis"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/jolokia"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/jolokia_client"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/selectors"
+	artemis_client "github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/artemis"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/jolokia"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/jolokia_client"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/selectors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"

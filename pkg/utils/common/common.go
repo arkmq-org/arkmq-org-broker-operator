@@ -20,12 +20,12 @@ import (
 
 	"github.com/RHsyseng/operator-utils/pkg/olm"
 	"github.com/RHsyseng/operator-utils/pkg/resource/read"
-	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/api/v1beta1"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/resources"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/channels"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/namer"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/selectors"
-	"github.com/arkmq-org/activemq-artemis-operator/version"
+	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v1beta1"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/channels"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/namer"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/selectors"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/version"
 	"github.com/blang/semver/v4"
 
 	routev1 "github.com/openshift/api/route/v1"

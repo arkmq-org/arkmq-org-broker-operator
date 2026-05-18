@@ -20,11 +20,11 @@ import (
 	"context"
 	"reflect"
 
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/common"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/common"
 
 	"github.com/RHsyseng/operator-utils/pkg/resource/read"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/resources/pods"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/namer"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources/pods"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/namer"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"

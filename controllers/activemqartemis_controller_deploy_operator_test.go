@@ -28,10 +28,10 @@ import (
 
 	"bufio"
 
-	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/api/v1beta1"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/common"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/namer"
-	"github.com/arkmq-org/activemq-artemis-operator/version"
+	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v1beta1"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/namer"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/version"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"

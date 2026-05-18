@@ -19,7 +19,7 @@ limitations under the License.
 package v2alpha1
 
 import (
-	internalinterfaces "github.com/arkmq-org/activemq-artemis-operator/pkg/client/informers/externalversions/internalinterfaces"
+	internalinterfaces "github.com/arkmq-org/activemq-artemis-operator/v2/pkg/client/informers/externalversions/internalinterfaces"
 )
 
 // Interface provides access to all the informers in this group version.

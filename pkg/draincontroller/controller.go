@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/api/v1beta1"
+	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v1beta1"
 	"github.com/go-logr/logr"
 
 	"os"
@@ -48,9 +48,9 @@ import (
 	"strconv"
 	"strings"
 
-	rbacutil "github.com/arkmq-org/activemq-artemis-operator/pkg/rbac"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/namer"
-	"github.com/arkmq-org/activemq-artemis-operator/pkg/utils/selectors"
+	rbacutil "github.com/arkmq-org/activemq-artemis-operator/v2/pkg/rbac"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/namer"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/selectors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 
