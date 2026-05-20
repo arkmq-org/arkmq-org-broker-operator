@@ -338,8 +338,8 @@ func TestProcessCapabilities_SubsWithSubscriberCapability(t *testing.T) {
 	reconciler := &BrokerServiceInstanceReconciler{}
 	secret := &corev1.Secret{Data: make(map[string][]byte)}
 
-	// Address with subs + SubscriberOf should create both declared queues AND
-	// queues from FQQN in SubscriberOf
+	// Address with subs + Subscriptions should create both declared queues AND
+	// queues from subscription capability
 	app := &broker.BrokerApp{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "subscriber-with-queues",
@@ -354,8 +354,11 @@ func TestProcessCapabilities_SubsWithSubscriberCapability(t *testing.T) {
 			},
 			Capabilities: []broker.AppCapabilityType{
 				{
-					SubscriberOf: []broker.AddressRef{
-						{Address: "notifications::push"}, // FQQN format
+					ConsumerOf: []broker.AddressRef{
+						{
+							Address:       "notifications",
+							Subscriptions: &[]string{"push"},
+						},
 					},
 				},
 			},

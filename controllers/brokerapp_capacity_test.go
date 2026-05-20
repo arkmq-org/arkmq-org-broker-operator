@@ -352,6 +352,215 @@ func TestFindServiceWithCapacity(t *testing.T) {
 			expectError:           true,
 			expectedErrorContains: "address clash",
 		},
+
+		{
+			name: "app with address ref type match",
+			app: &brokerv1beta2.BrokerApp{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "new-app",
+					Namespace: "test",
+				},
+				Spec: brokerv1beta2.BrokerAppSpec{
+					Capabilities: []brokerv1beta2.AppCapabilityType{
+						{
+							ProducerOf: []brokerv1beta2.AddressRef{
+								{
+									Address:      "shared-queue",
+									AppNamespace: "test",
+									AppName:      "existing-app"},
+							},
+						},
+					},
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+				},
+			},
+			services: []brokerv1beta2.BrokerService{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
+					Spec: brokerv1beta2.BrokerServiceSpec{
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								corev1.ResourceMemory: resource.MustParse("2Gi"),
+							},
+						},
+					},
+				},
+			},
+			existingApps: []brokerv1beta2.BrokerApp{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "existing-app",
+						Namespace: "test",
+					},
+					Spec: brokerv1beta2.BrokerAppSpec{
+						SharedAddresses: []brokerv1beta2.AddressType{{Address: "shared-queue"}},
+						Capabilities: []brokerv1beta2.AppCapabilityType{
+							{
+								ConsumerOf: []brokerv1beta2.AddressRef{
+									{Address: "shared-queue"},
+								},
+							},
+						},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceMemory: resource.MustParse("512Mi"),
+							},
+						},
+					},
+					Status: brokerv1beta2.BrokerAppStatus{
+						Service: &brokerv1beta2.BrokerServiceBindingStatus{
+							Name:      "service1",
+							Namespace: "test",
+							Secret:    "binding-secret",
+						},
+					},
+				},
+			},
+			expectedServiceName:   "service1",
+			expectError:           false,
+			expectedErrorContains: "",
+		},
+
+		{
+			name: "app with ref type mis match",
+			app: &brokerv1beta2.BrokerApp{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "new-app",
+					Namespace: "test",
+				},
+				Spec: brokerv1beta2.BrokerAppSpec{
+					Capabilities: []brokerv1beta2.AppCapabilityType{
+						{
+							ProducerOf: []brokerv1beta2.AddressRef{
+								{
+									Address:      "shared",
+									AppNamespace: "test",
+									AppName:      "existing-app"},
+							},
+						},
+					},
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+				},
+			},
+			services: []brokerv1beta2.BrokerService{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
+					Spec: brokerv1beta2.BrokerServiceSpec{
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								corev1.ResourceMemory: resource.MustParse("2Gi"),
+							},
+						},
+					},
+				},
+			},
+			existingApps: []brokerv1beta2.BrokerApp{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "existing-app",
+						Namespace: "test",
+					},
+					Spec: brokerv1beta2.BrokerAppSpec{
+						SharedAddresses: []brokerv1beta2.AddressType{{Address: "shared", Subscriptions: &[]string{}}},
+						Capabilities: []brokerv1beta2.AppCapabilityType{
+							{
+								ConsumerOf: []brokerv1beta2.AddressRef{
+									{Address: "shared", Subscriptions: &[]string{"sub1"}},
+								},
+							},
+						},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceMemory: resource.MustParse("512Mi"),
+							},
+						},
+					},
+					Status: brokerv1beta2.BrokerAppStatus{
+						Service: &brokerv1beta2.BrokerServiceBindingStatus{
+							Name:      "service1",
+							Namespace: "test",
+							Secret:    "binding-secret",
+						},
+					},
+				},
+			},
+			expectedServiceName:   "",
+			expectError:           true,
+			expectedErrorContains: "addressRef",
+		},
+		{
+			name: "app producer to shared with ref semantic mis match",
+			app: &brokerv1beta2.BrokerApp{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "new-app",
+					Namespace: "test",
+				},
+				Spec: brokerv1beta2.BrokerAppSpec{
+					Capabilities: []brokerv1beta2.AppCapabilityType{
+						{
+							ProducerOf: []brokerv1beta2.AddressRef{
+								{
+									Address:       "shared",
+									Subscriptions: &[]string{}, // subscription semantics
+									AppNamespace:  "test",
+									AppName:       "existing-app"},
+							},
+						},
+					},
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+				},
+			},
+			services: []brokerv1beta2.BrokerService{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
+					Spec: brokerv1beta2.BrokerServiceSpec{
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								corev1.ResourceMemory: resource.MustParse("2Gi"),
+							},
+						},
+					},
+				},
+			},
+			existingApps: []brokerv1beta2.BrokerApp{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "existing-app",
+						Namespace: "test",
+					},
+					Spec: brokerv1beta2.BrokerAppSpec{
+						SharedAddresses: []brokerv1beta2.AddressType{{Address: "shared"}},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceMemory: resource.MustParse("512Mi"),
+							},
+						},
+					},
+					Status: brokerv1beta2.BrokerAppStatus{
+						Service: &brokerv1beta2.BrokerServiceBindingStatus{
+							Name:      "service1",
+							Namespace: "test",
+							Secret:    "binding-secret",
+						},
+					},
+				},
+			},
+			expectedServiceName:   "",
+			expectError:           true,
+			expectedErrorContains: "addressRef",
+		},
 	}
 
 	for _, tt := range tests {

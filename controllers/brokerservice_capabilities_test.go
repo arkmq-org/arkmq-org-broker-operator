@@ -331,11 +331,12 @@ func TestProcessCapabilities_QueueConfigsForSingleSubscriber(t *testing.T) {
 		Spec: broker.BrokerAppSpec{
 			Capabilities: []broker.AppCapabilityType{
 				{
-					SubscriberOf: []broker.AddressRef{
+					ConsumerOf: []broker.AddressRef{
 						{
-							Address:      "events::joe",
-							AppNamespace: "other",
-							AppName:      "producer",
+							Address:       "events",
+							Subscriptions: &[]string{"joe"},
+							AppNamespace:  "other",
+							AppName:       "producer",
 						},
 					},
 				},

@@ -400,7 +400,7 @@ func TestReconcileAddressTypeError(t *testing.T) {
 	ns := "default"
 	appName := "my-app"
 
-	// Create BrokerApp with invalid subscriber address (simple address instead of FQQN)
+	// Create BrokerApp with invalid subscription (using FQQN format when it should be split)
 	app := &v1beta2.BrokerApp{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      appName,
@@ -412,8 +412,11 @@ func TestReconcileAddressTypeError(t *testing.T) {
 			},
 			Capabilities: []v1beta2.AppCapabilityType{
 				{
-					SubscriberOf: []v1beta2.AddressRef{
-						{Address: "simple-address"}, // Missing "::"
+					ConsumerOf: []v1beta2.AddressRef{
+						{
+							Address:       "events::queue", // Invalid: using FQQN (though less relevant now)
+							Subscriptions: &[]string{"sub1"},
+						},
 					},
 				},
 			},
@@ -836,4 +839,377 @@ func TestReconcileMatchedServiceNotFound(t *testing.T) {
 	assert.NotNil(t, deployedCondition)
 	assert.Equal(t, v1.ConditionFalse, deployedCondition.Status)
 	assert.Equal(t, v1beta2.DeployedConditionMatchedServiceNotFoundReason, deployedCondition.Reason)
+}
+
+func TestRoutingTypeConflictValidation(t *testing.T) {
+	// Setup scheme
+	scheme := runtime.NewScheme()
+	_ = v1beta2.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	ns := "default"
+	svcName := "my-broker-service"
+
+	namespace := &corev1.Namespace{
+		ObjectMeta: v1.ObjectMeta{
+			Name: ns,
+		},
+	}
+
+	svc := &v1beta2.BrokerService{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      svcName,
+			Namespace: ns,
+			Labels: map[string]string{
+				"type": "messaging",
+			},
+		},
+		Spec: v1beta2.BrokerServiceSpec{},
+		Status: v1beta2.BrokerServiceStatus{
+			Conditions: []v1.Condition{
+				{
+					Type:   v1beta2.DeployedConditionType,
+					Status: v1.ConditionTrue,
+				},
+			},
+		},
+	}
+
+	// Test Case 1: ConsumerOf→Subscriptions conflict
+	// Owner app uses Subscriptions (MULTICAST), consumer app tries ConsumerOf (ANYCAST)
+	t.Run("ConsumerOf references MULTICAST address", func(t *testing.T) {
+		ownerApp := &v1beta2.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "owner-app",
+				Namespace: ns,
+			},
+			Spec: v1beta2.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{
+						"type": "messaging",
+					},
+				},
+				SharedAddresses: []v1beta2.AddressType{
+					{Address: "events", Subscriptions: &[]string{}},
+				},
+				Capabilities: []v1beta2.AppCapabilityType{
+					{
+						ConsumerOf: []v1beta2.AddressRef{
+							{
+								Address:       "events",
+								Subscriptions: &[]string{"sub1"},
+							},
+						},
+					},
+				},
+			},
+			Status: v1beta2.BrokerAppStatus{
+				Service: &v1beta2.BrokerServiceBindingStatus{
+					Name:      svcName,
+					Namespace: ns,
+				},
+			},
+		}
+
+		consumerApp := &v1beta2.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "consumer-app",
+				Namespace: ns,
+			},
+			Spec: v1beta2.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{
+						"type": "messaging",
+					},
+				},
+				Capabilities: []v1beta2.AppCapabilityType{
+					{
+						ConsumerOf: []v1beta2.AddressRef{
+							{
+								Address:      "events",
+								AppNamespace: ns,
+								AppName:      "owner-app",
+							},
+						},
+					},
+				},
+			},
+		}
+
+		cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(namespace, svc, ownerApp, consumerApp).
+			WithStatusSubresource(ownerApp, consumerApp, svc)).
+			Build()
+
+		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+
+		// Reconcile consumer app - should fail to find matching service due to routing conflict
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "consumer-app", Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
+		assert.NoError(t, err) // Reconcile succeeds but sets condition
+
+		// Check that Deployed condition is False (no matching service due to AddressRef conflict)
+		updatedApp := &v1beta2.BrokerApp{}
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+		assert.NoError(t, err)
+
+		deployedCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
+		assert.NotNil(t, deployedCondition)
+		assert.Equal(t, v1.ConditionFalse, deployedCondition.Status)
+		// The error message should mention the routing conflict
+		assert.Contains(t, deployedCondition.Message, "events")
+		assert.Contains(t, deployedCondition.Message, "addressRef")
+		assert.Contains(t, deployedCondition.Message, "semantic")
+	})
+
+	// Test Case 2: Subscriptions→ConsumerOf conflict
+	// Owner app uses ConsumerOf (ANYCAST), subscriber app tries Subscriptions (MULTICAST)
+	t.Run("Subscriptions references ANYCAST address", func(t *testing.T) {
+		ownerApp := &v1beta2.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "owner-app-2",
+				Namespace: ns,
+			},
+			Spec: v1beta2.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{
+						"type": "messaging",
+					},
+				},
+				SharedAddresses: []v1beta2.AddressType{
+					{Address: "commands"},
+				},
+				Capabilities: []v1beta2.AppCapabilityType{
+					{
+						ConsumerOf: []v1beta2.AddressRef{
+							{Address: "commands"},
+						},
+					},
+				},
+			},
+			Status: v1beta2.BrokerAppStatus{
+				Service: &v1beta2.BrokerServiceBindingStatus{
+					Name:      svcName,
+					Namespace: ns,
+				},
+			},
+		}
+
+		subscriberApp := &v1beta2.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "subscriber-app",
+				Namespace: ns,
+			},
+			Spec: v1beta2.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{
+						"type": "messaging",
+					},
+				},
+				Capabilities: []v1beta2.AppCapabilityType{
+					{
+						ConsumerOf: []v1beta2.AddressRef{
+							{
+								Address:       "commands",
+								AppNamespace:  ns,
+								AppName:       "owner-app-2",
+								Subscriptions: &[]string{"sub1"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(namespace, svc, ownerApp, subscriberApp).
+			WithStatusSubresource(ownerApp, subscriberApp, svc)).
+			Build()
+
+		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+
+		// Reconcile subscriber app - should fail to find matching service due to routing conflict
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "subscriber-app", Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
+		assert.NoError(t, err) // Reconcile succeeds but sets condition
+
+		// Check that Deployed condition is False (no matching service due to AddressRef conflict)
+		updatedApp := &v1beta2.BrokerApp{}
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+		assert.NoError(t, err)
+
+		deployedCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
+		assert.NotNil(t, deployedCondition)
+		assert.Equal(t, v1.ConditionFalse, deployedCondition.Status)
+		// The error message should mention the routing conflict
+		assert.Contains(t, deployedCondition.Message, "commands")
+		assert.Contains(t, deployedCondition.Message, "addressRef")
+		assert.Contains(t, deployedCondition.Message, "semantics")
+	})
+
+	// Test Case 3: Compatible usage - both use Subscriptions (MULTICAST)
+	t.Run("Compatible MULTICAST sharing", func(t *testing.T) {
+		ownerApp := &v1beta2.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "owner-app-3",
+				Namespace: ns,
+			},
+			Spec: v1beta2.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{
+						"type": "messaging",
+					},
+				},
+				SharedAddresses: []v1beta2.AddressType{
+					{Address: "topic"},
+				},
+				Capabilities: []v1beta2.AppCapabilityType{
+					{
+						ConsumerOf: []v1beta2.AddressRef{
+							{
+								Address:       "topic",
+								Subscriptions: &[]string{"sub1"},
+							},
+						},
+					},
+				},
+			},
+			Status: v1beta2.BrokerAppStatus{
+				Service: &v1beta2.BrokerServiceBindingStatus{
+					Name:      svcName,
+					Namespace: ns,
+				},
+			},
+		}
+
+		subscriberApp := &v1beta2.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "subscriber-app-2",
+				Namespace: ns,
+			},
+			Spec: v1beta2.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{
+						"type": "messaging",
+					},
+				},
+				Capabilities: []v1beta2.AppCapabilityType{
+					{
+						ConsumerOf: []v1beta2.AddressRef{
+							{
+								Address:       "topic",
+								AppNamespace:  ns,
+								AppName:       "owner-app-3",
+								Subscriptions: &[]string{"sub2"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(namespace, svc, ownerApp, subscriberApp).
+			WithStatusSubresource(ownerApp, subscriberApp, svc)).
+			Build()
+
+		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+
+		// Reconcile subscriber app - should succeed (both MULTICAST)
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "subscriber-app-2", Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
+		assert.NoError(t, err)
+
+		// Check that Valid condition is True
+		updatedApp := &v1beta2.BrokerApp{}
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+		assert.NoError(t, err)
+
+		validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.ValidConditionType)
+		assert.NotNil(t, validCondition)
+		assert.Equal(t, v1.ConditionTrue, validCondition.Status)
+	})
+
+	// Test Case 4: Compatible usage - both use ConsumerOf (ANYCAST)
+	t.Run("Compatible ANYCAST sharing", func(t *testing.T) {
+		ownerApp := &v1beta2.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "owner-app-4",
+				Namespace: ns,
+			},
+			Spec: v1beta2.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{
+						"type": "messaging",
+					},
+				},
+				SharedAddresses: []v1beta2.AddressType{
+					{Address: "queue"},
+				},
+				Capabilities: []v1beta2.AppCapabilityType{
+					{
+						ConsumerOf: []v1beta2.AddressRef{
+							{Address: "queue"},
+						},
+					},
+				},
+			},
+			Status: v1beta2.BrokerAppStatus{
+				Service: &v1beta2.BrokerServiceBindingStatus{
+					Name:      svcName,
+					Namespace: ns,
+				},
+			},
+		}
+
+		consumerApp := &v1beta2.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "consumer-app-2",
+				Namespace: ns,
+			},
+			Spec: v1beta2.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{
+						"type": "messaging",
+					},
+				},
+				Capabilities: []v1beta2.AppCapabilityType{
+					{
+						ConsumerOf: []v1beta2.AddressRef{
+							{
+								Address:      "queue",
+								AppNamespace: ns,
+								AppName:      "owner-app-4",
+							},
+						},
+					},
+				},
+			},
+		}
+
+		cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(namespace, svc, ownerApp, consumerApp).
+			WithStatusSubresource(ownerApp, consumerApp, svc)).
+			Build()
+
+		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+
+		// Reconcile consumer app - should succeed (both ANYCAST)
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "consumer-app-2", Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
+		assert.NoError(t, err)
+
+		// Check that Valid condition is True
+		updatedApp := &v1beta2.BrokerApp{}
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+		assert.NoError(t, err)
+
+		validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.ValidConditionType)
+		assert.NotNil(t, validCondition)
+		assert.Equal(t, v1.ConditionTrue, validCondition.Status)
+	})
 }

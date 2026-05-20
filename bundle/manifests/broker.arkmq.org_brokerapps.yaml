@@ -51,8 +51,8 @@ spec:
                         a broker service)
                       type: string
                     subscriptions:
-                      description: identities of subscription queues on a multicast
-                        address
+                      description: Subscriptions declares pub/sub semantics and subscriber
+                        queue names for an address
                       items:
                         type: string
                       type: array
@@ -68,9 +68,7 @@ spec:
                         description: AddressRef references an address for use in capabilities
                         properties:
                           address:
-                            description: |-
-                              Address is the address identifier (required)
-                              Can be simple name ("orders") or FQQN ("events::queue1" for SubscriberOf)
+                            description: Address is the address identifier (required)
                             type: string
                           appName:
                             description: AppName of owning app - for cross-app references  (optional)
@@ -79,6 +77,12 @@ spec:
                             description: AppNamespace of owning app - for cross-app
                               references  (optional)
                             type: string
+                          subscriptions:
+                            description: Subscriptions declares pub/sub semantics
+                              and subscriber queue names for an address
+                            items:
+                              type: string
+                            type: array
                         required:
                         - address
                         type: object
@@ -88,9 +92,7 @@ spec:
                         description: AddressRef references an address for use in capabilities
                         properties:
                           address:
-                            description: |-
-                              Address is the address identifier (required)
-                              Can be simple name ("orders") or FQQN ("events::queue1" for SubscriberOf)
+                            description: Address is the address identifier (required)
                             type: string
                           appName:
                             description: AppName of owning app - for cross-app references  (optional)
@@ -99,26 +101,12 @@ spec:
                             description: AppNamespace of owning app - for cross-app
                               references  (optional)
                             type: string
-                        required:
-                        - address
-                        type: object
-                      type: array
-                    subscriberOf:
-                      items:
-                        description: AddressRef references an address for use in capabilities
-                        properties:
-                          address:
-                            description: |-
-                              Address is the address identifier (required)
-                              Can be simple name ("orders") or FQQN ("events::queue1" for SubscriberOf)
-                            type: string
-                          appName:
-                            description: AppName of owning app - for cross-app references  (optional)
-                            type: string
-                          appNamespace:
-                            description: AppNamespace of owning app - for cross-app
-                              references  (optional)
-                            type: string
+                          subscriptions:
+                            description: Subscriptions declares pub/sub semantics
+                              and subscriber queue names for an address
+                            items:
+                              type: string
+                            type: array
                         required:
                         - address
                         type: object
@@ -238,8 +226,8 @@ spec:
                         a broker service)
                       type: string
                     subscriptions:
-                      description: identities of subscription queues on a multicast
-                        address
+                      description: Subscriptions declares pub/sub semantics and subscriber
+                        queue names for an address
                       items:
                         type: string
                       type: array

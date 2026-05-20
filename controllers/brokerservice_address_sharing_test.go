@@ -265,7 +265,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(2))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(ownerAppName)))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(consumerAppName)))
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
@@ -398,7 +398,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				g.Expect(deployedCondition.Status).Should(Equal(metav1.ConditionFalse))
 				// No service binding since dependency not satisfied
 				g.Expect(createdApp.Status.Service).Should(BeNil())
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &app)).Should(Succeed())
@@ -560,7 +560,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(2))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(registryAppName)))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(consumerAppName)))
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
@@ -731,7 +731,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				g.Expect(deployedCondition.Status).Should(Equal(metav1.ConditionFalse))
 				// No service binding since dependency not satisfied
 				g.Expect(createdConsumer.Status.Service).Should(BeNil())
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
@@ -854,7 +854,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				}
 				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(1))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(app1Name)))
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			app2Name := NextSpecResourceName()
 			app2CertName := app2Name + "-" + common.DefaultOperandCertSecretName
@@ -920,7 +920,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				g.Expect(deployedCondition.Message).Should(ContainSubstring("already declared"))
 				g.Expect(deployedCondition.Message).Should(ContainSubstring("orders"))
 				g.Expect(deployedCondition.Message).Should(ContainSubstring(app1Name))
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("verifying app2 does not bind to service")
 			Consistently(func(g Gomega) {
@@ -1117,446 +1117,13 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(2))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(ownerAppName)))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(consumerAppName)))
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
 			UninstallCert(consumerCertName, otherNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
-		})
-	})
-
-	Context("Phase 5: FQQN and Mixed Usage", func() {
-
-		It("Scenario 6: should support FQQN in addressRef for topic subscriptions", func() {
-
-			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
-				return
-			}
-
-			ctx := context.Background()
-			serviceName := NextSpecResourceName()
-
-			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
-			By("installing broker cert")
-			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sharedOperandCertName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			By("installing prometheus cert")
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			By("creating BrokerService")
-			service := broker.BrokerService{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "BrokerService",
-					APIVersion: broker.GroupVersion.Identifier(),
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      serviceName,
-					Namespace: defaultNamespace,
-					Labels: map[string]string{
-						"test": "fqqn-sharing",
-					},
-				},
-				Spec: broker.BrokerServiceSpec{
-					Resources: corev1.ResourceRequirements{
-						Limits: corev1.ResourceList{
-							corev1.ResourceMemory: resource.MustParse("2Gi"),
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
-
-			ownerAppName := NextSpecResourceName()
-			ownerCertName := ownerAppName + "-cert"
-			By("installing owner app cert")
-			InstallCert(ownerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = ownerCertName
-				candidate.Spec.CommonName = ownerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			By("creating owner app that declares 'events' topic")
-			ownerApp := broker.BrokerApp{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "BrokerApp",
-					APIVersion: broker.GroupVersion.Identifier(),
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      ownerAppName,
-					Namespace: defaultNamespace,
-				},
-				Spec: broker.BrokerAppSpec{
-					ServiceSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"test": "fqqn-sharing",
-						},
-					},
-					SharedAddresses: []broker.AddressType{{Address: "events"}},
-				},
-			}
-			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
-
-			sub1AppName := NextSpecResourceName()
-			sub1CertName := sub1AppName + "-cert"
-			By("installing subscriber1 cert")
-			InstallCert(sub1CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sub1CertName
-				candidate.Spec.CommonName = sub1AppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			By("creating subscriber1 with FQQN addressRef")
-			sub1App := broker.BrokerApp{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "BrokerApp",
-					APIVersion: broker.GroupVersion.Identifier(),
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      sub1AppName,
-					Namespace: defaultNamespace,
-				},
-				Spec: broker.BrokerAppSpec{
-					ServiceSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"test": "fqqn-sharing",
-						},
-					},
-					Capabilities: []broker.AppCapabilityType{
-						{
-							SubscriberOf: []broker.AddressRef{
-								{
-									Address:      "events::sub1-queue",
-									AppNamespace: defaultNamespace,
-									AppName:      ownerAppName,
-								},
-							},
-						},
-					},
-					Resources: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceMemory: resource.MustParse("512Mi"),
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, &sub1App)).Should(Succeed())
-
-			sub2AppName := NextSpecResourceName()
-			sub2CertName := sub2AppName + "-cert"
-			By("installing subscriber2 cert")
-			InstallCert(sub2CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sub2CertName
-				candidate.Spec.CommonName = sub2AppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			By("creating subscriber2 with different FQQN queue")
-			sub2App := broker.BrokerApp{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "BrokerApp",
-					APIVersion: broker.GroupVersion.Identifier(),
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      sub2AppName,
-					Namespace: defaultNamespace,
-				},
-				Spec: broker.BrokerAppSpec{
-					ServiceSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"test": "fqqn-sharing",
-						},
-					},
-					Capabilities: []broker.AppCapabilityType{
-						{
-							SubscriberOf: []broker.AddressRef{
-								{
-									Address:      "events::sub2-queue",
-									AppNamespace: defaultNamespace,
-									AppName:      ownerAppName,
-								},
-							},
-						},
-					},
-					Resources: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceMemory: resource.MustParse("512Mi"),
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, &sub2App)).Should(Succeed())
-
-			createdService := &broker.BrokerService{}
-			By("verifying all three apps are provisioned")
-			Eventually(func(g Gomega) {
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, createdService)).Should(Succeed())
-				if verbose {
-					fmt.Printf("Service ProvisionedApps: %v\n", createdService.Status.ProvisionedApps)
-				}
-				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(3))
-				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(ownerAppName)))
-				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(sub1AppName)))
-				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(sub2AppName)))
-			}, timeout, interval).Should(Succeed())
-
-			By("cleaning up")
-			Expect(k8sClient.Delete(ctx, &sub2App)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, &sub1App)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(sub2CertName, defaultNamespace)
-			UninstallCert(sub1CertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
-		})
-
-		It("Scenario 7: should allow mixed ANYCAST and MULTICAST on same base address", func() {
-
-			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
-				return
-			}
-
-			ctx := context.Background()
-			serviceName := NextSpecResourceName()
-
-			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
-			By("installing broker cert")
-			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sharedOperandCertName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			By("installing prometheus cert")
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			By("creating BrokerService")
-			service := broker.BrokerService{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "BrokerService",
-					APIVersion: broker.GroupVersion.Identifier(),
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      serviceName,
-					Namespace: defaultNamespace,
-					Labels: map[string]string{
-						"test": "mixed-routing",
-					},
-				},
-				Spec: broker.BrokerServiceSpec{
-					Resources: corev1.ResourceRequirements{
-						Limits: corev1.ResourceList{
-							corev1.ResourceMemory: resource.MustParse("2Gi"),
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
-
-			ownerAppName := NextSpecResourceName()
-			ownerCertName := ownerAppName + "-cert"
-			By("installing owner app cert")
-			InstallCert(ownerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = ownerCertName
-				candidate.Spec.CommonName = ownerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			By("creating owner app that declares 'events' and produces to it (ANYCAST)")
-			ownerApp := broker.BrokerApp{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "BrokerApp",
-					APIVersion: broker.GroupVersion.Identifier(),
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      ownerAppName,
-					Namespace: defaultNamespace,
-				},
-				Spec: broker.BrokerAppSpec{
-					ServiceSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"test": "mixed-routing",
-						},
-					},
-					SharedAddresses: []broker.AddressType{{Address: "events"}},
-					Capabilities: []broker.AppCapabilityType{
-						{
-							ProducerOf: []broker.AddressRef{
-								{Address: "events"}, // Direct reference, ANYCAST
-							},
-						},
-					},
-					Resources: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceMemory: resource.MustParse("256Mi"),
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
-
-			queueConsumerName := NextSpecResourceName()
-			queueCertName := queueConsumerName + "-cert"
-			By("installing queue consumer cert")
-			InstallCert(queueCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = queueCertName
-				candidate.Spec.CommonName = queueConsumerName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			By("creating queue consumer that consumes from 'events' (ANYCAST)")
-			queueConsumer := broker.BrokerApp{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "BrokerApp",
-					APIVersion: broker.GroupVersion.Identifier(),
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      queueConsumerName,
-					Namespace: defaultNamespace,
-				},
-				Spec: broker.BrokerAppSpec{
-					ServiceSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"test": "mixed-routing",
-						},
-					},
-					Capabilities: []broker.AppCapabilityType{
-						{
-							ConsumerOf: []broker.AddressRef{
-								{
-									Address:      "events",
-									AppNamespace: defaultNamespace,
-									AppName:      ownerAppName,
-								},
-							},
-						},
-					},
-					Resources: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceMemory: resource.MustParse("512Mi"),
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, &queueConsumer)).Should(Succeed())
-
-			topicSubName := NextSpecResourceName()
-			topicCertName := topicSubName + "-cert"
-			By("installing topic subscriber cert")
-			InstallCert(topicCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = topicCertName
-				candidate.Spec.CommonName = topicSubName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			By("creating topic subscriber that subscribes to 'events::subscription' (MULTICAST)")
-			topicSubscriber := broker.BrokerApp{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "BrokerApp",
-					APIVersion: broker.GroupVersion.Identifier(),
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      topicSubName,
-					Namespace: defaultNamespace,
-				},
-				Spec: broker.BrokerAppSpec{
-					ServiceSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"test": "mixed-routing",
-						},
-					},
-					Capabilities: []broker.AppCapabilityType{
-						{
-							SubscriberOf: []broker.AddressRef{
-								{
-									Address:      "events::subscription",
-									AppNamespace: defaultNamespace,
-									AppName:      ownerAppName,
-								},
-							},
-						},
-					},
-					Resources: corev1.ResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceMemory: resource.MustParse("512Mi"),
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, &topicSubscriber)).Should(Succeed())
-
-			createdService := &broker.BrokerService{}
-			By("verifying all three apps are provisioned")
-			Eventually(func(g Gomega) {
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, createdService)).Should(Succeed())
-				if verbose {
-					fmt.Printf("Service ProvisionedApps: %v\n", createdService.Status.ProvisionedApps)
-				}
-				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(3))
-				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(ownerAppName)))
-				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(queueConsumerName)))
-				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(topicSubName)))
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-
-			By("cleaning up")
-			Expect(k8sClient.Delete(ctx, &topicSubscriber)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, &queueConsumer)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(topicCertName, defaultNamespace)
-			UninstallCert(queueCertName, defaultNamespace)
 			UninstallCert(ownerCertName, defaultNamespace)
 			UninstallCert(prometheusCertName, defaultNamespace)
 			UninstallCert(sharedOperandCertName, defaultNamespace)
@@ -1730,7 +1297,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				g.Expect(deployedCondition.Status).Should(Equal(metav1.ConditionFalse))
 				g.Expect(deployedCondition.Message).Should(ContainSubstring("does not share address"))
 				g.Expect(createdConsumer.Status.Service).Should(BeNil())
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
@@ -1901,7 +1468,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(2))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(ownerAppName)))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(consumerAppName)))
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
@@ -2019,7 +1586,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, createdService)).Should(Succeed())
 				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(1))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(app1Name)))
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			app2Name := NextSpecResourceName()
 			app2CertName := app2Name + "-" + common.DefaultOperandCertSecretName
@@ -2084,7 +1651,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				g.Expect(deployedCondition.Message).Should(ContainSubstring("already declared"))
 				g.Expect(deployedCondition.Message).Should(ContainSubstring("api"))
 				g.Expect(createdApp2.Status.Service).Should(BeNil())
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &app2)).Should(Succeed())
@@ -2202,7 +1769,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, createdService)).Should(Succeed())
 				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(1))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(app1Name)))
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			app2Name := NextSpecResourceName()
 			app2CertName := app2Name + "-" + common.DefaultOperandCertSecretName
@@ -2267,7 +1834,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				g.Expect(deployedCondition.Message).Should(ContainSubstring("already declared"))
 				g.Expect(deployedCondition.Message).Should(ContainSubstring("data"))
 				g.Expect(createdApp2.Status.Service).Should(BeNil())
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &app2)).Should(Succeed())

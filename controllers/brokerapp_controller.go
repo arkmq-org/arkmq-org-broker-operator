@@ -61,8 +61,9 @@ func extractBaseAddress(address string) string {
 // collectOwnedAddresses returns all addresses "owned" by an app for clash detection purposes.
 //
 // An app owns an address if:
-//  1. Explicitly declared in spec.addresses (shareable with other apps)
-//  2. Implicitly used in capabilities with empty appNamespace/appName (private, not shareable)
+//  1. Explicitly declared in spec.sharedAddresses (shareable with other apps)
+//  2. Explicitly declared in spec.addresses (private, not shareable)
+//  3. Implicitly used in capabilities with empty appNamespace/appName (private, not shareable)
 //
 // Both types count as "owned" to prevent address clashes between apps on the same service,
 // but only explicitly declared addresses (type 1) can be referenced by other apps via addressRef.
@@ -94,10 +95,10 @@ func collectOwnedAddresses(app *broker.BrokerApp) map[string]bool {
 
 	// Add from capabilities (local addresses only - where appNamespace and appName are empty)
 	for _, capability := range app.Spec.Capabilities {
+		// Handle ProducerOf and ConsumerOf
 		allAddresses := [][]broker.AddressRef{
 			capability.ProducerOf,
 			capability.ConsumerOf,
-			capability.SubscriberOf,
 		}
 
 		for _, addrList := range allAddresses {
@@ -107,6 +108,8 @@ func collectOwnedAddresses(app *broker.BrokerApp) map[string]bool {
 					baseAddr := extractBaseAddress(addressRef.Address)
 					addresses[baseAddr] = true
 				}
+				// Note: subscriptions array contains queue names, not addresses
+				// The address itself is owned, not the queue names
 			}
 		}
 	}
@@ -137,11 +140,7 @@ func (reconciler BrokerAppInstanceReconciler) validateSpec() error {
 	}
 
 	// Validate that Addresses and SharedAddresses don't overlap
-	if err := reconciler.validateAddressesDisjoint(); err != nil {
-		return err
-	}
-
-	return nil
+	return reconciler.validateAddressesDisjoint()
 }
 
 func (reconciler BrokerAppInstanceReconciler) processBindingSecret() error {
@@ -834,10 +833,10 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressRefCapacity(service *
 	ctx := context.Background()
 
 	for _, capability := range reconciler.instance.Spec.Capabilities {
+		// Check ProducerOf and ConsumerOf cross-app references
 		allAddresses := [][]broker.AddressRef{
 			capability.ProducerOf,
 			capability.ConsumerOf,
-			capability.SubscriberOf,
 		}
 
 		for _, addrList := range allAddresses {
@@ -890,20 +889,41 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressRefCapacity(service *
 				}
 
 				// Extract base address from FQQN if present
-				baseAddr := extractBaseAddress(addressRef.Address)
+				//baseAddr := extractBaseAddress(addressRef.Address)
 
 				// Check if the referenced app declares this address in spec.sharedAddresses
 				addressShared := false
+				var ownerIsMulticast = false
 				for _, sharedAddrType := range referencedApp.Spec.SharedAddresses {
-					if sharedAddrType.Address == baseAddr {
+					if sharedAddrType.Address == addressRef.Address {
 						addressShared = true
+						ownerIsMulticast = sharedAddrType.Subscriptions != nil
 						break
 					}
 				}
 
 				if !addressShared {
 					return fmt.Errorf("referenced app %s/%s does not share address '%s' (add to spec.sharedAddresses)",
-						addressRef.AppNamespace, addressRef.AppName, baseAddr)
+						addressRef.AppNamespace, addressRef.AppName, addressRef.Address)
+				}
+
+				// Check for routing type conflict
+				currentIsMulticast := addressRef.Subscriptions != nil
+
+				// Detect conflict
+				if currentIsMulticast && !ownerIsMulticast {
+					return fmt.Errorf(
+						"referenced app %s/%s declares address '%s' without subscriptions, "+
+							"but this app uses it with subscriptions. "+
+							"Shared addresses must use consistent semantics across all apps",
+						addressRef.AppNamespace, addressRef.AppName, addressRef.Address)
+				}
+				if !currentIsMulticast && ownerIsMulticast {
+					return fmt.Errorf(
+						"referenced app %s/%s declares address '%s' with subscriptions, "+
+							"but this app uses it without subscriptions. "+
+							"Shared addresses must use consistent semantics across all apps",
+						addressRef.AppNamespace, addressRef.AppName, addressRef.Address)
 				}
 			}
 		}
@@ -915,50 +935,133 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressRefCapacity(service *
 func (reconciler *BrokerAppInstanceReconciler) verifyCapabilityAddressType() (err error) {
 
 	for _, capability := range reconciler.instance.Spec.Capabilities {
-		// Validate all address refs in capabilities
-		allAddresses := []struct {
-			addresses []broker.AddressRef
-			capType   string
-		}{
-			{capability.ProducerOf, "ProducerOf"},
-			{capability.ConsumerOf, "ConsumerOf"},
-			{capability.SubscriberOf, "SubscriberOf"},
+		// Validate ProducerOf
+		for index, addressRef := range capability.ProducerOf {
+			// Address field is required
+			if addressRef.Address == "" {
+				err = fmt.Errorf("Spec.Capability.ProducerOf[%d].address must be specified", index)
+				break
+			}
+
+			// Address should NOT use FQQN format - FQQN is generated internally
+			if strings.Contains(addressRef.Address, FQQNSeparator) {
+				err = fmt.Errorf("Spec.Capability.ProducerOf[%d].address should not use FQQN format (no '::'). Use plain address name", index)
+				break
+			}
+
+			// Validate cross-app reference consistency
+			hasNamespace := addressRef.AppNamespace != ""
+			hasAppName := addressRef.AppName != ""
+			if hasNamespace != hasAppName {
+				err = fmt.Errorf("Spec.Capability.ProducerOf[%d]: appNamespace and appName must both be set (for cross-app reference) or both empty (for local reference)", index)
+				break
+			}
+
+			// Validate subscriptions field
+			if addressRef.Subscriptions != nil {
+				if len(*addressRef.Subscriptions) > 0 {
+					err = fmt.Errorf("Spec.Capability.ProducerOf[%d]: subscriptions array cannot contain queue names (producers don't create queues). Use empty array [] to declare MULTICAST address", index)
+					break
+				}
+				// Empty array is OK - declares MULTICAST address without creating queues
+			}
+		}
+		if err != nil {
+			break
 		}
 
-		for _, addrGroup := range allAddresses {
-			for index, addressRef := range addrGroup.addresses {
-				// Address field is required
-				if addressRef.Address == "" {
-					err = fmt.Errorf("Spec.Capability.%s[%d].address must be specified", addrGroup.capType, index)
+		// Validate ConsumerOf
+		for index, addressRef := range capability.ConsumerOf {
+			// Address field is required
+			if addressRef.Address == "" {
+				err = fmt.Errorf("Spec.Capability.ConsumerOf[%d].address must be specified", index)
+				break
+			}
+
+			// Address should NOT use FQQN format - FQQN is generated internally
+			if strings.Contains(addressRef.Address, FQQNSeparator) {
+				err = fmt.Errorf("Spec.Capability.ConsumerOf[%d].address should not use FQQN format (no '::'). Use plain address name", index)
+				break
+			}
+
+			// Validate cross-app reference consistency
+			hasNamespace := addressRef.AppNamespace != ""
+			hasAppName := addressRef.AppName != ""
+			if hasNamespace != hasAppName {
+				err = fmt.Errorf("Spec.Capability.ConsumerOf[%d]: appNamespace and appName must both be set (for cross-app reference) or both empty (for local reference)", index)
+				break
+			}
+
+			// Validate subscriptions field
+			if addressRef.Subscriptions != nil {
+				if len(*addressRef.Subscriptions) == 0 {
+					err = fmt.Errorf("Spec.Capability.ConsumerOf[%d]: empty subscriptions array not allowed (cannot consume without queue names). Either omit subscriptions for ANYCAST or specify queue names for MULTICAST", index)
 					break
 				}
 
-				// Validate cross-app reference consistency
-				// Both appNamespace and appName must be set together, or both must be empty
-				hasNamespace := addressRef.AppNamespace != ""
-				hasAppName := addressRef.AppName != ""
+				// Validate multicast queue names
+				for subIdx, queueName := range *addressRef.Subscriptions {
+					if queueName == "" {
+						err = fmt.Errorf("Spec.Capability.ConsumerOf[%d].subscriptions[%d]: queue name cannot be empty", index, subIdx)
+						break
+					}
 
-				if hasNamespace != hasAppName {
-					err = fmt.Errorf("Spec.Capability.%s[%d]: appNamespace and appName must both be set (for cross-app reference) or both empty (for local reference)", addrGroup.capType, index)
-					break
+					// Queue names should NOT use FQQN format
+					if strings.Contains(queueName, FQQNSeparator) {
+						err = fmt.Errorf("Spec.Capability.ConsumerOf[%d].subscriptions[%d]: queue name should not use FQQN format (no '::')", index, subIdx)
+						break
+					}
 				}
-
-				// SubscriberOf validation: must use FQQN format
-				if addrGroup.capType == "SubscriberOf" {
-					if !strings.Contains(addressRef.Address, FQQNSeparator) {
-						err = fmt.Errorf("Spec.Capability.SubscriberOf[%d].address must use FQQN format (address::queue)", index)
-						break
-					}
-					// Validate exactly one separator with non-empty parts
-					parts := strings.SplitN(addressRef.Address, FQQNSeparator, 3)
-					if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-						err = fmt.Errorf("Spec.Capability.SubscriberOf[%d].address must have valid FQQN format 'address::queue'", index)
-						break
-					}
+				if err != nil {
+					break
 				}
 			}
-			if err != nil {
-				break
+			// nil subscriptions is OK - means ANYCAST queue
+		}
+		if err != nil {
+			break
+		}
+
+		// Validate routing type consistency within this capability
+		// Check for same-app conflicts: address used with both ANYCAST and MULTICAST
+		addressRoutingTypes := make(map[string]bool) // address -> isMulticast
+
+		// Check ProducerOf addresses
+		for _, addressRef := range capability.ProducerOf {
+			if addressRef.AppNamespace == "" && addressRef.AppName == "" {
+				if addressRef.Subscriptions != nil {
+					// Explicitly MULTICAST
+					if prevType, exists := addressRoutingTypes[addressRef.Address]; exists && !prevType {
+						err = fmt.Errorf(
+							"address '%s' is used with both ANYCAST and MULTICAST routing types in the same capability. "+
+								"Shared addresses must use consistent routing types",
+							addressRef.Address)
+						break
+					}
+					addressRoutingTypes[addressRef.Address] = true
+				}
+				// nil subscriptions in ProducerOf doesn't specify routing type
+			}
+		}
+		if err != nil {
+			break
+		}
+
+		// Check ConsumerOf addresses
+		for _, addressRef := range capability.ConsumerOf {
+			if addressRef.AppNamespace == "" && addressRef.AppName == "" {
+				isMulticast := addressRef.Subscriptions != nil && len(*addressRef.Subscriptions) > 0
+
+				if prevType, exists := addressRoutingTypes[addressRef.Address]; exists {
+					if prevType != isMulticast {
+						err = fmt.Errorf(
+							"address '%s' is used with both ANYCAST and MULTICAST routing types in the same capability. "+
+								"Shared addresses must use consistent routing types",
+							addressRef.Address)
+						break
+					}
+				}
+				addressRoutingTypes[addressRef.Address] = isMulticast
 			}
 		}
 		if err != nil {

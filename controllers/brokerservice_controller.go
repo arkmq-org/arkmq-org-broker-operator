@@ -627,8 +627,7 @@ func (t *AddressTracker) trackAddressType(addrType *broker.AddressType) *Address
 	if addrType.Subscriptions != nil {
 		addressConfig.isMulticast = true
 		for _, subName := range *addrType.Subscriptions {
-			// subscriptions still use FQQN
-			t.track(&broker.AddressRef{Address: addrType.Address + "::" + subName})
+			t.track(&broker.AddressRef{Address: addrType.Address + FQQNSeparator + subName})
 		}
 	}
 	return addressConfig
@@ -655,20 +654,62 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 
 		var entry *AddressConfig
 
-		for _, address := range capability.ProducerOf {
-			entry = addressTracker.track(&address)
+		// Process ProducerOf
+		for _, addressRef := range capability.ProducerOf {
+			entry = addressTracker.track(&addressRef)
 			entry.senderRoles[role] = role
+
+			// Handle subscriptions field for MULTICAST declaration
+			if addressRef.Subscriptions != nil {
+				// Empty array means "this is a MULTICAST address"
+				// Validation already ensures it's empty (no queue names allowed for producers)
+				entry.isMulticast = true
+			}
+			// nil subscriptions means routing type unspecified by producer
 		}
 
-		for _, address := range capability.ConsumerOf {
-			entry = addressTracker.track(&address)
-			entry.consumerRoles[role] = role
-		}
+		// Process ConsumerOf
+		for _, addressRef := range capability.ConsumerOf {
+			entry = addressTracker.track(&addressRef)
 
-		for _, address := range capability.SubscriberOf {
-			entry = addressTracker.track(&address)
-			entry.subscriberRoles[role] = role
-			entry.isMulticast = true
+			if addressRef.Subscriptions == nil {
+				// ANYCAST - direct queue consumption
+				entry.consumerRoles[role] = role
+				// isMulticast remains false (default)
+
+				// Validate idempotency: check if address was already marked as MULTICAST
+				if entry.isOwned && entry.isMulticast {
+					return fmt.Errorf(
+						"address '%s' is used with both MULTICAST (has subscriptions) and ANYCAST (no subscriptions) routing types. "+
+							"This creates a routing type conflict. Use consistent routing types for the same address",
+						addressRef.Address)
+				}
+			} else {
+				// MULTICAST - multicast queue-based consumption
+				// Validation already ensures len > 0 (empty array not allowed for consumers)
+
+				// Validate idempotency: check if address was already used with ANYCAST
+				if entry.isOwned && len(entry.consumerRoles) > 0 && !entry.isMulticast {
+					return fmt.Errorf(
+						"address '%s' is used with both ANYCAST (no subscriptions) and MULTICAST (has subscriptions) routing types. "+
+							"This creates a routing type conflict. Use consistent routing types for the same address",
+						addressRef.Address)
+				}
+
+				entry.isMulticast = true
+
+				// Generate FQQN for each multicast queue
+				for _, queueName := range *addressRef.Subscriptions {
+					fqqn := addressRef.Address + FQQNSeparator + queueName
+					queueEntry := addressTracker.track(&broker.AddressRef{
+						Address:      fqqn,
+						AppNamespace: addressRef.AppNamespace,
+						AppName:      addressRef.AppName,
+					})
+					queueEntry.subscriberRoles[role] = role
+					queueEntry.isMulticast = true
+				}
+			}
 		}
 	}
 
@@ -681,7 +722,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 		escapedAddressName := escapeForProperties(addressName)
 
 		var address, queueName string
-		fqqn := strings.SplitN(addressName, "::", 2)
+		fqqn := strings.SplitN(addressName, FQQNSeparator, 2)
 		isFQQN := len(fqqn) > 1
 		if isFQQN {
 			address = escapeForProperties(fqqn[0])
@@ -694,7 +735,11 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 		// Only generate routingTypes for addresses owned by this app
 		// (not cross-app references where AppNamespace/AppName are set)
 		if addr.isOwned {
-			props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=ANYCAST,MULTICAST\n", address)] = ""
+			if addr.isMulticast {
+				props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=MULTICAST\n", address)] = ""
+			} else {
+				props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=ANYCAST\n", address)] = ""
+			}
 		}
 
 		// Generate ANYCAST queue configs for all non-multicast addresses
@@ -803,7 +848,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 	dedupMap := map[string]string{}
 	for _, capability := range app.Spec.Capabilities {
 
-		if len(capability.ConsumerOf) > 0 || len(capability.SubscriberOf) > 0 {
+		if len(capability.ConsumerOf) > 0 {
 			dedupMap[fmt.Sprintf("%s=%s\n", consumerRole(namespacedName), namespacedName)] = ""
 		}
 		if len(capability.ProducerOf) > 0 {
@@ -944,11 +989,17 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 	consumerAddresses := make(map[string]bool)
 	for _, app := range validApps {
 		for _, capability := range app.Spec.Capabilities {
-			for _, address := range capability.ConsumerOf {
-				consumerAddresses[address.Address] = true
-			}
-			for _, address := range capability.SubscriberOf {
-				consumerAddresses[address.Address] = true
+			for _, addressRef := range capability.ConsumerOf {
+				if addressRef.Subscriptions == nil {
+					// ANYCAST - direct queue address
+					consumerAddresses[addressRef.Address] = true
+				} else {
+					// MULTICAST - generate FQQN for each multicast queue
+					for _, queueName := range *addressRef.Subscriptions {
+						fqqn := addressRef.Address + FQQNSeparator + queueName
+						consumerAddresses[fqqn] = true
+					}
+				}
 			}
 		}
 	}

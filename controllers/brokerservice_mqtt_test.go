@@ -182,10 +182,14 @@ var _ = Describe("broker-service", func() {
 						{
 							ProducerOf: []brokerv1beta2.AddressRef{{Address: "mytopic"}, {Address: "mytopic/A"}, {Address: "mytopic/B"}},
 
-							SubscriberOf: []brokerv1beta2.AddressRef{
-								{Address: "mytopic::my-client.mytopic"},
-								// no support in the broker for liternal matches yet in security settings
-								// {Address: "mytopic.*::my-client.mytopic.*"},
+							ConsumerOf: []brokerv1beta2.AddressRef{
+								{
+									Address:       "mytopic",
+									Subscriptions: &[]string{"my-client.mytopic"},
+
+									// no support in the broker for liternal matches yet in security settings
+									// {Address: "mytopic.*::my-client.mytopic.*"},
+								},
 							},
 						},
 					},

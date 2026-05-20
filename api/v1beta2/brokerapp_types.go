@@ -53,15 +53,14 @@ type BrokerAppSpec struct {
 type AddressType struct {
 	// Address is the address identifier (unique within a broker service)
 	Address string `json:"address"`
-	// identities of subscription queues on a multicast address
+	// Subscriptions declares pub/sub semantics and subscriber queue names for an address
 	// +optional
-	Subscriptions *[]string `json:"subscriptions"`
+	Subscriptions *[]string `json:"subscriptions"` // no omitempty; respect empty array
 }
 
 // AddressRef references an address for use in capabilities
 type AddressRef struct {
 	// Address is the address identifier (required)
-	// Can be simple name ("orders") or FQQN ("events::queue1" for SubscriberOf)
 	Address string `json:"address"`
 
 	// AppNamespace of owning app - for cross-app references  (optional)
@@ -69,14 +68,16 @@ type AddressRef struct {
 
 	// AppName of owning app - for cross-app references  (optional)
 	AppName string `json:"appName,omitempty"`
+
+	// Subscriptions declares pub/sub semantics and subscriber queue names for an address
+	// +optional
+	Subscriptions *[]string `json:"subscriptions"` // no omitempty; respect empty array
 }
 
 type AppCapabilityType struct {
 	ProducerOf []AddressRef `json:"producerOf,omitempty"`
 
 	ConsumerOf []AddressRef `json:"consumerOf,omitempty"`
-
-	SubscriberOf []AddressRef `json:"subscriberOf,omitempty"`
 }
 
 // BrokerServiceBindingStatus captures the binding details between a BrokerApp and its provisioned BrokerService
