@@ -53,7 +53,7 @@ func TestBrokerServiceDeployed_WhenBrokerNotReady(t *testing.T) {
 		Status: v1beta2.BrokerServiceStatus{},
 	}
 
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc).
 		WithStatusSubresource(svc, &v1beta2.Broker{})).
@@ -98,7 +98,7 @@ func TestBrokerServiceDeployed_AfterPortDiscovery(t *testing.T) {
 		Status: v1beta2.BrokerServiceStatus{},
 	}
 
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc).
 		WithStatusSubresource(svc, &v1beta2.Broker{})).
@@ -204,7 +204,7 @@ func TestBrokerAppRejectsNonDeployedService(t *testing.T) {
 		},
 	}
 
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc, app, nsObj).
 		WithStatusSubresource(app, svc)).
@@ -276,7 +276,7 @@ func TestBrokerAppBindsToDeployedService(t *testing.T) {
 		},
 	}
 
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc, app, nsObj).
 		WithStatusSubresource(app, svc)).

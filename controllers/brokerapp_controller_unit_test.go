@@ -38,63 +38,16 @@ import (
 )
 
 func TestSimpleReconcile(t *testing.T) {
-	// Setup scheme
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-
-	// Data
 	ns := "default"
 	svcName := "my-broker-service"
 	appName := "my-app"
 
-	// Create namespace object (required for CEL evaluation)
-	namespace := &corev1.Namespace{
-		ObjectMeta: v1.ObjectMeta{
-			Name: ns,
-		},
-	}
+	svc := NewBrokerService(svcName, ns).Build()
+	app := NewBrokerApp(appName, ns).Build()
 
-	// Create BrokerService (with Deployed=True)
-	svc := &v1beta2.BrokerService{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      svcName,
-			Namespace: ns,
-			Labels:    map[string]string{"type": "broker"},
-		},
-		Status: v1beta2.BrokerServiceStatus{
-			Conditions: []v1.Condition{
-				{
-					Type:   v1beta2.DeployedConditionType,
-					Status: v1.ConditionTrue,
-					Reason: v1beta2.ReadyConditionReason,
-				},
-			},
-		},
-	}
-
-	// Create BrokerApp matching the service
-	app := &v1beta2.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
-			},
-		},
-	}
-
-	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(namespace, svc, app).
-		WithStatusSubresource(app, svc)).
-		Build()
-
-	// Create Reconciler
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	env := NewTestEnvironment(ns, svc, app)
+	r := env.Reconciler
+	cl := env.Client
 
 	// Reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
@@ -142,37 +95,18 @@ func TestSimpleReconcile(t *testing.T) {
 }
 
 func TestReconcileNoMatchingService(t *testing.T) {
-	// Setup scheme
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-
-	// Data
 	ns := "default"
 	appName := "my-app"
 
-	// Create BrokerApp with a selector that won't match anything
-	app := &v1beta2.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "non-existent"},
-			},
-		},
-	}
-
-	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(app).
-		WithStatusSubresource(app)).
+	app := NewBrokerApp(appName, ns).
+		WithServiceSelector(&v1.LabelSelector{
+			MatchLabels: map[string]string{"type": "non-existent"},
+		}).
 		Build()
 
-	// Create Reconciler
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	env := NewTestEnvironment(ns, app)
+	r := env.Reconciler
+	cl := env.Client
 
 	// Reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
@@ -199,70 +133,20 @@ func TestReconcileNoMatchingService(t *testing.T) {
 }
 
 func TestReconcileValidConditionTransition(t *testing.T) {
-	// Setup scheme
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-
-	// Data
 	ns := "default"
 	svcName := "my-broker-service"
-
-	// Create namespace object (required for CEL evaluation)
-	namespace := &corev1.Namespace{
-		ObjectMeta: v1.ObjectMeta{
-			Name: ns,
-		},
-	}
 	appName := "my-app"
 
-	// Create BrokerService (with Deployed=True)
-	svc := &v1beta2.BrokerService{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      svcName,
-			Namespace: ns,
-			Labels:    map[string]string{"type": "broker"},
-		},
-		Status: v1beta2.BrokerServiceStatus{
-			Conditions: []v1.Condition{
-				{
-					Type:   v1beta2.DeployedConditionType,
-					Status: v1.ConditionTrue,
-					Reason: v1beta2.ReadyConditionReason,
-				},
-			},
-		},
-	}
-
-	// Create BrokerApp with non-matching selector
-	app := &v1beta2.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "non-existent"},
-			},
-		},
-	}
-
-	// Setup fake client
-	cl := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(namespace, svc, app).
-		WithStatusSubresource(app).
-		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
-			app := obj.(*v1beta2.BrokerApp)
-			if app.Status.Service != nil {
-				return []string{app.Status.Service.Key()}
-			}
-			return nil
+	svc := NewBrokerService(svcName, ns).Build()
+	app := NewBrokerApp(appName, ns).
+		WithServiceSelector(&v1.LabelSelector{
+			MatchLabels: map[string]string{"type": "non-existent"},
 		}).
 		Build()
 
-	// Create Reconciler
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	env := NewTestEnvironment(ns, svc, app)
+	r := env.Reconciler
+	cl := env.Client
 
 	// 1. Reconcile with non-matching selector
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
@@ -370,7 +254,7 @@ func TestReconcileStatusUpdateFailure(t *testing.T) {
 		},
 	}
 
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(namespace, svc, app).
 		WithStatusSubresource(app).
@@ -391,47 +275,16 @@ func TestReconcileStatusUpdateFailure(t *testing.T) {
 }
 
 func TestReconcileAddressTypeError(t *testing.T) {
-	// Setup scheme
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-
-	// Data
 	ns := "default"
 	appName := "my-app"
 
-	// Create BrokerApp with invalid subscription (using FQQN format when it should be split)
-	app := &v1beta2.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
-			},
-			Capabilities: []v1beta2.AppCapabilityType{
-				{
-					ConsumerOf: []v1beta2.AddressRef{
-						{
-							Address:       "events::queue", // Invalid: using FQQN (though less relevant now)
-							Subscriptions: &[]string{"sub1"},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(app).
-		WithStatusSubresource(app)).
+	app := NewBrokerApp(appName, ns).
+		WithConsumerOf(NewAddressRef("events::queue").WithSubscriptions("sub1").Build()).
 		Build()
 
-	// Create Reconciler
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	env := NewTestEnvironment(ns, app)
+	r := env.Reconciler
+	cl := env.Client
 
 	// Reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
@@ -452,63 +305,16 @@ func TestReconcileAddressTypeError(t *testing.T) {
 }
 
 func TestReconcileDeployedConditionFromBrokerServiceStatus(t *testing.T) {
-	// Setup scheme
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-
-	// Data
 	ns := "default"
 	svcName := "my-broker-service"
-
-	// Create namespace object (required for CEL evaluation)
-	namespace := &corev1.Namespace{
-		ObjectMeta: v1.ObjectMeta{
-			Name: ns,
-		},
-	}
 	appName := "my-app"
 
-	// Create BrokerService (with Deployed=True)
-	svc := &v1beta2.BrokerService{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      svcName,
-			Namespace: ns,
-			Labels:    map[string]string{"type": "broker"},
-		},
-		Status: v1beta2.BrokerServiceStatus{
-			Conditions: []v1.Condition{
-				{
-					Type:   v1beta2.DeployedConditionType,
-					Status: v1.ConditionTrue,
-					Reason: v1beta2.ReadyConditionReason,
-				},
-			},
-		},
-	}
+	svc := NewBrokerService(svcName, ns).Build()
+	app := NewBrokerApp(appName, ns).Build()
 
-	// Create BrokerApp matching the service
-	app := &v1beta2.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
-			},
-		},
-	}
-
-	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(namespace, svc, app).
-		WithStatusSubresource(app, svc)).
-		Build()
-
-	// Create Reconciler
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	env := NewTestEnvironment(ns, svc, app)
+	r := env.Reconciler
+	cl := env.Client
 
 	// 1. Reconcile with BrokerService status not having the app.
 	// This first reconcile will annotate the app. The Deployed condition will be False.
@@ -600,7 +406,7 @@ func TestReconcileIdempotentStatus(t *testing.T) {
 	}
 
 	// Setup fake client for first reconcile
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().WithScheme(scheme).WithObjects(namespace, svc, app).WithStatusSubresource(app, svc)).Build()
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().WithScheme(scheme).WithObjects(namespace, svc, app).WithStatusSubresource(app, svc)).Build()
 
 	// Create Reconciler
 	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
@@ -627,7 +433,7 @@ func TestReconcileIdempotentStatus(t *testing.T) {
 		},
 	}
 
-	cl2 := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl2 := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(namespace, svc, updatedApp).
 		WithStatusSubresource(updatedApp, svc).
@@ -642,33 +448,14 @@ func TestReconcileIdempotentStatus(t *testing.T) {
 }
 
 func TestReconcileInvalidResourceName(t *testing.T) {
-	// Setup scheme
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-
-	// Data
 	ns := "default"
 	invalidName := "invalid/name"
 
-	// Create BrokerApp with invalid name
-	app := &v1beta2.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      invalidName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
-			},
-		},
-	}
+	app := NewBrokerApp(invalidName, ns).Build()
 
-	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().WithScheme(scheme).WithObjects(app).WithStatusSubresource(app)).Build()
-
-	// Create Reconciler
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	env := NewTestEnvironment(ns, app)
+	r := env.Reconciler
+	cl := env.Client
 
 	// Reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: invalidName, Namespace: ns}}
@@ -689,39 +476,24 @@ func TestReconcileInvalidResourceName(t *testing.T) {
 }
 
 func TestReconcileInvalidSelectorSyntax(t *testing.T) {
-	// Setup scheme
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-
-	// Data
 	ns := "default"
 	appName := "my-app"
 
-	// Create BrokerApp with invalid selector syntax
-	app := &v1beta2.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchExpressions: []v1.LabelSelectorRequirement{
-					{
-						Key:      "type",
-						Operator: "InvalidOperator", // Invalid operator
-						Values:   []string{"broker"},
-					},
+	app := NewBrokerApp(appName, ns).
+		WithServiceSelector(&v1.LabelSelector{
+			MatchExpressions: []v1.LabelSelectorRequirement{
+				{
+					Key:      "type",
+					Operator: "InvalidOperator",
+					Values:   []string{"broker"},
 				},
 			},
-		},
-	}
+		}).
+		Build()
 
-	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().WithScheme(scheme).WithObjects(app).WithStatusSubresource(app)).Build()
-
-	// Create Reconciler
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	env := NewTestEnvironment(ns, app)
+	r := env.Reconciler
+	cl := env.Client
 
 	// Reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
@@ -742,71 +514,18 @@ func TestReconcileInvalidSelectorSyntax(t *testing.T) {
 }
 
 func TestReconcileMatchedServiceNotFound(t *testing.T) {
-	// Setup scheme
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-
-	// Data
 	ns := "default"
 	svcName := "my-broker-service"
-
-	// Create namespace object (required for CEL evaluation)
-	namespace := &corev1.Namespace{
-		ObjectMeta: v1.ObjectMeta{
-			Name: ns,
-		},
-	}
 	appName := "my-app"
 
-	// Create BrokerService (with Deployed=True)
-	svc := &v1beta2.BrokerService{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      svcName,
-			Namespace: ns,
-			Labels:    map[string]string{"type": "broker"},
-		},
-		Status: v1beta2.BrokerServiceStatus{
-			Conditions: []v1.Condition{
-				{
-					Type:   v1beta2.DeployedConditionType,
-					Status: v1.ConditionTrue,
-					Reason: v1beta2.ReadyConditionReason,
-				},
-			},
-		},
-	}
-
-	// Create BrokerApp with status binding pointing to the service
-	app := &v1beta2.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
-			},
-		},
-		Status: v1beta2.BrokerAppStatus{
-			Service: &v1beta2.BrokerServiceBindingStatus{
-				Name:         svcName,
-				Namespace:    ns,
-				Secret:       "binding-secret",
-				AssignedPort: 61616,
-			},
-		},
-	}
-
-	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(namespace, svc, app).
-		WithStatusSubresource(app, svc)).
+	svc := NewBrokerService(svcName, ns).Build()
+	app := NewBrokerApp(appName, ns).
+		WithServiceBinding(svcName, ns, "binding-secret", 61616).
 		Build()
 
-	// Create Reconciler
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	env := NewTestEnvironment(ns, svc, app)
+	r := env.Reconciler
+	cl := env.Client
 
 	// First reconcile - should succeed
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
@@ -842,107 +561,31 @@ func TestReconcileMatchedServiceNotFound(t *testing.T) {
 }
 
 func TestRoutingTypeConflictValidation(t *testing.T) {
-	// Setup scheme
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-
 	ns := "default"
 	svcName := "my-broker-service"
 
-	namespace := &corev1.Namespace{
-		ObjectMeta: v1.ObjectMeta{
-			Name: ns,
-		},
-	}
-
-	svc := &v1beta2.BrokerService{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      svcName,
-			Namespace: ns,
-			Labels: map[string]string{
-				"type": "messaging",
-			},
-		},
-		Spec: v1beta2.BrokerServiceSpec{},
-		Status: v1beta2.BrokerServiceStatus{
-			Conditions: []v1.Condition{
-				{
-					Type:   v1beta2.DeployedConditionType,
-					Status: v1.ConditionTrue,
-				},
-			},
-		},
-	}
+	svc := NewBrokerService(svcName, ns).
+		WithLabels(map[string]string{"type": "messaging"}).
+		Build()
 
 	// Test Case 1: ConsumerOf→Subscriptions conflict
 	// Owner app uses Subscriptions (MULTICAST), consumer app tries ConsumerOf (ANYCAST)
 	t.Run("ConsumerOf references MULTICAST address", func(t *testing.T) {
-		ownerApp := &v1beta2.BrokerApp{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "owner-app",
-				Namespace: ns,
-			},
-			Spec: v1beta2.BrokerAppSpec{
-				ServiceSelector: &v1.LabelSelector{
-					MatchLabels: map[string]string{
-						"type": "messaging",
-					},
-				},
-				SharedAddresses: []v1beta2.AddressType{
-					{Address: "events", Subscriptions: &[]string{}},
-				},
-				Capabilities: []v1beta2.AppCapabilityType{
-					{
-						ConsumerOf: []v1beta2.AddressRef{
-							{
-								Address:       "events",
-								Subscriptions: &[]string{"sub1"},
-							},
-						},
-					},
-				},
-			},
-			Status: v1beta2.BrokerAppStatus{
-				Service: &v1beta2.BrokerServiceBindingStatus{
-					Name:      svcName,
-					Namespace: ns,
-				},
-			},
-		}
-
-		consumerApp := &v1beta2.BrokerApp{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "consumer-app",
-				Namespace: ns,
-			},
-			Spec: v1beta2.BrokerAppSpec{
-				ServiceSelector: &v1.LabelSelector{
-					MatchLabels: map[string]string{
-						"type": "messaging",
-					},
-				},
-				Capabilities: []v1beta2.AppCapabilityType{
-					{
-						ConsumerOf: []v1beta2.AddressRef{
-							{
-								Address:      "events",
-								AppNamespace: ns,
-								AppName:      "owner-app",
-							},
-						},
-					},
-				},
-			},
-		}
-
-		cl := setupBrokerAppIndexer(fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(namespace, svc, ownerApp, consumerApp).
-			WithStatusSubresource(ownerApp, consumerApp, svc)).
+		ownerApp := NewBrokerApp("owner-app", ns).
+			WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
+			WithSharedAddresses(v1beta2.AddressType{Address: "events", Subscriptions: &[]string{}}).
+			WithConsumerOf(NewAddressRef("events").WithSubscriptions("sub1").Build()).
+			WithServiceBinding(svcName, ns, "", 0).
 			Build()
 
-		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		consumerApp := NewBrokerApp("consumer-app", ns).
+			WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
+			WithConsumerOf(NewAddressRef("events").WithAppRef(ns, "owner-app").Build()).
+			Build()
+
+		env := NewTestEnvironment(ns, svc, ownerApp, consumerApp)
+		r := env.Reconciler
+		cl := env.Client
 
 		// Reconcile consumer app - should fail to find matching service due to routing conflict
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "consumer-app", Namespace: ns}}
@@ -966,69 +609,24 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 	// Test Case 2: Subscriptions→ConsumerOf conflict
 	// Owner app uses ConsumerOf (ANYCAST), subscriber app tries Subscriptions (MULTICAST)
 	t.Run("Subscriptions references ANYCAST address", func(t *testing.T) {
-		ownerApp := &v1beta2.BrokerApp{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "owner-app-2",
-				Namespace: ns,
-			},
-			Spec: v1beta2.BrokerAppSpec{
-				ServiceSelector: &v1.LabelSelector{
-					MatchLabels: map[string]string{
-						"type": "messaging",
-					},
-				},
-				SharedAddresses: []v1beta2.AddressType{
-					{Address: "commands"},
-				},
-				Capabilities: []v1beta2.AppCapabilityType{
-					{
-						ConsumerOf: []v1beta2.AddressRef{
-							{Address: "commands"},
-						},
-					},
-				},
-			},
-			Status: v1beta2.BrokerAppStatus{
-				Service: &v1beta2.BrokerServiceBindingStatus{
-					Name:      svcName,
-					Namespace: ns,
-				},
-			},
-		}
-
-		subscriberApp := &v1beta2.BrokerApp{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "subscriber-app",
-				Namespace: ns,
-			},
-			Spec: v1beta2.BrokerAppSpec{
-				ServiceSelector: &v1.LabelSelector{
-					MatchLabels: map[string]string{
-						"type": "messaging",
-					},
-				},
-				Capabilities: []v1beta2.AppCapabilityType{
-					{
-						ConsumerOf: []v1beta2.AddressRef{
-							{
-								Address:       "commands",
-								AppNamespace:  ns,
-								AppName:       "owner-app-2",
-								Subscriptions: &[]string{"sub1"},
-							},
-						},
-					},
-				},
-			},
-		}
-
-		cl := setupBrokerAppIndexer(fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(namespace, svc, ownerApp, subscriberApp).
-			WithStatusSubresource(ownerApp, subscriberApp, svc)).
+		ownerApp := NewBrokerApp("owner-app-2", ns).
+			WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
+			WithSharedAddresses(v1beta2.AddressType{Address: "commands"}).
+			WithConsumerOf(NewAddressRef("commands").Build()).
+			WithServiceBinding(svcName, ns, "", 0).
 			Build()
 
-		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		subscriberApp := NewBrokerApp("subscriber-app", ns).
+			WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
+			WithConsumerOf(NewAddressRef("commands").
+				WithAppRef(ns, "owner-app-2").
+				WithSubscriptions("sub1").
+				Build()).
+			Build()
+
+		env := NewTestEnvironment(ns, svc, ownerApp, subscriberApp)
+		r := env.Reconciler
+		cl := env.Client
 
 		// Reconcile subscriber app - should fail to find matching service due to routing conflict
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "subscriber-app", Namespace: ns}}
@@ -1051,72 +649,24 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 
 	// Test Case 3: Compatible usage - both use Subscriptions (MULTICAST)
 	t.Run("Compatible MULTICAST sharing", func(t *testing.T) {
-		ownerApp := &v1beta2.BrokerApp{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "owner-app-3",
-				Namespace: ns,
-			},
-			Spec: v1beta2.BrokerAppSpec{
-				ServiceSelector: &v1.LabelSelector{
-					MatchLabels: map[string]string{
-						"type": "messaging",
-					},
-				},
-				SharedAddresses: []v1beta2.AddressType{
-					{Address: "topic"},
-				},
-				Capabilities: []v1beta2.AppCapabilityType{
-					{
-						ConsumerOf: []v1beta2.AddressRef{
-							{
-								Address:       "topic",
-								Subscriptions: &[]string{"sub1"},
-							},
-						},
-					},
-				},
-			},
-			Status: v1beta2.BrokerAppStatus{
-				Service: &v1beta2.BrokerServiceBindingStatus{
-					Name:      svcName,
-					Namespace: ns,
-				},
-			},
-		}
-
-		subscriberApp := &v1beta2.BrokerApp{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "subscriber-app-2",
-				Namespace: ns,
-			},
-			Spec: v1beta2.BrokerAppSpec{
-				ServiceSelector: &v1.LabelSelector{
-					MatchLabels: map[string]string{
-						"type": "messaging",
-					},
-				},
-				Capabilities: []v1beta2.AppCapabilityType{
-					{
-						ConsumerOf: []v1beta2.AddressRef{
-							{
-								Address:       "topic",
-								AppNamespace:  ns,
-								AppName:       "owner-app-3",
-								Subscriptions: &[]string{"sub2"},
-							},
-						},
-					},
-				},
-			},
-		}
-
-		cl := setupBrokerAppIndexer(fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(namespace, svc, ownerApp, subscriberApp).
-			WithStatusSubresource(ownerApp, subscriberApp, svc)).
+		ownerApp := NewBrokerApp("owner-app-3", ns).
+			WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
+			WithSharedAddresses(v1beta2.AddressType{Address: "topic"}).
+			WithConsumerOf(NewAddressRef("topic").WithSubscriptions("sub1").Build()).
+			WithServiceBinding(svcName, ns, "", 0).
 			Build()
 
-		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		subscriberApp := NewBrokerApp("subscriber-app-2", ns).
+			WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
+			WithConsumerOf(NewAddressRef("topic").
+				WithAppRef(ns, "owner-app-3").
+				WithSubscriptions("sub2").
+				Build()).
+			Build()
+
+		env := NewTestEnvironment(ns, svc, ownerApp, subscriberApp)
+		r := env.Reconciler
+		cl := env.Client
 
 		// Reconcile subscriber app - should succeed (both MULTICAST)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "subscriber-app-2", Namespace: ns}}
@@ -1135,68 +685,21 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 
 	// Test Case 4: Compatible usage - both use ConsumerOf (ANYCAST)
 	t.Run("Compatible ANYCAST sharing", func(t *testing.T) {
-		ownerApp := &v1beta2.BrokerApp{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "owner-app-4",
-				Namespace: ns,
-			},
-			Spec: v1beta2.BrokerAppSpec{
-				ServiceSelector: &v1.LabelSelector{
-					MatchLabels: map[string]string{
-						"type": "messaging",
-					},
-				},
-				SharedAddresses: []v1beta2.AddressType{
-					{Address: "queue"},
-				},
-				Capabilities: []v1beta2.AppCapabilityType{
-					{
-						ConsumerOf: []v1beta2.AddressRef{
-							{Address: "queue"},
-						},
-					},
-				},
-			},
-			Status: v1beta2.BrokerAppStatus{
-				Service: &v1beta2.BrokerServiceBindingStatus{
-					Name:      svcName,
-					Namespace: ns,
-				},
-			},
-		}
-
-		consumerApp := &v1beta2.BrokerApp{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      "consumer-app-2",
-				Namespace: ns,
-			},
-			Spec: v1beta2.BrokerAppSpec{
-				ServiceSelector: &v1.LabelSelector{
-					MatchLabels: map[string]string{
-						"type": "messaging",
-					},
-				},
-				Capabilities: []v1beta2.AppCapabilityType{
-					{
-						ConsumerOf: []v1beta2.AddressRef{
-							{
-								Address:      "queue",
-								AppNamespace: ns,
-								AppName:      "owner-app-4",
-							},
-						},
-					},
-				},
-			},
-		}
-
-		cl := setupBrokerAppIndexer(fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(namespace, svc, ownerApp, consumerApp).
-			WithStatusSubresource(ownerApp, consumerApp, svc)).
+		ownerApp := NewBrokerApp("owner-app-4", ns).
+			WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
+			WithSharedAddresses(v1beta2.AddressType{Address: "queue"}).
+			WithConsumerOf(NewAddressRef("queue").Build()).
+			WithServiceBinding(svcName, ns, "", 0).
 			Build()
 
-		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		consumerApp := NewBrokerApp("consumer-app-2", ns).
+			WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
+			WithConsumerOf(NewAddressRef("queue").WithAppRef(ns, "owner-app-4").Build()).
+			Build()
+
+		env := NewTestEnvironment(ns, svc, ownerApp, consumerApp)
+		r := env.Reconciler
+		cl := env.Client
 
 		// Reconcile consumer app - should succeed (both ANYCAST)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "consumer-app-2", Namespace: ns}}

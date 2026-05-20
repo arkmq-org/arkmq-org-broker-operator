@@ -84,7 +84,7 @@ func TestResolveBrokerService_MultipleServices_OneNotDeployed(t *testing.T) {
 		},
 	}
 
-	fakeClient := setupBrokerAppIndexer(fake.NewClientBuilder().
+	fakeClient := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithRuntimeObjects(app, service1, service2, ns)).
 		Build()

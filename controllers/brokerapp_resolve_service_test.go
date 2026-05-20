@@ -225,7 +225,7 @@ func TestResolveBrokerService(t *testing.T) {
 					Name: tt.app.Namespace,
 				},
 			})
-			fakeClient := setupBrokerAppIndexer(fake.NewClientBuilder().
+			fakeClient := SetupBrokerAppIndexer(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(objs...)).
 				Build()

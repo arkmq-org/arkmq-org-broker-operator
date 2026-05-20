@@ -40,17 +40,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// setupBrokerAppIndexer adds the status.service field indexer to avoid duplication in tests
-func setupBrokerAppIndexer(builder *fake.ClientBuilder) *fake.ClientBuilder {
-	return builder.WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
-		app := obj.(*v1beta2.BrokerApp)
-		if app.Status.Service != nil {
-			return []string{app.Status.Service.Key()}
-		}
-		return nil
-	})
-}
-
 func TestBrokerServiceReconcileWithAppMove(t *testing.T) {
 	// Setup scheme
 	scheme := runtime.NewScheme()
@@ -1071,7 +1060,7 @@ func TestBrokerServiceValidCondition(t *testing.T) {
 		}
 
 		// Setup fake client with field indexer using helper
-		cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(svc).
 			WithStatusSubresource(svc)).
@@ -1109,7 +1098,7 @@ func TestBrokerServiceValidCondition(t *testing.T) {
 		}
 
 		// Setup fake client with field indexer using helper
-		cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(svc).
 			WithStatusSubresource(svc)).
@@ -1147,7 +1136,7 @@ func TestBrokerServiceValidCondition(t *testing.T) {
 		}
 
 		// Setup fake client with field indexer using helper
-		cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(svc).
 			WithStatusSubresource(svc)).
@@ -1205,7 +1194,7 @@ func TestBrokerServiceIdempotentStatus(t *testing.T) {
 	}
 
 	// Setup fake client with indexer
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc).
 		WithStatusSubresource(svc)).
@@ -1264,7 +1253,7 @@ func TestBrokerServiceConditionIndependence(t *testing.T) {
 	}
 
 	// Setup fake client with indexer
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc).
 		WithStatusSubresource(svc)).
@@ -1337,7 +1326,7 @@ func TestBrokerServiceValidPersistsThroughRuntimeErrors(t *testing.T) {
 		},
 	}
 
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc).
 		WithStatusSubresource(svc).
@@ -1391,7 +1380,7 @@ func TestBrokerServiceConditionTransitionsOnRecovery(t *testing.T) {
 	}
 
 	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc).
 		WithStatusSubresource(svc, &v1beta2.Broker{})).

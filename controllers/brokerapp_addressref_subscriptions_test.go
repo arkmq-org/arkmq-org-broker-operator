@@ -1,36 +1,18 @@
 package controllers
 
 import (
+	"strings"
 	"testing"
-
-	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // TestProcessCapabilities_AddressRefSubscriptions_ANYCAST tests ANYCAST queue (nil subscriptions)
 func TestProcessCapabilities_AddressRefSubscriptions_ANYCAST(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "anycast-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address: "commands",
-							// Subscriptions: nil means ANYCAST
-						},
-					},
-				},
-			},
-		},
-	}
+	app := NewBrokerApp("anycast-app", "test").
+		WithConsumerOf(NewAddressRef("commands").Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err != nil {
@@ -41,40 +23,24 @@ func TestProcessCapabilities_AddressRefSubscriptions_ANYCAST(t *testing.T) {
 	t.Logf("PROPS:\n%s\n", props)
 
 	// Should have ANYCAST routing
-	if !contains(props, `addressConfigurations."commands".routingTypes=ANYCAST`) {
+	if !strings.Contains(props, `addressConfigurations."commands".routingTypes=ANYCAST`) {
 		t.Error("expected routingTypes=ANYCAST for nil subscriptions")
 	}
 
 	// Should have ANYCAST queue
-	if !contains(props, `queueConfigs."commands".routingType=ANYCAST`) {
+	if !strings.Contains(props, `queueConfigs."commands".routingType=ANYCAST`) {
 		t.Error("expected ANYCAST queue config")
 	}
 }
 
 // TestProcessCapabilities_AddressRefSubscriptions_MULTICAST tests MULTICAST topic with subscription queues
 func TestProcessCapabilities_AddressRefSubscriptions_MULTICAST(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
-	subs := []string{"sub1", "sub2"}
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "multicast-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address:       "events",
-							Subscriptions: &subs,
-						},
-					},
-				},
-			},
-		},
-	}
+	app := NewBrokerApp("multicast-app", "test").
+		WithConsumerOf(NewAddressRef("events").WithSubscriptions("sub1", "sub2").Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err != nil {
@@ -85,53 +51,37 @@ func TestProcessCapabilities_AddressRefSubscriptions_MULTICAST(t *testing.T) {
 	t.Logf("PROPS:\n%s\n", props)
 
 	// Should have MULTICAST routing
-	if !contains(props, `addressConfigurations."events".routingTypes=MULTICAST`) {
+	if !strings.Contains(props, `addressConfigurations."events".routingTypes=MULTICAST`) {
 		t.Error("expected routingTypes=MULTICAST for subscriptions array")
 	}
 
 	// Should have MULTICAST subscription queues
-	if !contains(props, `queueConfigs."sub1".routingType=MULTICAST`) {
+	if !strings.Contains(props, `queueConfigs."sub1".routingType=MULTICAST`) {
 		t.Error("expected MULTICAST queue sub1")
 	}
 
-	if !contains(props, `queueConfigs."sub2".routingType=MULTICAST`) {
+	if !strings.Contains(props, `queueConfigs."sub2".routingType=MULTICAST`) {
 		t.Error("expected MULTICAST queue sub2")
 	}
 
 	// Should have subscriber roles for FQQN
-	if !contains(props, `securityRoles."events\:\:sub1"`) {
+	if !strings.Contains(props, `securityRoles."events\:\:sub1"`) {
 		t.Error("expected subscriber role for events::sub1")
 	}
 
-	if !contains(props, `securityRoles."events\:\:sub2"`) {
+	if !strings.Contains(props, `securityRoles."events\:\:sub2"`) {
 		t.Error("expected subscriber role for events::sub2")
 	}
 }
 
 // TestProcessCapabilities_AddressRefSubscriptions_ProducerMULTICAST tests producer declaring MULTICAST address
 func TestProcessCapabilities_AddressRefSubscriptions_ProducerMULTICAST(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
-	emptyArray := []string{}
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "producer-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ProducerOf: []broker.AddressRef{
-						{
-							Address:       "notifications",
-							Subscriptions: &emptyArray, // Empty array = MULTICAST declaration
-						},
-					},
-				},
-			},
-		},
-	}
+	app := NewBrokerApp("producer-app", "test").
+		WithProducerOf(NewAddressRef("notifications").WithSubscriptions().Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err != nil {
@@ -142,68 +92,36 @@ func TestProcessCapabilities_AddressRefSubscriptions_ProducerMULTICAST(t *testin
 	t.Logf("PROPS:\n%s\n", props)
 
 	// Should have MULTICAST routing (declared by producer)
-	if !contains(props, `addressConfigurations."notifications".routingTypes=MULTICAST`) {
+	if !strings.Contains(props, `addressConfigurations."notifications".routingTypes=MULTICAST`) {
 		t.Error("expected routingTypes=MULTICAST for empty subscriptions array in ProducerOf")
 	}
 
 	// Should NOT have queue configs (producer doesn't create queues)
-	if contains(props, `queueConfigs."notifications"`) {
+	if strings.Contains(props, `queueConfigs."notifications"`) {
 		t.Error("producer should not create queue configs")
 	}
 }
 
 // TestProcessCapabilities_AddressRefSubscriptions_Conflict tests same-app routing conflict
 func TestProcessCapabilities_AddressRefSubscriptions_Conflict(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
-	subs := []string{"sub1"}
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "conflict-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address: "mixed",
-							// Subscriptions: nil (ANYCAST)
-						},
-						{
-							Address:       "mixed",
-							Subscriptions: &subs, // MULTICAST
-						},
-					},
-				},
-			},
-		},
-	}
+	app := NewBrokerApp("conflict-app", "test").
+		WithConsumerOf(
+			NewAddressRef("mixed").Build(),                           // nil subscriptions = ANYCAST
+			NewAddressRef("mixed").WithSubscriptions("sub1").Build(), // MULTICAST
+		).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err == nil {
 		t.Fatal("expected error for routing type conflict")
 	}
 
-	if !contains(err.Error(), "ANYCAST") || !contains(err.Error(), "MULTICAST") || !contains(err.Error(), "conflict") {
+	if !strings.Contains(err.Error(), "ANYCAST") || !strings.Contains(err.Error(), "MULTICAST") || !strings.Contains(err.Error(), "conflict") {
 		t.Errorf("error should mention routing type conflict, got: %v", err)
 	}
 
 	t.Logf("Correctly rejected conflict: %v", err)
-}
-
-// Helper function
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && len(s) >= len(substr) &&
-		(s == substr || findSubstring(s, substr))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

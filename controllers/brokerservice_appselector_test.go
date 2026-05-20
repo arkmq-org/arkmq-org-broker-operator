@@ -91,7 +91,7 @@ func TestAppSelectorAllowedNamespace(t *testing.T) {
 	}
 
 	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc, app, allowedNsObj, sharedNsObj).
 		WithStatusSubresource(app, svc)).
@@ -193,7 +193,7 @@ func TestAppSelectorDeniedNamespace(t *testing.T) {
 	}
 
 	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc, app, allowedNsObj, deniedNsObj, sharedNsObj).
 		WithStatusSubresource(app, svc)).
@@ -288,7 +288,7 @@ func TestAppSelectorEmptyAllowlist(t *testing.T) {
 	}
 
 	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc, app, svcNsObj).
 		WithStatusSubresource(app, svc)).
@@ -377,7 +377,7 @@ func TestAppSelectorEmptyAllowlistDifferentNamespace(t *testing.T) {
 	}
 
 	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc, app, svcNsObj, appNsObj).
 		WithStatusSubresource(app, svc)).
@@ -474,7 +474,7 @@ func TestAppSelectorRevokedAccess(t *testing.T) {
 	}
 
 	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc, app, appNsObj, sharedNsObj).
 		WithStatusSubresource(app, svc)).
@@ -611,7 +611,7 @@ func TestAppSelectorMultipleNamespaces(t *testing.T) {
 	}
 
 	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc, appA, appB, appDenied, svcNsObj, teamANsObj, teamBNsObj, teamDNsObj).
 		WithStatusSubresource(appA, appB, appDenied, svc)).
@@ -719,7 +719,7 @@ func TestAppSelectorAllowAll(t *testing.T) {
 	}
 
 	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc, app, svcNsObj, appNsObj).
 		WithStatusSubresource(app, svc)).
@@ -817,7 +817,7 @@ func TestAppSelectorPrefix(t *testing.T) {
 	}
 
 	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc, appMatch, appNoMatch, svcNsObj, teamAProdNsObj, appNoMatchNsObj).
 		WithStatusSubresource(appMatch, appNoMatch, svc)).
@@ -925,7 +925,7 @@ func TestAppSelectorSuffix(t *testing.T) {
 	}
 
 	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc, appMatch, appNoMatch, svcNsObj, teamAProdNsObj, teamADevNsObj).
 		WithStatusSubresource(appMatch, appNoMatch, svc)).
@@ -1049,7 +1049,7 @@ func TestAppSelectorPrefixAndSuffix(t *testing.T) {
 	}
 
 	// Setup fake client
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc, appMatch1, appMatch2, appNoMatch, svcNsObj, teamAProdNsObj, teamBackendProdNsObj, teamADevNsObj).
 		WithStatusSubresource(appMatch1, appMatch2, appNoMatch, svc)).

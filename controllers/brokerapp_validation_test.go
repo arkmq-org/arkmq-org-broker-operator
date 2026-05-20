@@ -48,7 +48,7 @@ func TestValidation_ConsumerOf_EmptySubscriptionsArray(t *testing.T) {
 		},
 	}
 
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(app).
 		WithStatusSubresource(app)).
@@ -94,7 +94,7 @@ func TestValidation_ProducerOf_NonEmptySubscriptionsArray(t *testing.T) {
 		},
 	}
 
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(app).
 		WithStatusSubresource(app)).
@@ -140,7 +140,7 @@ func TestValidation_QueueName_FQQN(t *testing.T) {
 		},
 	}
 
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(app).
 		WithStatusSubresource(app)).
@@ -186,7 +186,7 @@ func TestValidation_QueueName_Empty(t *testing.T) {
 		},
 	}
 
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(app).
 		WithStatusSubresource(app)).
@@ -230,7 +230,7 @@ func TestValidation_ProducerOf_FQQN(t *testing.T) {
 		},
 	}
 
-	cl := setupBrokerAppIndexer(fake.NewClientBuilder().
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(app).
 		WithStatusSubresource(app)).
