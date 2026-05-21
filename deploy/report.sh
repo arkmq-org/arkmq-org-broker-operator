@@ -23,6 +23,15 @@ error() {
   echo -n "$@" 1>&2 && exit 1
 }
 
+# bash version check
+if [[ -z ${BASH_VERSINFO+x} ]]; then
+  error "No bash version information available, aborting"
+fi
+if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+  error "You need bash version >= 4 to run the script"
+fi
+
+# kube client check
 if [[ -x "$(command -v kubectl)" ]]; then
   KUBECTL_INSTALLED=true
 else
@@ -42,14 +51,27 @@ $KUBE_CLIENT version -o yaml --request-timeout=5s 1>/dev/null
 readonly USAGE="
 Usage: report.sh [options]
 
-Required:
+Interactive mode (auto-discovery - requires cluster admin rights):
+  ./report.sh                   Discover all AMQ Broker clusters and select interactively.
+
+Manual mode (works without cluster admin rights):
   --namespace=<string>          Kubernetes namespace.
   --cluster=<string>            AMQ Broker cluster name.
 
 Optional:
-
   --secrets=(off|hidden|all)    Secret verbosity. Default is hidden, only the secret key will be reported.
   --out-dir=<string>            Script output directory.
+
+Examples:
+  # Interactive mode (requires cluster-wide permissions)
+  ./report.sh
+
+  # Manual mode (local script)
+  ./report.sh --namespace=amq --cluster=broker-prod
+  ./report.sh --namespace=amq --cluster=broker-prod --secrets=all --out-dir=~/Downloads
+
+  # Manual mode (remote via curl - useful without cluster admin rights)
+  bash <(curl -sLk \"https://raw.githubusercontent.com/aboucham/amq-broker-dump/refs/heads/main/report.sh\") --namespace=broker --cluster=broker
 "
 OPTSPEC=":-:"
 while getopts "$OPTSPEC" optchar; do
@@ -77,10 +99,6 @@ while getopts "$OPTSPEC" optchar; do
 done
 shift $((OPTIND-1))
 
-if [[ -z $NAMESPACE || -z $CLUSTER ]]; then
-  error "$USAGE"
-fi
-
 if [[ -z $OUT_DIR ]]; then
   OUT_DIR="$(mktemp -d)"
 fi
@@ -94,6 +112,89 @@ if [[ "$SECRETS_OPT" != "all" && "$SECRETS_OPT" != "off" && "$SECRETS_OPT" != "h
   error "$USAGE"
 fi
 
+# Auto-discovery: if namespace and cluster not provided, try to discover all AMQ Broker instances
+if [[ -z $NAMESPACE || -z $CLUSTER ]]; then
+  echo ""
+  echo "Auto-discovering AMQ Broker clusters..."
+  echo ""
+
+  # Try to get all ActiveMQArtemis instances across all namespaces
+  AMQ_INSTANCES=$($KUBE_CLIENT get activemqartemises.broker.amq.io --all-namespaces --no-headers -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name 2>/dev/null)
+
+  if [[ -z $AMQ_INSTANCES ]]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "⚠️  INSUFFICIENT CLUSTER ADMIN RIGHTS DETECTED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Unable to auto-discover AMQ Broker clusters across all namespaces."
+    echo "This typically means you don't have cluster-wide permissions."
+    echo ""
+    echo "Please use MANUAL MODE by specifying the namespace and cluster name:"
+    echo ""
+    echo "  bash <(curl -sLk \"https://raw.githubusercontent.com/aboucham/amq-broker-dump/refs/heads/main/report.sh\") \\"
+    echo "    --namespace=<YOUR_NAMESPACE> \\"
+    echo "    --cluster=<YOUR_CLUSTER_NAME>"
+    echo ""
+    echo "Example:"
+    echo "  bash <(curl -sLk \"https://raw.githubusercontent.com/aboucham/amq-broker-dump/refs/heads/main/report.sh\") \\"
+    echo "    --namespace=broker \\"
+    echo "    --cluster=broker"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    exit 1
+  fi
+
+  # Display found clusters
+  echo "Found AMQ Broker clusters:"
+  echo ""
+
+  # Create array of instances
+  mapfile -t INSTANCES < <(echo "$AMQ_INSTANCES")
+
+  # Display menu with index
+  count=1
+  for instance in "${INSTANCES[@]}"; do
+    ns=$(echo "$instance" | awk '{print $1}')
+    name=$(echo "$instance" | awk '{print $2}')
+    echo "  $count) Namespace: $ns, Cluster: $name"
+    count=$((count + 1))
+  done
+
+  echo ""
+
+  # Read user selection
+  read -p "Select cluster number (1-${#INSTANCES[@]}) or 'q' to quit: " selection
+
+  # Handle quit
+  if [[ "$selection" == "q" || "$selection" == "Q" ]]; then
+    echo "Cancelled by user"
+    exit 0
+  fi
+
+  # Validate selection is a number
+  if [[ ! $selection =~ ^[0-9]+$ ]]; then
+    error "Invalid selection. Please enter a number."
+  fi
+
+  # Validate selection is in range
+  if [[ $selection -lt 1 || $selection -gt ${#INSTANCES[@]} ]]; then
+    error "Invalid selection. Please enter a number between 1 and ${#INSTANCES[@]}."
+  fi
+
+  # Get selected instance
+  selected_instance="${INSTANCES[$((selection - 1))]}"
+  NAMESPACE=$(echo "$selected_instance" | awk '{print $1}')
+  CLUSTER=$(echo "$selected_instance" | awk '{print $2}')
+
+  readonly NAMESPACE
+  readonly CLUSTER
+
+  echo ""
+  echo "✓ Selected: Namespace=$NAMESPACE, Cluster=$CLUSTER"
+  echo ""
+fi
+
+# Validate namespace and cluster are now set (either from auto-discovery or command line)
 if [[ -z $CLUSTER ]]; then
   echo "Cluster was not specified. Use --cluster option to specify it."
   error "$USAGE"
@@ -136,6 +237,18 @@ readonly CLUSTER_RESOURCES=(
 if [[ "$SECRETS_OPT" == "off" ]]; then
   RESOURCES=("${RESOURCES[@]/secrets}") && readonly RESOURCES
 fi
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Starting resource collection for AMQ Broker cluster"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Namespace: $NAMESPACE"
+echo "  Cluster: $CLUSTER"
+echo "  Secrets: $SECRETS_OPT"
+echo "  Output: $OUT_DIR"
+echo ""
+echo "Collecting namespace-scoped resources..."
+echo ""
 
 get_masked_secrets() {
   echo "secrets"
@@ -181,19 +294,39 @@ done
 get_nonnamespaced_yamls() {
   local type="$1"
   mkdir -p "$OUT_DIR"/reports/"$type"
-  local resources && resources=$($KUBE_CLIENT get "$type" -l ActiveMQArtemis=$CLUSTER -o name -n "$NAMESPACE")
+  local resources
+  local error_output
+  error_output=$($KUBE_CLIENT get "$type" -l ActiveMQArtemis=$CLUSTER -o name 2>&1)
+  local exit_code=$?
+
+  if [[ $exit_code -ne 0 ]]; then
+    if [[ "$error_output" == *"Forbidden"* ]] || [[ "$error_output" == *"forbidden"* ]]; then
+      echo "$type (⚠️  skipped - insufficient cluster permissions)"
+      return 0
+    else
+      echo "$type (⚠️  skipped - not accessible)"
+      return 0
+    fi
+  fi
+
+  resources=$(echo "$error_output")
   echo "$type"
-  for res in $resources; do
-    local resources && resources=$($KUBE_CLIENT get "$type" -l ActiveMQArtemis=$CLUSTER -o name -n "$NAMESPACE")
-    echo "    $res"
-    res=$(echo "$res" | cut -d "/" -f 2)
-    $KUBE_CLIENT get "$type" "$res" -o yaml | sed "$SE" > "$OUT_DIR"/reports/"$type"/"$res".yaml
-  done
+
+  if [[ -n $resources ]]; then
+    for res in $resources; do
+      echo "    $res"
+      res=$(echo "$res" | cut -d "/" -f 2)
+      $KUBE_CLIENT get "$type" "$res" -o yaml 2>/dev/null | sed "$SE" > "$OUT_DIR"/reports/"$type"/"$res".yaml || echo "        (failed to retrieve)"
+    done
+  fi
 }
 
+echo ""
+echo "Collecting cluster-scoped resources (may require cluster admin rights)..."
 for RES in "${CLUSTER_RESOURCES[@]}"; do
   get_nonnamespaced_yamls "$RES"
 done
+echo ""
 
 get_pod_logs() {
   local pod="$1"
@@ -208,12 +341,18 @@ get_pod_logs() {
       if [[ -n $logs ]]; then printf "%s" "$logs" > "$OUT_DIR"/reports/podlogs/"$pod".log; fi
       logs="$($KUBE_CLIENT -n "$NAMESPACE" logs "$pod" -p 2>/dev/null ||true)"
       if [[ -n $logs ]]; then printf "%s" "$logs" > "$OUT_DIR"/reports/podlogs/"$pod".log.0; fi
+      # shellcheck disable=SC2016
+      # append thread dump to logs (no external dependency needed)
+      $KUBE_CLIENT -n "$NAMESPACE" exec -i "$pod" -- sh -c 'kill -QUIT 1' 2>/dev/null ||true
     fi
     if [[ "$count" -gt 1 && -n "$con" && "$names" == *"$con"* ]]; then
       logs="$($KUBE_CLIENT -n "$NAMESPACE" logs "$pod" -c "$con" ||true)"
       if [[ -n $logs ]]; then printf "%s" "$logs" > "$OUT_DIR"/reports/podlogs/"$pod"-"$con".log; fi
       logs="$($KUBE_CLIENT -n "$NAMESPACE" logs "$pod" -p -c "$con" 2>/dev/null ||true)"
       if [[ -n $logs ]]; then printf "%s" "$logs" > "$OUT_DIR"/reports/podlogs/"$pod"-"$con".log.0; fi
+      # shellcheck disable=SC2016
+      # append thread dump to logs (no external dependency needed)
+      $KUBE_CLIENT -n "$NAMESPACE" exec -i "$pod" -c "$con" -- sh -c 'kill -QUIT 1' 2>/dev/null ||true
     fi
   fi
 }
@@ -231,19 +370,14 @@ if [[ -n $CO_DEPLOY ]]; then
     get_pod_logs "$CO_POD"
   fi
 else
-  if $KUBE_CLIENT get namespace openshift-operators &> /dev/null; then
-    echo "Namespace 'openshift-operators' exists."
   $KUBE_CLIENT get deploy amq-broker-controller-manager -o yaml -n "openshift-operators" > "$OUT_DIR"/reports/deployments/cluster-operator.yaml
   $KUBE_CLIENT get po -l name=amq-broker-operator -o yaml -n "openshift-operators" > "$OUT_DIR"/reports/pods/cluster-operator.yaml
-  CO_POD_NS=$($KUBE_CLIENT get po -l name=amq-broker-operator -o name -n "openshift-operators" --ignore-not-found)
-  if [[ -n $CO_POD_NS ]]; then
-    echo "-   $CO_POD_NS"
+  CO_POD=$($KUBE_CLIENT get po -l name=amq-broker-operator -o name -n "openshift-operators" --ignore-not-found)
+  if [[ -n $CO_POD ]]; then
+    echo "    $CO_POD"
     #get_pod_logs "$CO_POD"
     mkdir -p "$OUT_DIR"/reports/podlogs
-    $KUBE_CLIENT -n "openshift-operators" logs "$CO_POD_NS" > "$OUT_DIR"/reports/podlogs/amq-broker-controller-manager.log
-  fi
-  else
-    echo "Namespace 'openshift-operators' not found. Skipping commands specific to that namespace."
+    $KUBE_CLIENT -n "openshift-operators" logs "$CO_POD" > "$OUT_DIR"/reports/podlogs/amq-broker-controller-manager.log
   fi
 fi
 
@@ -257,19 +391,64 @@ fi
 
 echo "customresources"
 mkdir -p "$OUT_DIR"/reports/crds "$OUT_DIR"/reports/crs
-CRDS=$($KUBE_CLIENT get crd -l operators.coreos.com/amq-broker-rhel8.openshift-operators -o name | cut -d "/" -f 2) && readonly CRDS
+# Collect all AMQ Broker CRDs (works with both rhel8 and rhel9 operators)
+# Using explicit CRD names to avoid grep alias issues on macOS
+AMQ_CRDS=(
+  "activemqartemises.broker.amq.io"
+  "activemqartemisaddresses.broker.amq.io"
+  "activemqartemisscaledowns.broker.amq.io"
+  "activemqartemissecurities.broker.amq.io"
+)
+CRDS=""
+for crd_name in "${AMQ_CRDS[@]}"; do
+  if $KUBE_CLIENT get crd "$crd_name" &>/dev/null; then
+    CRDS="$CRDS $crd_name"
+  fi
+done
+readonly CRDS
 for CRD in $CRDS; do
-  RES=$($KUBE_CLIENT get "$CRD" -o name -n "$NAMESPACE" | cut -d "/" -f 2)
+  RES=$($KUBE_CLIENT get "$CRD" -o name -n "$NAMESPACE" --ignore-not-found 2>/dev/null | cut -d "/" -f 2)
   if [[ -n $RES ]]; then
     echo "    $CRD"
-    $KUBE_CLIENT get crd "$CRD" -o yaml > "$OUT_DIR"/reports/crds/"$CRD".yaml
+    $KUBE_CLIENT get crd "$CRD" -o yaml > "$OUT_DIR"/reports/crds/"$CRD".yaml 2>/dev/null || true
     for j in $RES; do
       RES=$(echo "$j" | cut -f 1 -d " ")
-      $KUBE_CLIENT get "$CRD" "$RES" -n "$NAMESPACE" -o yaml > "$OUT_DIR"/reports/crs/"$CRD"-"$RES".yaml
+      $KUBE_CLIENT get "$CRD" "$RES" -n "$NAMESPACE" -o yaml > "$OUT_DIR"/reports/crs/"$CRD"-"$RES".yaml 2>/dev/null || true
       echo "        $RES"
     done
   fi
 done
+
+# Collect extraMounts ConfigMaps and Secrets from ActiveMQArtemis CRs
+echo "extramounts"
+mkdir -p "$OUT_DIR"/reports/extramounts/configmaps "$OUT_DIR"/reports/extramounts/secrets
+# Get the ActiveMQArtemis CR for this cluster
+ARTEMIS_CR=$($KUBE_CLIENT get activemqartemises.broker.amq.io "$CLUSTER" -n "$NAMESPACE" -o jsonpath='{.spec.deploymentPlan.extraMounts}' 2>/dev/null)
+if [[ -n $ARTEMIS_CR ]]; then
+  # Extract ConfigMaps from extraMounts using jsonpath
+  EXTRA_CONFIGMAPS=$($KUBE_CLIENT get activemqartemises.broker.amq.io "$CLUSTER" -n "$NAMESPACE" -o jsonpath='{.spec.deploymentPlan.extraMounts.configMaps[*]}' 2>/dev/null || true)
+  if [[ -n $EXTRA_CONFIGMAPS ]]; then
+    echo "    configmaps from extraMounts:"
+    for cm in $EXTRA_CONFIGMAPS; do
+      echo "        $cm"
+      $KUBE_CLIENT get configmap "$cm" -n "$NAMESPACE" -o yaml > "$OUT_DIR"/reports/extramounts/configmaps/"$cm".yaml 2>/dev/null || echo "        WARNING: ConfigMap $cm not found"
+    done
+  fi
+
+  # Extract Secrets from extraMounts using jsonpath
+  EXTRA_SECRETS=$($KUBE_CLIENT get activemqartemises.broker.amq.io "$CLUSTER" -n "$NAMESPACE" -o jsonpath='{.spec.deploymentPlan.extraMounts.secrets[*]}' 2>/dev/null || true)
+  if [[ -n $EXTRA_SECRETS ]]; then
+    echo "    secrets from extraMounts:"
+    for secret in $EXTRA_SECRETS; do
+      echo "        $secret"
+      if [[ "$SECRETS_OPT" == "all" ]]; then
+        $KUBE_CLIENT get secret "$secret" -n "$NAMESPACE" -o yaml > "$OUT_DIR"/reports/extramounts/secrets/"$secret".yaml 2>/dev/null || echo "        WARNING: Secret $secret not found"
+      elif [[ "$SECRETS_OPT" == "hidden" ]]; then
+        $KUBE_CLIENT get secret "$secret" -n "$NAMESPACE" -o yaml 2>/dev/null | sed "$SE" > "$OUT_DIR"/reports/extramounts/secrets/"$secret".yaml 2>/dev/null || echo "        WARNING: Secret $secret not found"
+      fi
+    done
+  fi
+fi
 
 echo "events"
 EVENTS=$($KUBE_CLIENT get event -n "$NAMESPACE" --ignore-not-found) && readonly EVENTS
@@ -301,7 +480,7 @@ for POD in $PODS; do
 
 for file in "${files[@]}"; do
     echo "Processing file: $file"
-    KUBE_CLIENT exec -i "$POD" -n "$NAMESPACE" -c "$CLUSTER-container" -- \
+    $KUBE_CLIENT exec -i "$POD" -n "$NAMESPACE" -c "$CLUSTER-container" -- \
         cat "/home/jboss/amq-broker/etc/$file" > "$OUT_DIR/reports/configs/$file" \
         2>/dev/null || true
 done
@@ -309,7 +488,7 @@ done
 # PostConfig.sh -- init
 
     echo "Processing file: post-config.sh"
-    KUBE_CLIENT exec -i "$POD" -n "$NAMESPACE" -c "$CLUSTER-container" -- \
+    $KUBE_CLIENT exec -i "$POD" -n "$NAMESPACE" -c "$CLUSTER-container" -- \
         cat "/amq/scripts/post-config.sh" > "$OUT_DIR/reports/configs/post-config.sh" \
         2>/dev/null || true
 done
@@ -323,5 +502,26 @@ if [[ $OUT_DIR == *"tmp."* ]]; then
   # let's keep the old behavior when --out-dir is not specified
   mv "$OUT_DIR"/"$FILENAME".zip ./
 fi
-echo "Report file $FILENAME.zip created"
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "✓ Report successfully created: $FILENAME.zip"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Summary:"
+echo "  Namespace: $NAMESPACE"
+echo "  Cluster: $CLUSTER"
+echo "  Output: $FILENAME.zip"
+echo ""
+
+# Check if cluster-scoped resources directory exists and is empty
+if [[ -d "$OUT_DIR/reports/clusterroles" ]] && [[ -z "$(ls -A "$OUT_DIR/reports/clusterroles" 2>/dev/null)" ]] && \
+   [[ -d "$OUT_DIR/reports/clusterrolebindings" ]] && [[ -z "$(ls -A "$OUT_DIR/reports/clusterrolebindings" 2>/dev/null)" ]]; then
+  echo "Note: Cluster-scoped resources (clusterroles, clusterrolebindings) were skipped"
+  echo "      due to insufficient cluster permissions. This is normal for non-admin users."
+  echo ""
+fi
+
+echo "Report collected successfully!"
+echo ""
 } # this ensures the entire script is downloaded #
