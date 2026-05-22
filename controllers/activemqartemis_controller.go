@@ -256,8 +256,7 @@ func (r *ActiveMQArtemisReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err == nil {
 		r.events = make(chan event.GenericEvent)
 		err = controller.Watch(
-			&source.Channel{Source: r.events},
-			&handler.EnqueueRequestForObject{},
+			source.Channel(r.events, &handler.EnqueueRequestForObject{}),
 		)
 	}
 	return err

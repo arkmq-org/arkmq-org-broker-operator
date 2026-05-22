@@ -18,6 +18,7 @@ import (
 	"github.com/RHsyseng/operator-utils/pkg/resource/compare"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/containers"
+	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/httproutes"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/ingresses"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/persistentvolumeclaims"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/pods"
@@ -25,6 +26,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/secrets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/serviceports"
 	ss "github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/statefulsets"
+	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/tlsroutes"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/certutil"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/cr2jinja2"
@@ -56,6 +58,7 @@ import (
 
 	routev1 "github.com/openshift/api/route/v1"
 	netv1 "k8s.io/api/networking/v1"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -92,6 +95,8 @@ const (
 	ServiceTypePostfix       = "svc"
 	RouteTypePostfix         = "rte"
 	IngressTypePostfix       = "ing"
+	TLSRouteTypePostfix      = "tlsrte"
+	HTTPRouteTypePostfix     = "httprte"
 	RemoveKeySpecialValue    = "-"
 	javaArgsAppendEnvVarName = "JAVA_ARGS_APPEND"
 	debugArgsEnvVarName      = "DEBUG_ARGS"
@@ -1049,7 +1054,7 @@ func (reconciler *BrokerReconcilerImpl) configureAcceptorsExposure(customResourc
 			reconciler.trackDesired(serviceDefinition)
 
 			if acceptor.Expose {
-				exposureDefinition := reconciler.ExposureDefinitionForCR(customResource, namespacedName, serviceRoutelabels, acceptor.SSLEnabled, acceptor.IngressHost, ordinalString, acceptor.Name, acceptor.ExposeMode)
+				exposureDefinition := reconciler.ExposureDefinitionForCR(customResource, namespacedName, serviceRoutelabels, acceptor.SSLEnabled, acceptor.IngressHost, ordinalString, acceptor.Name, acceptor.ExposeMode, acceptor.Port, acceptor.Gateway)
 				reconciler.trackDesired(exposureDefinition)
 			}
 		}
@@ -1065,12 +1070,17 @@ func (reconciler *BrokerReconcilerImpl) ServiceDefinitionForCR(serviceName types
 	return svc.NewServiceDefinitionForCR(serviceName, client, nameSuffix, portNumber, selectorLabels, labels, serviceDefinition)
 }
 
-func (reconciler *BrokerReconcilerImpl) ExposureDefinitionForCR(customResource *v1beta2.Broker, namespacedName types.NamespacedName, labels map[string]string, passthroughTLS bool, ingressHost string, ordinalString string, itemName string, exposeMode *v1beta2.ExposeMode) rtclient.Object {
+func (reconciler *BrokerReconcilerImpl) ExposureDefinitionForCR(customResource *v1beta2.Broker, namespacedName types.NamespacedName, labels map[string]string, passthroughTLS bool, ingressHost string, ordinalString string, itemName string, exposeMode *v1beta2.ExposeMode, port int32, gateway *v1beta2.GatewayConfig) rtclient.Object {
 
 	targetPortName := itemName + "-" + ordinalString
 	targetServiceName := customResource.Name + "-" + targetPortName + "-" + ServiceTypePostfix
 
 	exposeWithRoute := (exposeMode == nil && reconciler.isOnOpenShift) || (exposeMode != nil && *exposeMode == v1beta2.ExposeModes.Route)
+	exposeWithGateway := exposeMode != nil && *exposeMode == v1beta2.ExposeModes.Gateway
+
+	if exposeWithGateway {
+		return reconciler.gatewayRouteForExposure(customResource, namespacedName, labels, passthroughTLS, ingressHost, ordinalString, itemName, targetServiceName, port, gateway)
+	}
 
 	if exposeWithRoute {
 		reconciler.log.V(1).Info("creating route for "+targetPortName, "service", targetServiceName)
@@ -1093,6 +1103,34 @@ func (reconciler *BrokerReconcilerImpl) ExposureDefinitionForCR(customResource *
 		brokerHost := formatTemplatedString(customResource, ingressHost, ordinalString, itemName, IngressTypePostfix)
 		return ingresses.NewIngressForCRWithSSL(existing, namespacedName, labels, targetServiceName, targetPortName, passthroughTLS, customResource.Spec.IngressDomain, brokerHost, reconciler.isOnOpenShift)
 	}
+}
+
+// gatewayRouteForExposure builds the Gateway API route object for an acceptor,
+// connector or console exposed with exposeMode=gateway. It picks TLSRoute when
+// SSL is enabled (passthrough) and HTTPRoute otherwise.
+func (reconciler *BrokerReconcilerImpl) gatewayRouteForExposure(customResource *v1beta2.Broker, namespacedName types.NamespacedName, labels map[string]string, sslEnabled bool, ingressHost string, ordinalString string, itemName string, targetServiceName string, port int32, gateway *v1beta2.GatewayConfig) rtclient.Object {
+
+	if sslEnabled {
+		routeName := targetServiceName + "-" + TLSRouteTypePostfix
+		brokerHost := formatTemplatedString(customResource, ingressHost, ordinalString, itemName, TLSRouteTypePostfix)
+		reconciler.log.V(1).Info("creating TLSRoute", "service", targetServiceName, "host", brokerHost)
+
+		var existing *gatewayv1.TLSRoute
+		if obj := reconciler.cloneOfDeployed(reflect.TypeOf(gatewayv1.TLSRoute{}), routeName); obj != nil {
+			existing = obj.(*gatewayv1.TLSRoute)
+		}
+		return tlsroutes.NewTLSRouteForCR(existing, namespacedName, labels, routeName, targetServiceName, port, brokerHost, gateway)
+	}
+
+	routeName := targetServiceName + "-" + HTTPRouteTypePostfix
+	brokerHost := formatTemplatedString(customResource, ingressHost, ordinalString, itemName, HTTPRouteTypePostfix)
+	reconciler.log.V(1).Info("creating HTTPRoute", "service", targetServiceName, "host", brokerHost)
+
+	var existing *gatewayv1.HTTPRoute
+	if obj := reconciler.cloneOfDeployed(reflect.TypeOf(gatewayv1.HTTPRoute{}), routeName); obj != nil {
+		existing = obj.(*gatewayv1.HTTPRoute)
+	}
+	return httproutes.NewHTTPRouteForCR(existing, namespacedName, labels, routeName, targetServiceName, port, brokerHost, gateway)
 }
 
 func (reconciler *BrokerReconcilerImpl) trackDesired(desired rtclient.Object) {
@@ -1233,6 +1271,14 @@ func extractResType(desired rtclient.Object) string {
 		{
 			return RouteTypePostfix
 		}
+	case *gatewayv1.TLSRoute:
+		{
+			return TLSRouteTypePostfix
+		}
+	case *gatewayv1.HTTPRoute:
+		{
+			return HTTPRouteTypePostfix
+		}
 	}
 	return "undefined-res-type"
 }
@@ -1248,7 +1294,7 @@ func extractOrdinal(desired rtclient.Object) string {
 			}
 
 		}
-	case *netv1.Ingress, *routev1.Route:
+	case *netv1.Ingress, *routev1.Route, *gatewayv1.TLSRoute, *gatewayv1.HTTPRoute:
 		{
 			podName, found := desired.GetLabels()[PodNameLabelKey]
 			if found {
@@ -1336,7 +1382,7 @@ func (reconciler *BrokerReconcilerImpl) configureConnectorsExposure(customResour
 
 			if connector.Expose {
 
-				exposureDefinition := reconciler.ExposureDefinitionForCR(customResource, namespacedName, serviceRoutelabels, connector.SSLEnabled, connector.IngressHost, ordinalString, connector.Name, connector.ExposeMode)
+				exposureDefinition := reconciler.ExposureDefinitionForCR(customResource, namespacedName, serviceRoutelabels, connector.SSLEnabled, connector.IngressHost, ordinalString, connector.Name, connector.ExposeMode, connector.Port, connector.Gateway)
 
 				reconciler.trackDesired(exposureDefinition)
 			}
@@ -1384,8 +1430,12 @@ func (reconciler *BrokerReconcilerImpl) configureConsoleExposure(customResource 
 			reconciler.trackDesired(serviceDefinition)
 
 			exposeWithRoute := (console.ExposeMode == nil && reconciler.isOnOpenShift) || (console.ExposeMode != nil && *console.ExposeMode == v1beta2.ExposeModes.Route)
+			exposeWithGateway := console.ExposeMode != nil && *console.ExposeMode == v1beta2.ExposeModes.Gateway
 
-			if exposeWithRoute {
+			if exposeWithGateway {
+				gwRoute := reconciler.gatewayRouteForExposure(customResource, namespacedName, serviceRoutelabels, console.SSLEnabled, customResource.Spec.Console.IngressHost, ordinalString, consoleName, targetServiceName, portNumber, console.Gateway)
+				reconciler.trackDesired(gwRoute)
+			} else if exposeWithRoute {
 				reconciler.log.V(2).Info("routeDefinition for " + targetPortName)
 				var existing *routev1.Route = nil
 				obj := reconciler.cloneOfDeployed(reflect.TypeOf(routev1.Route{}), targetServiceName+"-"+RouteTypePostfix)
@@ -1923,7 +1973,7 @@ var orderedTypes *([]reflect.Type)
 
 func getOrderedTypeList() []reflect.Type {
 	if orderedTypes == nil {
-		types := make([]reflect.Type, 7)
+		types := make([]reflect.Type, 9)
 
 		// we want to create/update in this order
 		types[0] = reflect.TypeOf(corev1.Secret{})
@@ -1932,7 +1982,9 @@ func getOrderedTypeList() []reflect.Type {
 		types[3] = reflect.TypeOf(corev1.Service{})
 		types[4] = reflect.TypeOf(netv1.Ingress{})
 		types[5] = reflect.TypeOf(routev1.Route{})
-		types[6] = reflect.TypeOf(policyv1.PodDisruptionBudget{})
+		types[6] = reflect.TypeOf(gatewayv1.TLSRoute{})
+		types[7] = reflect.TypeOf(gatewayv1.HTTPRoute{})
+		types[8] = reflect.TypeOf(policyv1.PodDisruptionBudget{})
 		orderedTypes = &types
 	}
 	return *orderedTypes
@@ -4363,7 +4415,44 @@ func (r *BrokerReconcilerImpl) validateExposeModes(customResource *v1beta2.Broke
 		}, false
 	}
 
+	for _, acceptor := range customResource.Spec.Acceptors {
+		if cond := validateGatewayExposure(acceptor.Expose, acceptor.ExposeMode, acceptor.Gateway, acceptor.IngressHost, customResource.Spec.IngressDomain, fmt.Sprintf(".Spec.Acceptors %q", acceptor.Name)); cond != nil {
+			return cond, false
+		}
+	}
+	for _, connector := range customResource.Spec.Connectors {
+		if cond := validateGatewayExposure(connector.Expose, connector.ExposeMode, connector.Gateway, connector.IngressHost, customResource.Spec.IngressDomain, fmt.Sprintf(".Spec.Connectors %q", connector.Name)); cond != nil {
+			return cond, false
+		}
+	}
+	if cond := validateGatewayExposure(console.Expose, console.ExposeMode, console.Gateway, console.IngressHost, customResource.Spec.IngressDomain, ".Spec.Console"); cond != nil {
+		return cond, false
+	}
+
 	return nil, false
+}
+
+func validateGatewayExposure(expose bool, exposeMode *v1beta2.ExposeMode, gateway *v1beta2.GatewayConfig, ingressHost string, ingressDomain string, fieldPath string) *metav1.Condition {
+	if !expose || exposeMode == nil || *exposeMode != v1beta2.ExposeModes.Gateway {
+		return nil
+	}
+	if gateway == nil || gateway.ParentRef.Name == "" {
+		return &metav1.Condition{
+			Type:    v1beta2.ValidConditionType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1beta2.ValidConditionFailedInvalidExposeMode,
+			Message: fmt.Sprintf("%s has expose mode gateway but no gateway.parentRef.name provided", fieldPath),
+		}
+	}
+	if ingressDomain == "" && ingressHost == "" {
+		return &metav1.Condition{
+			Type:    v1beta2.ValidConditionType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1beta2.ValidConditionFailedInvalidIngressSettings,
+			Message: fmt.Sprintf("%s has invalid gateway settings, IngressHost unspecified and no Spec.IngressDomain default domain provided", fieldPath),
+		}
+	}
+	return nil
 }
 
 func (r *BrokerReconcilerImpl) validateEnvVars(customResource *v1beta2.Broker) (*metav1.Condition, bool) {

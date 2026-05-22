@@ -1084,7 +1084,7 @@ var _ = Describe("security controller", func() {
 			}
 			httpClient, err := rest.HTTPClientFor(restConfig)
 			Expect(err).To(BeNil())
-			restClient, err := apiutil.RESTClientForGVK(gvk, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
+			restClient, err := apiutil.RESTClientForGVK(gvk, false, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
 			Expect(err).To(BeNil())
 
 			podOrdinal := strconv.FormatInt(int64(0), 10)

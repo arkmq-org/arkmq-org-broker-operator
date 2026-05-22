@@ -51,6 +51,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	routev1 "github.com/openshift/api/route/v1"
+	gatewayv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/log"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/sdkk8sutil"
@@ -93,6 +94,7 @@ func printVersion() {
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(routev1.AddToScheme(scheme))
+	utilruntime.Must(gatewayv1alpha2.Install(scheme))
 
 	utilruntime.Must(brokerv2alpha1.AddToScheme(scheme))
 	utilruntime.Must(brokerv2alpha2.AddToScheme(scheme))
@@ -195,7 +197,6 @@ func main() {
 		Logger:                 setupLog,
 	}
 
-	mgrOptions.Client.WarningHandler.SuppressWarnings = true
 	rest.SetDefaultWarningHandler(&TraceLogWarnings{Log: ctrl.Log})
 
 	isLocal, watchList := common.ResolveWatchNamespaceForManager(oprNamespace, watchNamespace)

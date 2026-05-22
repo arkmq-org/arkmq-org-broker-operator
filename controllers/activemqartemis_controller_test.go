@@ -65,6 +65,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
+	brokerv1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/cr2jinja2"
 
 	"github.com/Azure/go-amqp"
@@ -72,6 +73,7 @@ import (
 	netv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 var _ = Describe("artemis controller", func() {
@@ -107,7 +109,7 @@ var _ = Describe("artemis controller", func() {
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 				By("Deploying the broker cr")
-				brokerCr, createdBrokerCr := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
+				brokerCr, createdBrokerCr := DeployCustomBrokerV1(defaultNamespace, func(candidate *brokerv1beta2.Broker) {
 
 					candidate.Spec.DeploymentPlan.Size = common.Int32ToPtr(2)
 					candidate.Spec.DeploymentPlan.ReadinessProbe = &corev1.Probe{
@@ -123,7 +125,7 @@ var _ = Describe("artemis controller", func() {
 						candidate.Spec.IngressDomain = defaultTestIngressDomain
 					}
 
-					candidate.Spec.Acceptors = []brokerv1beta1.AcceptorType{
+					candidate.Spec.Acceptors = []brokerv1beta2.AcceptorType{
 						{
 							Name:               "amqp-ssl",
 							Protocols:          "amqp",
@@ -140,7 +142,7 @@ var _ = Describe("artemis controller", func() {
 						},
 					}
 
-					candidate.Spec.Connectors = []brokerv1beta1.ConnectorType{
+					candidate.Spec.Connectors = []brokerv1beta2.ConnectorType{
 						{
 							Name:       "connector-ssl",
 							Host:       "0.0.0.0",
@@ -307,6 +309,111 @@ var _ = Describe("artemis controller", func() {
 				CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
 				CleanResource(commonSecret, commonSecret.Name, defaultNamespace)
 			}
+		})
+
+		It("exposes acceptors and console via Gateway API routes", func() {
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				return
+			}
+			if err := k8sClient.List(ctx, &gatewayv1.TLSRouteList{}); err != nil {
+				if errors.IsNotFound(err) || meta.IsNoMatchError(err) {
+					Skip("gateway-api CRDs not installed in the cluster — skipping gateway expose-mode spec")
+				}
+			}
+
+			commonSecretName := "common-amq-tls-secret"
+			commonSecret, err := CreateTlsSecret(commonSecretName, defaultNamespace, defaultPassword, defaultSanDnsNames)
+			Expect(err).To(BeNil())
+
+			Expect(k8sClient.Create(ctx, commonSecret)).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				createdSecret := corev1.Secret{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: commonSecretName, Namespace: defaultNamespace}, &createdSecret)).To(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			gatewayMode := brokerv1beta2.ExposeModes.Gateway
+			parent := brokerv1beta2.GatewayParentReference{Name: "test-gateway", Namespace: defaultNamespace}
+
+			By("Deploying the broker cr with gateway-exposed acceptors and console")
+			brokerCr, createdBrokerCr := DeployCustomBrokerV1(defaultNamespace, func(candidate *brokerv1beta2.Broker) {
+
+				candidate.Spec.DeploymentPlan.Size = common.Int32ToPtr(1)
+				candidate.Spec.DeploymentPlan.ReadinessProbe = &corev1.Probe{
+					InitialDelaySeconds: 1,
+					PeriodSeconds:       1,
+					TimeoutSeconds:      5,
+				}
+				candidate.Spec.IngressDomain = defaultTestIngressDomain
+
+				candidate.Spec.Console.Expose = true
+				candidate.Spec.Console.SSLEnabled = true
+				candidate.Spec.Console.SSLSecret = commonSecretName
+				candidate.Spec.Console.ExposeMode = &gatewayMode
+				candidate.Spec.Console.Gateway = &brokerv1beta2.GatewayConfig{ParentRef: parent}
+
+				candidate.Spec.Acceptors = []brokerv1beta2.AcceptorType{
+					{
+						Name:       "amqp-ssl-gw",
+						Protocols:  "amqp",
+						Port:       5671,
+						SSLEnabled: true,
+						SSLSecret:  commonSecretName,
+						Expose:     true,
+						ExposeMode: &gatewayMode,
+						Gateway:    &brokerv1beta2.GatewayConfig{ParentRef: parent},
+					},
+					{
+						Name:       "amqp-plain-gw",
+						Protocols:  "amqp",
+						Port:       5672,
+						Expose:     true,
+						ExposeMode: &gatewayMode,
+						Gateway:    &brokerv1beta2.GatewayConfig{ParentRef: parent},
+					},
+				}
+			})
+
+			By("verify pod is up")
+			WaitForPod(brokerCr.Name)
+
+			By("checking TLSRoute is created for the SSL acceptor")
+			tlsRoute := gatewayv1.TLSRoute{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: brokerCr.Name + "-amqp-ssl-gw-0-svc-tlsrte", Namespace: defaultNamespace}, &tlsRoute)).To(Succeed())
+				g.Expect(tlsRoute.Spec.ParentRefs).To(HaveLen(1))
+				g.Expect(string(tlsRoute.Spec.ParentRefs[0].Name)).To(Equal(parent.Name))
+				g.Expect(tlsRoute.Spec.ParentRefs[0].Namespace).NotTo(BeNil())
+				g.Expect(string(*tlsRoute.Spec.ParentRefs[0].Namespace)).To(Equal(parent.Namespace))
+				g.Expect(tlsRoute.Spec.Rules).To(HaveLen(1))
+				g.Expect(tlsRoute.Spec.Rules[0].BackendRefs).To(HaveLen(1))
+				g.Expect(string(tlsRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(brokerCr.Name + "-amqp-ssl-gw-0-svc"))
+				g.Expect(tlsRoute.Spec.Rules[0].BackendRefs[0].Port).NotTo(BeNil())
+				g.Expect(int32(*tlsRoute.Spec.Rules[0].BackendRefs[0].Port)).To(Equal(int32(5671)))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("checking HTTPRoute is created for the plain acceptor")
+			httpRoute := gatewayv1.HTTPRoute{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: brokerCr.Name + "-amqp-plain-gw-0-svc-httprte", Namespace: defaultNamespace}, &httpRoute)).To(Succeed())
+				g.Expect(httpRoute.Spec.ParentRefs).To(HaveLen(1))
+				g.Expect(string(httpRoute.Spec.ParentRefs[0].Name)).To(Equal(parent.Name))
+				g.Expect(httpRoute.Spec.Rules).To(HaveLen(1))
+				g.Expect(httpRoute.Spec.Rules[0].BackendRefs).To(HaveLen(1))
+				g.Expect(string(httpRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(brokerCr.Name + "-amqp-plain-gw-0-svc"))
+				g.Expect(httpRoute.Spec.Rules[0].BackendRefs[0].Port).NotTo(BeNil())
+				g.Expect(int32(*httpRoute.Spec.Rules[0].BackendRefs[0].Port)).To(Equal(int32(5672)))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("checking TLSRoute is created for the SSL-enabled console")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: brokerCr.Name + "-wconsj-0-svc-tlsrte", Namespace: defaultNamespace}, &tlsRoute)).To(Succeed())
+				g.Expect(tlsRoute.Spec.ParentRefs).To(HaveLen(1))
+				g.Expect(string(tlsRoute.Spec.ParentRefs[0].Name)).To(Equal(parent.Name))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
+			CleanResource(commonSecret, commonSecret.Name, defaultNamespace)
 		})
 	})
 
