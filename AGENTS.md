@@ -97,6 +97,8 @@ Follow the `AI_documentation/contribution_guide.md`
   - Check if minikube/cluster is running
   - Start minikube if needed (don't ask permission)
   - Verify cert-manager installed and ready
+  - Verify the Gateway API CRDs are installed (`make install-gateway-api-crds`);
+    without them the gateway expose-mode specs skip themselves silently
 
 - **Run Tests** → Execute tests AUTOMATICALLY:
   - E2E tests at start and end: `USE_EXISTING_CLUSTER=true go test -v
@@ -249,15 +251,31 @@ kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --ti
 # Verify SSL passthrough
 kubectl get deployment ingress-nginx-controller -n ingress-nginx \
   -o jsonpath='{.spec.template.spec.containers[0].args}' | grep "enable-ssl-passthrough"
+
+# macOS only:  a running minikube tunnel is required
+minikube tunnel --profile minikube
 ```
 
-**3. Install Development Tools**
+**3. Install Gateway API CRDs**
+
+```bash
+# Required by the exposeMode=gateway specs. The version is pinned in the Makefile
+# and must track sigs.k8s.io/gateway-api in go.mod.
+make install-gateway-api-crds
+
+# Verify (both resources are needed; a partial install disables gateway exposure)
+kubectl wait --for=condition=Established \
+  crd/httproutes.gateway.networking.k8s.io \
+  crd/tlsroutes.gateway.networking.k8s.io --timeout=60s
+```
+
+**4. Install Development Tools**
 
 ```bash
 make helm controller-gen envtest
 ```
 
-**4. Generate and Install CRDs**
+**5. Generate and Install CRDs**
 
 ```bash
 # Generate CRDs and code
@@ -270,7 +288,7 @@ make install
 kubectl get crds | grep broker.amq.io
 ```
 
-**5. Run Test Suite**
+**6. Run Test Suite**
 
 ```bash
 # Run all tests (excludes deployed operator tests)

@@ -16,6 +16,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokervolumes"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/containers"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/httproutes"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/ingresses"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/persistentvolumeclaims"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/pods"
@@ -23,6 +24,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/serviceports"
 	ss "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/statefulsets"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/tlsroutes"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/certutil"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/cr2jinja2"
@@ -30,6 +32,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/random"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -53,6 +56,7 @@ import (
 
 	routev1 "github.com/openshift/api/route/v1"
 	netv1 "k8s.io/api/networking/v1"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -60,7 +64,6 @@ import (
 
 	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
 	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
-	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 
 	"strconv"
 	"strings"
@@ -90,6 +93,8 @@ const (
 	ServiceTypePostfix       = "svc"
 	RouteTypePostfix         = "rte"
 	IngressTypePostfix       = "ing"
+	TLSRouteTypePostfix      = "tlsrte"
+	HTTPRouteTypePostfix     = "httprte"
 	RemoveKeySpecialValue    = "-"
 	javaArgsAppendEnvVarName = "JAVA_ARGS_APPEND"
 	debugArgsEnvVarName      = "DEBUG_ARGS"
@@ -118,26 +123,28 @@ var defApplyRule string = "merge_all"
 var yacfgProfileVersion = version.YacfgProfileVersionFromFullVersion[version.GetDefaultVersion()]
 
 type BrokerClusterReconcilerImpl struct {
-	requestedResources map[reflect.Type]map[string]rtclient.Object
-	deployed           map[reflect.Type][]rtclient.Object
-	log                logr.Logger
-	customResource     *v1beta2.BrokerCluster
-	scheme             *runtime.Scheme
-	isOnOpenShift      bool
-	jolokiaEndpoints   []*jolokia_client.JkInfo
-	cachedBrokerStatus map[string]any
-	matchedTemplates   map[int]bool
+	requestedResources        map[reflect.Type]map[string]rtclient.Object
+	deployed                  map[reflect.Type][]rtclient.Object
+	log                       logr.Logger
+	customResource            *v1beta2.BrokerCluster
+	scheme                    *runtime.Scheme
+	isOnOpenShift             bool
+	isGatewayAPIAvailable     bool
+	jolokiaEndpoints          []*jolokia_client.JkInfo
+	cachedBrokerClusterStatus map[string]any
+	matchedTemplates          map[int]bool
 }
 
 func NewBrokerClusterReconcilerImpl(customResource *v1beta2.BrokerCluster, parent *BrokerClusterReconciler) *BrokerClusterReconcilerImpl {
 	return &BrokerClusterReconcilerImpl{
-		log:                withCRContext(parent.log, customResource.Name, customResource.Namespace),
-		customResource:     customResource,
-		scheme:             parent.Scheme,
-		requestedResources: make(map[reflect.Type]map[string]rtclient.Object),
-		isOnOpenShift:      parent.isOnOpenShift,
-		cachedBrokerStatus: make(map[string]any),
-		matchedTemplates:   make(map[int]bool),
+		log:                       withCRContext(parent.log, customResource.Name, customResource.Namespace),
+		customResource:            customResource,
+		scheme:                    parent.Scheme,
+		requestedResources:        make(map[reflect.Type]map[string]rtclient.Object),
+		isOnOpenShift:             parent.isOnOpenShift,
+		isGatewayAPIAvailable:     parent.isGatewayAPIAvailable,
+		cachedBrokerClusterStatus: make(map[string]any),
+		matchedTemplates:          make(map[int]bool),
 	}
 }
 
@@ -1038,7 +1045,7 @@ func (reconciler *BrokerClusterReconcilerImpl) configureAcceptorsExposure(custom
 			reconciler.trackDesired(serviceDefinition)
 
 			if acceptor.Expose {
-				exposureDefinition := reconciler.ExposureDefinitionForCR(customResource, namespacedName, serviceRoutelabels, acceptor.SSLEnabled, acceptor.IngressHost, ordinalString, acceptor.Name, acceptor.ExposeMode)
+				exposureDefinition := reconciler.ExposureDefinitionForCR(customResource, namespacedName, serviceRoutelabels, acceptor.SSLEnabled, acceptor.IngressHost, ordinalString, acceptor.Name, acceptor.ExposeMode, acceptor.Port, acceptor.Gateway)
 				reconciler.trackDesired(exposureDefinition)
 			}
 		}
@@ -1054,12 +1061,17 @@ func (reconciler *BrokerClusterReconcilerImpl) ServiceDefinitionForCR(serviceNam
 	return svc.NewServiceDefinitionForCR(serviceName, client, nameSuffix, portNumber, selectorLabels, labels, serviceDefinition)
 }
 
-func (reconciler *BrokerClusterReconcilerImpl) ExposureDefinitionForCR(customResource *v1beta2.BrokerCluster, namespacedName types.NamespacedName, labels map[string]string, passthroughTLS bool, ingressHost string, ordinalString string, itemName string, exposeMode *v1beta2.ExposeMode) rtclient.Object {
+func (reconciler *BrokerClusterReconcilerImpl) ExposureDefinitionForCR(customResource *v1beta2.BrokerCluster, namespacedName types.NamespacedName, labels map[string]string, passthroughTLS bool, ingressHost string, ordinalString string, itemName string, exposeMode *v1beta2.ExposeMode, port int32, gateway *v1beta2.GatewayConfig) rtclient.Object {
 
 	targetPortName := itemName + "-" + ordinalString
 	targetServiceName := customResource.Name + "-" + targetPortName + "-" + ServiceTypePostfix
 
 	exposeWithRoute := (exposeMode == nil && reconciler.isOnOpenShift) || (exposeMode != nil && *exposeMode == v1beta2.ExposeModes.Route)
+	exposeWithGateway := exposeMode != nil && *exposeMode == v1beta2.ExposeModes.Gateway
+
+	if exposeWithGateway {
+		return reconciler.gatewayRouteForExposure(customResource, namespacedName, labels, passthroughTLS, ingressHost, ordinalString, itemName, targetServiceName, port, gateway)
+	}
 
 	if exposeWithRoute {
 		reconciler.log.V(1).Info("creating route for "+targetPortName, "service", targetServiceName)
@@ -1082,6 +1094,34 @@ func (reconciler *BrokerClusterReconcilerImpl) ExposureDefinitionForCR(customRes
 		brokerHost := formatTemplatedString(customResource, ingressHost, ordinalString, itemName, IngressTypePostfix)
 		return ingresses.NewIngressForCRWithSSL(existing, namespacedName, labels, targetServiceName, targetPortName, passthroughTLS, customResource.Spec.IngressDomain, brokerHost, reconciler.isOnOpenShift)
 	}
+}
+
+// gatewayRouteForExposure builds the Gateway API route object for an acceptor,
+// connector or console exposed with exposeMode=gateway. It picks TLSRoute when
+// SSL is enabled (passthrough) and HTTPRoute otherwise.
+func (reconciler *BrokerClusterReconcilerImpl) gatewayRouteForExposure(customResource *v1beta2.BrokerCluster, namespacedName types.NamespacedName, labels map[string]string, sslEnabled bool, ingressHost string, ordinalString string, itemName string, targetServiceName string, port int32, gateway *v1beta2.GatewayConfig) rtclient.Object {
+
+	if sslEnabled {
+		routeName := targetServiceName + "-" + TLSRouteTypePostfix
+		brokerHost := formatTemplatedString(customResource, ingressHost, ordinalString, itemName, TLSRouteTypePostfix)
+		reconciler.log.V(1).Info("creating TLSRoute", "service", targetServiceName, "host", brokerHost)
+
+		var existing *gatewayv1.TLSRoute
+		if obj := reconciler.cloneOfDeployed(reflect.TypeOf(gatewayv1.TLSRoute{}), routeName); obj != nil {
+			existing = obj.(*gatewayv1.TLSRoute)
+		}
+		return tlsroutes.NewTLSRouteForCR(existing, namespacedName, labels, routeName, targetServiceName, port, brokerHost, gateway)
+	}
+
+	routeName := targetServiceName + "-" + HTTPRouteTypePostfix
+	brokerHost := formatTemplatedString(customResource, ingressHost, ordinalString, itemName, HTTPRouteTypePostfix)
+	reconciler.log.V(1).Info("creating HTTPRoute", "service", targetServiceName, "host", brokerHost)
+
+	var existing *gatewayv1.HTTPRoute
+	if obj := reconciler.cloneOfDeployed(reflect.TypeOf(gatewayv1.HTTPRoute{}), routeName); obj != nil {
+		existing = obj.(*gatewayv1.HTTPRoute)
+	}
+	return httproutes.NewHTTPRouteForCR(existing, namespacedName, labels, routeName, targetServiceName, port, brokerHost, gateway)
 }
 
 func (reconciler *BrokerClusterReconcilerImpl) trackDesired(desired rtclient.Object) {
@@ -1222,6 +1262,14 @@ func extractResType(desired rtclient.Object) string {
 		{
 			return RouteTypePostfix
 		}
+	case *gatewayv1.TLSRoute:
+		{
+			return TLSRouteTypePostfix
+		}
+	case *gatewayv1.HTTPRoute:
+		{
+			return HTTPRouteTypePostfix
+		}
 	}
 	return "undefined-res-type"
 }
@@ -1237,7 +1285,7 @@ func extractOrdinal(desired rtclient.Object) string {
 			}
 
 		}
-	case *netv1.Ingress, *routev1.Route:
+	case *netv1.Ingress, *routev1.Route, *gatewayv1.TLSRoute, *gatewayv1.HTTPRoute:
 		{
 			podName, found := desired.GetLabels()[PodNameLabelKey]
 			if found {
@@ -1325,7 +1373,7 @@ func (reconciler *BrokerClusterReconcilerImpl) configureConnectorsExposure(custo
 
 			if connector.Expose {
 
-				exposureDefinition := reconciler.ExposureDefinitionForCR(customResource, namespacedName, serviceRoutelabels, connector.SSLEnabled, connector.IngressHost, ordinalString, connector.Name, connector.ExposeMode)
+				exposureDefinition := reconciler.ExposureDefinitionForCR(customResource, namespacedName, serviceRoutelabels, connector.SSLEnabled, connector.IngressHost, ordinalString, connector.Name, connector.ExposeMode, connector.Port, connector.Gateway)
 
 				reconciler.trackDesired(exposureDefinition)
 			}
@@ -1373,8 +1421,13 @@ func (reconciler *BrokerClusterReconcilerImpl) configureConsoleExposure(customRe
 			reconciler.trackDesired(serviceDefinition)
 
 			exposeWithRoute := (console.ExposeMode == nil && reconciler.isOnOpenShift) || (console.ExposeMode != nil && *console.ExposeMode == v1beta2.ExposeModes.Route)
+			exposeWithGateway := console.ExposeMode != nil && *console.ExposeMode == v1beta2.ExposeModes.Gateway
 
-			if exposeWithRoute {
+			switch {
+			case exposeWithGateway:
+				gwRoute := reconciler.gatewayRouteForExposure(customResource, namespacedName, serviceRoutelabels, console.SSLEnabled, customResource.Spec.Console.IngressHost, ordinalString, consoleName, targetServiceName, portNumber, console.Gateway)
+				reconciler.trackDesired(gwRoute)
+			case exposeWithRoute:
 				reconciler.log.V(2).Info("routeDefinition for " + targetPortName)
 				var existing *routev1.Route = nil
 				obj := reconciler.cloneOfDeployed(reflect.TypeOf(routev1.Route{}), targetServiceName+"-"+RouteTypePostfix)
@@ -1385,7 +1438,7 @@ func (reconciler *BrokerClusterReconcilerImpl) configureConsoleExposure(customRe
 				routeDefinition := routes.NewRouteDefinitionForCR(existing, namespacedName, serviceRoutelabels, targetServiceName, targetPortName, console.SSLEnabled, customResource.Spec.IngressDomain, brokerHost)
 				reconciler.trackDesired(routeDefinition)
 
-			} else {
+			default:
 				reconciler.log.V(2).Info("ingress for " + targetPortName)
 				var existing *netv1.Ingress = nil
 				obj := reconciler.cloneOfDeployed(reflect.TypeOf(netv1.Ingress{}), targetServiceName+"-"+IngressTypePostfix)
@@ -1572,7 +1625,7 @@ func (reconciler *BrokerClusterReconcilerImpl) CurrentDeployedResources(customRe
 		reconciler.checkExistingPersistentVolumes(customResource, client)
 	}
 
-	reconciler.deployed, err = common.GetDeployedResources(customResource, client, reconciler.isOnOpenShift)
+	reconciler.deployed, err = common.GetDeployedResources(customResource, client, reconciler.isOnOpenShift, reconciler.isGatewayAPIAvailable)
 	if err != nil {
 		reconciler.log.Error(err, "error getting deployed resources")
 		return
@@ -1884,7 +1937,7 @@ var orderedTypes *([]reflect.Type)
 
 func getOrderedTypeList() []reflect.Type {
 	if orderedTypes == nil {
-		types := make([]reflect.Type, 7)
+		types := make([]reflect.Type, 9)
 
 		// we want to create/update in this order
 		types[0] = reflect.TypeOf(corev1.Secret{})
@@ -1893,7 +1946,9 @@ func getOrderedTypeList() []reflect.Type {
 		types[3] = reflect.TypeOf(corev1.Service{})
 		types[4] = reflect.TypeOf(netv1.Ingress{})
 		types[5] = reflect.TypeOf(routev1.Route{})
-		types[6] = reflect.TypeOf(policyv1.PodDisruptionBudget{})
+		types[6] = reflect.TypeOf(gatewayv1.TLSRoute{})
+		types[7] = reflect.TypeOf(gatewayv1.HTTPRoute{})
+		types[8] = reflect.TypeOf(policyv1.PodDisruptionBudget{})
 		orderedTypes = &types
 	}
 	return *orderedTypes
@@ -3127,8 +3182,8 @@ func (reconciler *BrokerClusterReconcilerImpl) ProcessBrokerClusterStatus(cr *v1
 					if len(reconciler.jolokiaEndpoints) > ordinal {
 						// reusing logic from config applied with check for _key present on ordinal that is scaling down
 						reconciler.CheckStatusFromJolokia(reconciler.jolokiaEndpoints[ordinal],
-							func(BrokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError {
-								if _, exists := BrokerStatus.BrokerConfigStatus.PropertiesStatus[scaleDownOnSigTermPropsKey(ordinal)]; exists {
+							func(BrokerClusterStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError {
+								if _, exists := BrokerClusterStatus.BrokerConfigStatus.PropertiesStatus[scaleDownOnSigTermPropsKey(ordinal)]; exists {
 									// restart for sig term config to take effect
 									if _, err := jk.Artemis.ScaleDown(); err == nil {
 										// transition
@@ -3253,8 +3308,8 @@ func (reconciler *BrokerClusterReconcilerImpl) AssertBrokerPropertiesStatus(cr *
 		return NewArtemisStatusError(err, false)
 	}
 
-	errorStatus := reconciler.checkProjectionStatus(cr, client, secretProjection, func(BrokerStatus *brokerStatus, FileName string) (propertiesStatus, bool) {
-		current, present := BrokerStatus.BrokerConfigStatus.PropertiesStatus[FileName]
+	errorStatus := reconciler.checkProjectionStatus(cr, client, secretProjection, func(BrokerClusterStatus *brokerStatus, FileName string) (propertiesStatus, bool) {
+		current, present := BrokerClusterStatus.BrokerConfigStatus.PropertiesStatus[FileName]
 		return current, present
 	})
 
@@ -3266,8 +3321,8 @@ func (reconciler *BrokerClusterReconcilerImpl) AssertBrokerPropertiesStatus(cr *
 					reqLogger.V(2).Info("error retrieving -bp extra mount resource.")
 					return NewArtemisStatusError(err, false)
 				}
-				errorStatus = reconciler.checkProjectionStatus(cr, client, secretProjection, func(BrokerStatus *brokerStatus, FileName string) (propertiesStatus, bool) {
-					current, present := BrokerStatus.BrokerConfigStatus.PropertiesStatus[FileName]
+				errorStatus = reconciler.checkProjectionStatus(cr, client, secretProjection, func(BrokerClusterStatus *brokerStatus, FileName string) (propertiesStatus, bool) {
+					current, present := BrokerClusterStatus.BrokerConfigStatus.PropertiesStatus[FileName]
 					return current, present
 				})
 				if errorStatus == nil {
@@ -3292,8 +3347,8 @@ func (reconciler *BrokerClusterReconcilerImpl) AssertJaasPropertiesStatus(cr *v1
 		return NewArtemisStatusError(err, false)
 	}
 
-	statusError := reconciler.checkProjectionStatus(cr, client, Projection, func(BrokerStatus *brokerStatus, FileName string) (propertiesStatus, bool) {
-		current, present := BrokerStatus.ServerStatus.Jaas.PropertiesStatus[FileName]
+	statusError := reconciler.checkProjectionStatus(cr, client, Projection, func(BrokerClusterStatus *brokerStatus, FileName string) (propertiesStatus, bool) {
+		current, present := BrokerClusterStatus.ServerStatus.Jaas.PropertiesStatus[FileName]
 		return current, present
 	})
 
@@ -3325,7 +3380,7 @@ func (reconciler *BrokerClusterReconcilerImpl) AssertBrokerImageVersion(cr *v1be
 	return statusError
 }
 
-func (reconciler *BrokerClusterReconcilerImpl) CheckStatus(cr *v1beta2.BrokerCluster, client rtclient.Client, checkBrokerStatus func(BrokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError) ArtemisError {
+func (reconciler *BrokerClusterReconcilerImpl) CheckStatus(cr *v1beta2.BrokerCluster, client rtclient.Client, checkBrokerClusterStatus func(BrokerClusterStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError) ArtemisError {
 
 	reconciler.resolveJolokiaEndpoints(cr, client)
 
@@ -3336,7 +3391,7 @@ func (reconciler *BrokerClusterReconcilerImpl) CheckStatus(cr *v1beta2.BrokerClu
 
 	for _, jk := range reconciler.jolokiaEndpoints {
 
-		artemisError := reconciler.CheckStatusFromJolokia(jk, checkBrokerStatus)
+		artemisError := reconciler.CheckStatusFromJolokia(jk, checkBrokerClusterStatus)
 		if artemisError != nil {
 			return artemisError
 		}
@@ -3345,23 +3400,23 @@ func (reconciler *BrokerClusterReconcilerImpl) CheckStatus(cr *v1beta2.BrokerClu
 	return nil
 }
 
-func (reconciler *BrokerClusterReconcilerImpl) CheckStatusFromJolokia(jk *jolokia_client.JkInfo, checkBrokerStatus func(BrokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError) ArtemisError {
+func (reconciler *BrokerClusterReconcilerImpl) CheckStatusFromJolokia(jk *jolokia_client.JkInfo, checkBrokerClusterStatus func(BrokerClusterStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError) ArtemisError {
 
-	brokerStatus, artemisError := reconciler.GetAndCacheBrokerStatus(jk)
+	brokerStatus, artemisError := reconciler.GetAndCacheBrokerClusterStatus(jk)
 	if artemisError != nil {
 		return artemisError
 	}
 
-	artemisError = checkBrokerStatus(brokerStatus, jk)
+	artemisError = checkBrokerClusterStatus(brokerStatus, jk)
 	if artemisError != nil {
 		return artemisError
 	}
 	return nil
 }
 
-func (reconciler *BrokerClusterReconcilerImpl) GetAndCacheBrokerStatus(jk *jolokia_client.JkInfo) (*brokerStatus, ArtemisError) {
+func (reconciler *BrokerClusterReconcilerImpl) GetAndCacheBrokerClusterStatus(jk *jolokia_client.JkInfo) (*brokerStatus, ArtemisError) {
 
-	if cached, exists := reconciler.cachedBrokerStatus[jk.Ordinal]; exists {
+	if cached, exists := reconciler.cachedBrokerClusterStatus[jk.Ordinal]; exists {
 		switch v := cached.(type) {
 		case ArtemisError:
 			return nil, v
@@ -3375,7 +3430,7 @@ func (reconciler *BrokerClusterReconcilerImpl) GetAndCacheBrokerStatus(jk *jolok
 	if err != nil {
 		reconciler.log.V(1).Info("error getting broker status with Jolokia", "IP", jk.IP, "Ordinal", jk.Ordinal, "error", err)
 		artemisError := NewArtemisStatusError(err, true)
-		reconciler.cachedBrokerStatus[jk.Ordinal] = artemisError
+		reconciler.cachedBrokerClusterStatus[jk.Ordinal] = artemisError
 		return nil, artemisError
 	}
 
@@ -3385,12 +3440,12 @@ func (reconciler *BrokerClusterReconcilerImpl) GetAndCacheBrokerStatus(jk *jolok
 	if err != nil {
 		reconciler.log.Error(err, "unable to unmarshall broker status", "json", currentJson)
 		artemisError := NewArtemisStatusError(err, false)
-		reconciler.cachedBrokerStatus[jk.Ordinal] = artemisError
+		reconciler.cachedBrokerClusterStatus[jk.Ordinal] = artemisError
 		return nil, artemisError
 	}
 
 	reconciler.log.V(2).Info("cached broker status", "ordinal", jk.Ordinal, "status", brokerStatus)
-	reconciler.cachedBrokerStatus[jk.Ordinal] = brokerStatus
+	reconciler.cachedBrokerClusterStatus[jk.Ordinal] = brokerStatus
 
 	return &brokerStatus, nil
 
@@ -3411,7 +3466,7 @@ func (reconciler *BrokerClusterReconcilerImpl) resolveJolokiaEndpoints(cr *v1bet
 	}
 }
 
-func (reconciler *BrokerClusterReconcilerImpl) checkProjectionStatus(cr *v1beta2.BrokerCluster, client rtclient.Client, secretProjection *projection, extractStatus func(BrokerStatus *brokerStatus, FileName string) (propertiesStatus, bool)) ArtemisError {
+func (reconciler *BrokerClusterReconcilerImpl) checkProjectionStatus(cr *v1beta2.BrokerCluster, client rtclient.Client, secretProjection *projection, extractStatus func(BrokerClusterStatus *brokerStatus, FileName string) (propertiesStatus, bool)) ArtemisError {
 	reqLogger := reconciler.log
 
 	reqLogger.V(2).Info("in sync check", "projection", secretProjection)
@@ -3835,7 +3890,52 @@ func (r *BrokerClusterReconcilerImpl) validateExposeModes(customResource *v1beta
 		}, false
 	}
 
+	for _, acceptor := range customResource.Spec.Acceptors {
+		if cond := validateGatewayExposure(acceptor.Expose, acceptor.ExposeMode, acceptor.Gateway, acceptor.IngressHost, r.isGatewayAPIAvailable, fmt.Sprintf(".Spec.Acceptors %q", acceptor.Name)); cond != nil {
+			return cond, false
+		}
+	}
+	for _, connector := range customResource.Spec.Connectors {
+		if cond := validateGatewayExposure(connector.Expose, connector.ExposeMode, connector.Gateway, connector.IngressHost, r.isGatewayAPIAvailable, fmt.Sprintf(".Spec.Connectors %q", connector.Name)); cond != nil {
+			return cond, false
+		}
+	}
+	if cond := validateGatewayExposure(console.Expose, console.ExposeMode, console.Gateway, console.IngressHost, r.isGatewayAPIAvailable, ".Spec.Console"); cond != nil {
+		return cond, false
+	}
+
 	return nil, false
+}
+
+func validateGatewayExposure(expose bool, exposeMode *v1beta2.ExposeMode, gateway *v1beta2.GatewayConfig, ingressHost string, gatewayAPIAvailable bool, fieldPath string) *metav1.Condition {
+	if !expose || exposeMode == nil || *exposeMode != v1beta2.ExposeModes.Gateway {
+		return nil
+	}
+	if !gatewayAPIAvailable {
+		return &metav1.Condition{
+			Type:    v1beta2.ValidConditionType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1beta2.ValidConditionFailedInvalidExposeMode,
+			Message: fmt.Sprintf("%s has expose mode gateway but the gateway-api httproutes/tlsroutes resources are not served by the cluster", fieldPath),
+		}
+	}
+	if gateway == nil || gateway.ParentRef.Name == "" {
+		return &metav1.Condition{
+			Type:    v1beta2.ValidConditionType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1beta2.ValidConditionFailedInvalidExposeMode,
+			Message: fmt.Sprintf("%s has expose mode gateway but no gateway.parentRef.name provided", fieldPath),
+		}
+	}
+	if ingressHost == "" {
+		return &metav1.Condition{
+			Type:    v1beta2.ValidConditionType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1beta2.ValidConditionFailedInvalidIngressSettings,
+			Message: fmt.Sprintf("%s has expose mode gateway but no ingressHost provided (gateway routes require an explicit hostname; use template variables like $(ITEM_NAME)-$(BROKER_ORDINAL).$(INGRESS_DOMAIN))", fieldPath),
+		}
+	}
+	return nil
 }
 
 func (r *BrokerClusterReconcilerImpl) validateEnvVars(customResource *v1beta2.BrokerCluster) (*metav1.Condition, bool) {

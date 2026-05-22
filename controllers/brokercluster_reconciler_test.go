@@ -404,7 +404,7 @@ func TestProcess_TemplateIncludesLabelsServiceAndSecret(t *testing.T) {
 				}},
 		},
 	}
-	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateIncludesLabelsServiceAndSecret"), isOpenshift)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateIncludesLabelsServiceAndSecret"), isOpenshift, false)
 	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
@@ -481,7 +481,7 @@ func TestProcess_TemplateIncludesLabelsSecretRegexp(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateIncludesLabelsServiceAndSecret"), isOpenshift)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateIncludesLabelsServiceAndSecret"), isOpenshift, false)
 	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
@@ -533,7 +533,7 @@ func TestProcess_TemplateDuplicateKeyReplacesOk(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateDuplicateKeyReplacesOk"), isOpenshift)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateDuplicateKeyReplacesOk"), isOpenshift, false)
 	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
@@ -563,7 +563,7 @@ func Test_Respect_existing_JAVA_OPTS_properties_def(t *testing.T) {
 		Spec:       v1beta2.BrokerClusterSpec{},
 	}
 
-	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_Respect_existing_JAVA_OPTS_properties_def"), isOpenshift)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_Respect_existing_JAVA_OPTS_properties_def"), isOpenshift, false)
 	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
@@ -640,7 +640,7 @@ func TestProcess_TemplateKeyValue(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
 	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
@@ -729,7 +729,7 @@ func TestProcess_TemplateCustomAttributeIngress(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
 	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
@@ -790,7 +790,7 @@ func TestProcess_TemplateCustomAttributeMisSpellingIngress(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
 	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
@@ -851,7 +851,7 @@ func testTemplateCustomAttributeContainerSecurityContext(t *testing.T, withCRNam
 		},
 	}
 
-	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
 	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
@@ -904,7 +904,7 @@ func TestProcess_TemplateCustomAttributePriorityClassName(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
 	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
@@ -952,7 +952,7 @@ func TestNewPodTemplateSpecForCR_AppendsDebugArgs(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
 	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, k8sClient)
@@ -979,7 +979,7 @@ func TestNewPodTemplateSpecForCR_IncludesImagePullSecret(t *testing.T) {
 			},
 		},
 	}
-	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, k8sClient)
@@ -1015,7 +1015,7 @@ func TestNewPodTemplateSpecForCR_IncludesTopologySpreadConstraints(t *testing.T)
 			},
 		},
 	}
-	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, k8sClient)
@@ -1527,7 +1527,7 @@ func TestEnsureOwnerReferenceAPIVersion_NoOwnerReferences(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
@@ -1567,7 +1567,7 @@ func TestEnsureOwnerReferenceAPIVersion_MatchingAPIVersion(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
@@ -1607,7 +1607,7 @@ func TestEnsureOwnerReferenceAPIVersion_DifferentAPIVersion(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
@@ -1654,7 +1654,7 @@ func TestEnsureOwnerReferenceAPIVersion_MultipleOwnerReferences(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
@@ -1696,7 +1696,7 @@ func TestEnsureOwnerReferenceAPIVersion_DifferentBrokerName(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
@@ -1744,7 +1744,7 @@ func TestCompareSecret_WithAPIVersionUpdate(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.CompareSecret(deployed, requested)
@@ -1787,7 +1787,7 @@ func TestCompareConfigMap_WithAPIVersionUpdate(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.CompareConfigMap(deployed, requested)
@@ -1842,7 +1842,7 @@ func TestCompareMetaAndSpec_WithAPIVersionUpdate(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.CompareMetaAndSpec(deployed, requested)

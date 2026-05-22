@@ -1487,6 +1487,106 @@ spec:
 
 Note: If you are not using Jolokia (`jolokiaAgentEnabled: false`), you can omit the `jolokia-config` volume and its corresponding volume mount.
 
+## Exposing acceptors and the console
+
+When you set `expose: true` on an acceptor or on the broker console, the
+operator creates an external networking resource so the endpoint is reachable
+from outside the cluster. The kind of resource is controlled by `exposeMode`,
+which accepts three values:
+
+| `exposeMode` | Resource created                     | When to use it                                                                 |
+|--------------|--------------------------------------|--------------------------------------------------------------------------------|
+| `route`      | OpenShift `Route`                    | OpenShift clusters (default on OpenShift).                                     |
+| `ingress`    | Kubernetes `Ingress` (NGINX-style)   | Plain Kubernetes with an ingress controller (default on Kubernetes).           |
+| `gateway`    | Gateway API `HTTPRoute` / `TLSRoute` | Clusters using the Gateway API; requires the gateway-api CRDs to be installed. |
+
+In `gateway` mode the route kind depends on `sslEnabled`: an SSL-enabled
+acceptor (or console) gets a `TLSRoute` for passthrough, a plain acceptor
+gets an `HTTPRoute`. The route is attached to an existing `Gateway` via the
+`gateway.parentRef` block.
+
+The Gateway API CRDs are not part of Kubernetes and must be installed
+separately, for example:
+
+```bash
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.1/standard-install.yaml
+```
+
+The standard channel is sufficient: it serves both `httproutes` and
+`tlsroutes`. The operator requires both and disables gateway exposure when
+either is missing, rather than failing part way through a reconcile, so a
+partial install leaves acceptors unexposed instead of half-configured.
+Installing the CRDs only makes the API available; you still need a Gateway
+controller in the cluster to act on the routes the operator creates.
+
+```yaml
+apiVersion: broker.arkmq.org/v1beta2
+kind: Broker
+metadata:
+  name: artemis-broker
+spec:
+  ingressDomain: apps.example.com
+  console:
+    expose: true
+    sslEnabled: true
+    sslSecret: console-cert-secret
+    exposeMode: gateway
+    ingressHost: $(ITEM_NAME)-$(BROKER_ORDINAL).$(INGRESS_DOMAIN)
+    gateway:
+      parentRef:
+        name: shared-gateway
+        namespace: gateway-system
+  acceptors:
+    - name: amqp-ssl
+      protocols: amqp
+      port: 5671
+      sslEnabled: true
+      sslSecret: acceptor-cert-secret
+      expose: true
+      exposeMode: gateway
+      ingressHost: $(ITEM_NAME)-$(BROKER_ORDINAL).$(INGRESS_DOMAIN)
+      gateway:
+        parentRef:
+          name: shared-gateway
+          namespace: gateway-system
+    - name: amqp-plain
+      protocols: amqp
+      port: 5672
+      expose: true
+      exposeMode: gateway
+      ingressHost: $(ITEM_NAME)-$(BROKER_ORDINAL).$(INGRESS_DOMAIN)
+      gateway:
+        parentRef:
+          name: shared-gateway
+          namespace: gateway-system
+```
+
+The example produces one `TLSRoute` (for the SSL-enabled acceptor and the
+console) and one `HTTPRoute` (for the plain acceptor), all attached to the
+`shared-gateway` Gateway in the `gateway-system` namespace.
+
+`gateway.parentRef.namespace` is optional. If omitted, the operator assumes
+the Gateway lives in the same namespace as the Broker CR.
+
+Unlike `ingress` and `route`, **`gateway` mode requires an explicit
+`ingressHost`** on every exposed acceptor, connector and console. The other two
+modes fall back to a generated `<resource>-<namespace>.<ingressDomain>` host
+when `ingressHost` is omitted; `gateway` mode does not, and the operator reports
+`Valid=False` instead.
+
+The reason is that a Gateway route is only served if its hostname matches a
+*listener* hostname on the parent `Gateway` — something the operator cannot
+infer. A generated host would attach to nothing and fail silently, whereas an
+Ingress or Route controller serves whatever host it is handed.
+
+`ingressHost` supports the same template variables in all three modes (see
+[Resolve your cluster domain](hostname_resolution.md)), so
+`$(ITEM_NAME)-$(BROKER_ORDINAL).$(INGRESS_DOMAIN)` reproduces the familiar
+naming while staying explicit.
+
+If the gateway-api CRDs are not served by the cluster, the operator reports
+`Valid=False` rather than attempting to create routes.
+
 ## Configuring Jolokia Access
 
 The operator uses jolokia endpoints to get broker status and also create queue/address resources using the address CRs.

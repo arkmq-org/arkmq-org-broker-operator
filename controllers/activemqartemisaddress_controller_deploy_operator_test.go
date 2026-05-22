@@ -144,7 +144,7 @@ var _ = Describe("Address controller DO", Label("do"), func() {
 				}
 				httpClient, err := rest.HTTPClientFor(restConfig)
 				Expect(err).To(BeNil())
-				restClient, err := apiutil.RESTClientForGVK(gvk, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
+				restClient, err := apiutil.RESTClientForGVK(gvk, false, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
 				Expect(err).To(BeNil())
 
 				for ipod := 4; ipod >= 0; ipod-- {
