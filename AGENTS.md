@@ -97,6 +97,8 @@ Follow the `AI_documentation/contribution_guide.md`
   - Check if minikube/cluster is running
   - Start minikube if needed (don't ask permission)
   - Verify cert-manager installed and ready
+  - Verify the Gateway API CRDs are installed (`make install-gateway-api-crds`);
+    without them the gateway expose-mode specs skip themselves silently
 
 - **Run Tests** → Execute tests AUTOMATICALLY:
   - E2E tests at start and end: `USE_EXISTING_CLUSTER=true go test -v
@@ -251,13 +253,46 @@ kubectl get deployment ingress-nginx-controller -n ingress-nginx \
   -o jsonpath='{.spec.template.spec.containers[0].args}' | grep "enable-ssl-passthrough"
 ```
 
-**3. Install Development Tools**
+**macOS only — make the ingress reachable on localhost**
+
+The E2E suite dials `clusterIngressHost:443`, where `clusterIngressHost` is the
+hostname of the API server URL (`controllers/suite_test.go`). With the docker
+driver on macOS that resolves to `127.0.0.1`, and nothing listens there — on
+Linux it resolves to the minikube node IP, where the ingress controller is
+reachable directly, which is why CI needs no extra step.
+
+Run the tunnel in a **separate terminal** and leave it open (it blocks and
+needs root for port 443):
+
+```bash
+minikube tunnel --profile minikube
+```
+
+If you skip this, `[BeforeSuite]` fails after a 180s timeout in
+`setUpTestProxy()` with `dial tcp 127.0.0.1:443: connect: connection refused`.
+Note the `--profile` flag: a tunnel running for a different profile does not
+help, and the failure looks identical.
+
+**3. Install Gateway API CRDs**
+
+```bash
+# Required by the exposeMode=gateway specs. The version is pinned in the Makefile
+# and must track sigs.k8s.io/gateway-api in go.mod.
+make install-gateway-api-crds
+
+# Verify (both resources are needed; a partial install disables gateway exposure)
+kubectl wait --for=condition=Established \
+  crd/httproutes.gateway.networking.k8s.io \
+  crd/tlsroutes.gateway.networking.k8s.io --timeout=60s
+```
+
+**4. Install Development Tools**
 
 ```bash
 make helm controller-gen envtest
 ```
 
-**4. Generate and Install CRDs**
+**5. Generate and Install CRDs**
 
 ```bash
 # Generate CRDs and code
@@ -270,7 +305,7 @@ make install
 kubectl get crds | grep broker.amq.io
 ```
 
-**5. Run Test Suite**
+**6. Run Test Suite**
 
 ```bash
 # Run all tests (excludes deployed operator tests)

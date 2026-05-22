@@ -84,7 +84,13 @@ endif
 # Image URL to use all building/pushing image targets
 IMG ?= $(OPERATOR_IMAGE_REPO):$(OPERATOR_VERSION)
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.26.0
+ENVTEST_K8S_VERSION = 1.36.0
+
+# GATEWAY_API_VERSION must track the sigs.k8s.io/gateway-api version in go.mod. The standard
+# channel is enough: it serves both httproutes and tlsroutes, the two resources the operator
+# needs for exposeMode=gateway.
+GATEWAY_API_VERSION ?= v1.5.1
+GATEWAY_API_CRDS_URL ?= https://github.com/kubernetes-sigs/gateway-api/releases/download/$(GATEWAY_API_VERSION)/standard-install.yaml
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -134,8 +140,8 @@ manifests: controller-gen
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
-	sed -i 's~^LABEL version=.*~LABEL version="$(VERSION)"~g' Dockerfile
-	sed -i 's~\tVersion = ".*"~\tVersion = "$(MANAGER_VERSION)"~' version/version.go
+	sed -i.bak 's~^LABEL version=.*~LABEL version="$(VERSION)"~g' Dockerfile && rm Dockerfile.bak
+	sed -i.bak 's~\tVersion = ".*"~\tVersion = "$(MANAGER_VERSION)"~' version/version.go && rm version/version.go.bak
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -262,6 +268,14 @@ install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~
 uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/crd | $(KUBE_CLI) delete --ignore-not-found=$(ignore-not-found) -f -
 
+.PHONY: install-gateway-api-crds
+install-gateway-api-crds: ## Install the Gateway API CRDs required by the gateway expose-mode tests.
+	$(KUBE_CLI) apply -f $(GATEWAY_API_CRDS_URL)
+
+.PHONY: uninstall-gateway-api-crds
+uninstall-gateway-api-crds: ## Uninstall the Gateway API CRDs.
+	$(KUBE_CLI) delete --ignore-not-found=$(ignore-not-found) -f $(GATEWAY_API_CRDS_URL)
+
 .PHONY: deploy
 deploy: manifests kustomize generate-deploy ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
@@ -332,7 +346,7 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
-	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.20
+	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.24
 
 .PHONY: bundle
 bundle: manifests operator-sdk kustomize ## Generate bundle manifests and metadata, then validate generated files.
