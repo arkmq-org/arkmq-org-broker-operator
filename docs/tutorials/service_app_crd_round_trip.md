@@ -144,7 +144,7 @@ kubectl apply -f - <<EOF
 apiVersion: trust.cert-manager.io/v1alpha1
 kind: Bundle
 metadata:
-  name: activemq-artemis-manager-ca
+  name: arkmq-org-broker-manager-ca
   namespace: cert-manager
 spec:
   sources:
@@ -158,7 +158,7 @@ EOF
 ```
 
 ```bash {"stage":"deploy_certs", "label":"wait for ca bundle", "runtime":"bash"}
-kubectl wait bundle activemq-artemis-manager-ca -n cert-manager --for=condition=Synced --timeout=300s
+kubectl wait bundle arkmq-org-broker-manager-ca -n cert-manager --for=condition=Synced --timeout=300s
 ```
 
 ##### Create the certificate for the operator
@@ -168,11 +168,11 @@ kubectl apply -f - <<EOF
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: activemq-artemis-manager-cert
+  name: arkmq-org-broker-manager-cert
   namespace: service-app-project
 spec:
-  secretName: activemq-artemis-manager-cert
-  commonName: activemq-artemis-operator
+  secretName: arkmq-org-broker-manager-cert
+  commonName: arkmq-org-broker-operator
   issuerRef:
     name: broker-ca-issuer
     kind: ClusterIssuer
@@ -180,7 +180,7 @@ EOF
 ```
 
 ```bash {"stage":"deploy_certs", "label":"wait for operator cert", "runtime":"bash"}
-kubectl wait certificate activemq-artemis-manager-cert -n service-app-project --for=condition=Ready --timeout=300s
+kubectl wait certificate arkmq-org-broker-manager-cert -n service-app-project --for=condition=Ready --timeout=300s
 ```
 
 ### 3. Deploy the Messaging Service and Application
@@ -340,7 +340,7 @@ spec:
     spec:
       containers:
       - name: producer
-        image: quay.io/arkmq-org/activemq-artemis-broker-kubernetes:artemis.2.40.0
+        image: quay.io/arkmq-org/arkmq-org-broker-kubernetes:artemis.2.40.0
         command:
         - "/bin/sh"
         - "-c"
@@ -368,7 +368,7 @@ spec:
       volumes:
       - name: trust
         secret:
-          secretName: activemq-artemis-manager-ca
+          secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
           secretName: first-app-app-cert
@@ -395,7 +395,7 @@ spec:
     spec:
       containers:
       - name: consumer
-        image: quay.io/arkmq-org/activemq-artemis-broker-kubernetes:artemis.2.40.0
+        image: quay.io/arkmq-org/arkmq-org-broker-kubernetes:artemis.2.40.0
         command:
         - "/bin/sh"
         - "-c"
@@ -423,7 +423,7 @@ spec:
       volumes:
       - name: trust
         secret:
-          secretName: activemq-artemis-manager-ca
+          secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
           secretName: first-app-app-cert

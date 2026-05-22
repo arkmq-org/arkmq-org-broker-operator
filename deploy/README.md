@@ -48,7 +48,7 @@ as illustrated in following
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: activemq-artemis-manager-rolebinding
+  name: arkmq-org-broker-manager-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

@@ -74,8 +74,8 @@ graph TB
     end
 
     subgraph cert_layer ["Application Certificates"]
-        ServerCert["🖥️ Server<br />CN: activemq-artemis-<br />operand"]
-        OperatorCert["⚙️ Operator<br />CN: activemq-artemis-<br />operator"]
+        ServerCert["🖥️ Server<br />CN: arkmq-org-broker-<br />operand"]
+        OperatorCert["⚙️ Operator<br />CN: arkmq-org-broker-<br />operator"]
         PrometheusCert["📊 Prometheus<br />CN: prometheus"]
         MessagingCert["💬 Messaging<br />CN: messaging-client"]
     end
@@ -163,7 +163,7 @@ The locked-down broker uses certificate-based authentication. This tutorial uses
   * In this tutorial we use:
     * `CN=arkmq-org-broker-operator` for operator privileges (management)
     * `CN=prometheus` for metrics access (Prometheus scraping)
-    * `CN=activemq-artemis-operand` for health probes
+    * `CN=arkmq-org-broker-operand` for health probes
   * You can use different CN values - the operator will extract them from your
     actual certificates
 
@@ -177,15 +177,15 @@ The locked-down broker uses certificate-based authentication. This tutorial uses
       falls back to `broker-cert`
     * No environment variable override (uses discovery based on what exists in
       the namespace)
-    * CN in this tutorial: `activemq-artemis-operand` (used for health probes)
-  * **Operator client certificate** - Default: `activemq-artemis-manager-cert`
+    * CN in this tutorial: `arkmq-org-broker-operand` (used for health probes)
+  * **Operator client certificate** - Default: `arkmq-org-broker-manager-cert`
     * Operator certificate for authenticating with the broker
-    * Override via env: `ACTIVEMQ_ARTEMIS_MANAGER_CERT_SECRET_NAME`
+    * Override via env: `ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME`
     * CN in this tutorial: `arkmq-org-broker-operator` (gets operator
       privileges)
-  * **CA trust bundle** - Default: `activemq-artemis-manager-ca`
+  * **CA trust bundle** - Default: `arkmq-org-broker-manager-ca`
     * Root certificate that validates all others (key must be `ca.pem`)
-    * Override via env: `ACTIVEMQ_ARTEMIS_MANAGER_CA_SECRET_NAME`
+    * Override via env: `ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME`
   * **Prometheus client certificate** - Default: `prometheus-cert`
     * Prometheus certificate for authenticating to the metrics endpoint
     * The operator automatically checks for `[cr-name]-[base-name]` first, then
@@ -320,8 +320,8 @@ customresourcedefinition.apiextensions.k8s.io/activemqartemissecurities.broker.a
 serviceaccount/arkmq-org-broker-controller-manager created
 role.rbac.authorization.k8s.io/arkmq-org-broker-operator-role created
 rolebinding.rbac.authorization.k8s.io/arkmq-org-broker-operator-rolebinding created
-role.rbac.authorization.k8s.io/activemq-artemis-leader-election-role created
-rolebinding.rbac.authorization.k8s.io/activemq-artemis-leader-election-rolebinding created
+role.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-role created
+rolebinding.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-rolebinding created
 deployment.apps/arkmq-org-broker-controller-manager created
 ```
 
@@ -593,7 +593,7 @@ kubectl apply -f - <<EOF
 apiVersion: trust.cert-manager.io/v1alpha1
 kind: Bundle
 metadata:
-  name: activemq-artemis-manager-ca
+  name: arkmq-org-broker-manager-ca
   namespace: cert-manager
 spec:
   sources:
@@ -606,14 +606,14 @@ spec:
 EOF
 ```
 ```shell markdown_runner
-bundle.trust.cert-manager.io/activemq-artemis-manager-ca created
+bundle.trust.cert-manager.io/arkmq-org-broker-manager-ca created
 ```
 
 ```bash {"stage":"certs", "label":"wait for ca bundle", "runtime":"bash"}
-kubectl wait bundle activemq-artemis-manager-ca -n cert-manager --for=condition=Synced --timeout=300s
+kubectl wait bundle arkmq-org-broker-manager-ca -n cert-manager --for=condition=Synced --timeout=300s
 ```
 ```shell markdown_runner
-bundle.trust.cert-manager.io/activemq-artemis-manager-ca condition met
+bundle.trust.cert-manager.io/arkmq-org-broker-manager-ca condition met
 ```
 
 ### Create a Cluster Issuer
@@ -645,7 +645,7 @@ We need three certificates:
 
 1. A server certificate for the broker pod (`broker-cert`)
 2. A client certificate for the operator to authenticate with the broker
-   (`activemq-artemis-manager-cert`)
+   (`arkmq-org-broker-manager-cert`)
 3. A client certificate for Prometheus to scrape metrics (`prometheus-cert`)
 
 ```{"stage":"deploy", "runtime":"bash", "label":"create broker and client certs"}
@@ -658,7 +658,7 @@ metadata:
   namespace: locked-down-broker
 spec:
   secretName: broker-cert
-  commonName: activemq-artemis-operand
+  commonName: arkmq-org-broker-operand
   dnsNames:
     - artemis-broker-ss-0.artemis-broker-hdls-svc.locked-down-broker.svc.cluster.local
     - '*.artemis-broker-hdls-svc.locked-down-broker.svc.cluster.local'
@@ -671,10 +671,10 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: activemq-artemis-manager-cert
+  name: arkmq-org-broker-manager-cert
   namespace: locked-down-broker
 spec:
-  secretName: activemq-artemis-manager-cert
+  secretName: arkmq-org-broker-manager-cert
   commonName: arkmq-org-broker-operator
   issuerRef:
     name: ca-issuer
@@ -695,7 +695,7 @@ EOF
 ```
 ```shell markdown_runner
 certificate.cert-manager.io/broker-cert created
-certificate.cert-manager.io/activemq-artemis-manager-cert created
+certificate.cert-manager.io/arkmq-org-broker-manager-cert created
 certificate.cert-manager.io/prometheus-cert created
 ```
 
@@ -703,12 +703,12 @@ Wait for the secrets to be created.
 
 ```{"stage":"deploy", "runtime":"bash", "label":"wait for secrets"}
 kubectl wait --for=condition=Ready certificate broker-cert -n locked-down-broker --timeout=300s
-kubectl wait --for=condition=Ready certificate activemq-artemis-manager-cert -n locked-down-broker --timeout=300s
+kubectl wait --for=condition=Ready certificate arkmq-org-broker-manager-cert -n locked-down-broker --timeout=300s
 kubectl wait --for=condition=Ready certificate prometheus-cert -n locked-down-broker --timeout=300s
 ```
 ```shell markdown_runner
 certificate.cert-manager.io/broker-cert condition met
-certificate.cert-manager.io/activemq-artemis-manager-cert condition met
+certificate.cert-manager.io/arkmq-org-broker-manager-cert condition met
 certificate.cert-manager.io/prometheus-cert condition met
 ```
 
@@ -816,7 +816,7 @@ spec:
     - "acceptorConfigurations.\"amqps\".params.keyStoreType=PEMCFG"
     - "acceptorConfigurations.\"amqps\".params.keyStorePath=/amq/extra/secrets/amqps-pem/_amqps.pemcfg"
     - "acceptorConfigurations.\"amqps\".params.trustStoreType=PEMCA"
-    - "acceptorConfigurations.\"amqps\".params.trustStorePath=/amq/extra/secrets/activemq-artemis-manager-ca/ca.pem"
+    - "acceptorConfigurations.\"amqps\".params.trustStorePath=/amq/extra/secrets/arkmq-org-broker-manager-ca/ca.pem"
   deploymentPlan:
     image: quay.io/arkmq-org/arkmq-org-broker-kubernetes:snapshot
     extraMounts:
@@ -895,7 +895,7 @@ spec:
       # CA certificate to trust the broker's server certificate.
       ca:
         secret:
-          name: activemq-artemis-manager-ca
+          name: arkmq-org-broker-manager-ca
           key: ca.pem
       # Client certificate and key for mutual TLS authentication.
       # This uses the dedicated Prometheus certificate (CN: prometheus).
@@ -1639,7 +1639,7 @@ cat <<'EOT' >> deploy.yml
       volumes:
       - name: trust
         secret:
-          secretName: activemq-artemis-manager-ca
+          secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
           secretName: messaging-client-cert
@@ -1680,7 +1680,7 @@ cat <<'EOT' >> deploy.yml
       volumes:
       - name: trust
         secret:
-          secretName: activemq-artemis-manager-ca
+          secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
           secretName: messaging-client-cert

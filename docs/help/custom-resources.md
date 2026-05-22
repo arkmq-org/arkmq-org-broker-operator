@@ -22,7 +22,7 @@ broker and addressing CRDs.
 
 ### Broker Custom Resource configuration reference
 
-A CR instance based on the main broker CRD enables you to configure brokers for deployment in a Kubernetes project, see the [arkmq-org/activemq-artemis-operator CRDs](https://doc.crds.dev/github.com/arkmq-org/arkmq-org-broker-operator). The following is the full CRD yaml file
+A CR instance based on the main broker CRD enables you to configure brokers for deployment in a Kubernetes project, see the [arkmq-org/arkmq-org-broker-operator CRDs](https://doc.crds.dev/github.com/arkmq-org/arkmq-org-broker-operator). The following is the full CRD yaml file
 
 ```yaml
 apiVersion: apiextensions.k8s.io/v1

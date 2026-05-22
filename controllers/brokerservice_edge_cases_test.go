@@ -76,7 +76,7 @@ var _ = Describe("broker-service edge cases and concurrent operations", func() {
 			By("installing operator cert")
 			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
 				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-				candidate.Spec.CommonName = "activemq-artemis-operator"
+				candidate.Spec.CommonName = "arkmq-org-broker-operator"
 				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
 					Name: caIssuer.Name,
 					Kind: "ClusterIssuer",

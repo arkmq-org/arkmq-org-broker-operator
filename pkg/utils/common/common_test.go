@@ -190,6 +190,99 @@ var _ = Describe("Common Test", func() {
 			Expect(secret).To(BeNil())
 		})
 	})
+
+	Describe("GetOperatorSecretWithFallback", func() {
+		const testNamespace = "operator-ns"
+
+		var scheme *runtime.Scheme
+
+		BeforeEach(func() {
+			scheme = runtime.NewScheme()
+			Expect(corev1.AddToScheme(scheme)).To(Succeed())
+			SetOperatorNameSpace(testNamespace)
+		})
+
+		AfterEach(func() {
+			UnsetOperatorNameSpace()
+			operatorCertSecretName = nil
+			operatorCASecretName = nil
+			os.Unsetenv("ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME")
+			os.Unsetenv("ACTIVEMQ_ARTEMIS_MANAGER_CERT_SECRET_NAME")
+			os.Unsetenv("ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME")
+			os.Unsetenv("ACTIVEMQ_ARTEMIS_MANAGER_CA_SECRET_NAME")
+		})
+
+		It("should use new default secret when it exists", func() {
+			newSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: DefaultOperatorCertSecretName, Namespace: testNamespace},
+			}
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(newSecret).Build()
+
+			secret, err := GetOperatorClientCertSecret(fakeClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(secret.Name).To(Equal(DefaultOperatorCertSecretName))
+		})
+
+		It("should fall back to legacy secret when no env vars are set and new secret is missing", func() {
+			legacySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: LegacyOperatorCertSecretName, Namespace: testNamespace},
+			}
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(legacySecret).Build()
+
+			secret, err := GetOperatorClientCertSecret(fakeClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(secret.Name).To(Equal(LegacyOperatorCertSecretName))
+		})
+
+		It("should prefer new secret over legacy when both exist and no env vars are set", func() {
+			newSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: DefaultOperatorCertSecretName, Namespace: testNamespace},
+			}
+			legacySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: LegacyOperatorCertSecretName, Namespace: testNamespace},
+			}
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(newSecret, legacySecret).Build()
+
+			secret, err := GetOperatorClientCertSecret(fakeClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(secret.Name).To(Equal(DefaultOperatorCertSecretName))
+		})
+
+		It("should not fall back to legacy when new env var is set", func() {
+			os.Setenv("ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME", "custom-cert")
+
+			legacySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: LegacyOperatorCertSecretName, Namespace: testNamespace},
+			}
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(legacySecret).Build()
+
+			_, err := GetOperatorClientCertSecret(fakeClient)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("custom-cert"))
+			Expect(err.Error()).NotTo(ContainSubstring(LegacyOperatorCertSecretName))
+		})
+
+		It("should not fall back to legacy when legacy env var is set", func() {
+			os.Setenv("ACTIVEMQ_ARTEMIS_MANAGER_CA_SECRET_NAME", "custom-ca")
+
+			legacySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: LegacyOperatorCASecretName, Namespace: testNamespace},
+			}
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(legacySecret).Build()
+
+			_, err := GetOperatorCASecret(fakeClient)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("custom-ca"))
+			Expect(err.Error()).NotTo(ContainSubstring(LegacyOperatorCASecretName))
+		})
+
+		It("should return error when neither new nor legacy secret exists", func() {
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			_, err := GetOperatorClientCertSecret(fakeClient)
+			Expect(err).To(HaveOccurred())
+		})
+	})
 })
 
 // errorClient is a fake client that returns errors for Get operations
