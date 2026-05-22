@@ -42,6 +42,7 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	rtclient "sigs.k8s.io/controller-runtime/pkg/client"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	policyv1 "k8s.io/api/policy/v1"
 )
@@ -107,6 +108,8 @@ var jaasConfigSyntaxMatchRegEx = JaasConfigSyntaxMatchRegExDefault
 var ClusterDomain *string
 
 var isOpenshift *bool
+
+var isGatewayAPIAvailable *bool
 
 var operatorCertSecretName, operatorCASecretName, prometheusCertSecretName *string
 
@@ -701,31 +704,28 @@ func GetDeploymentSize(cr *v1beta2.Broker) int32 {
 	return *cr.Spec.DeploymentPlan.Size
 }
 
-func GetDeployedResources(instance *v1beta2.Broker, client rtclient.Client, onOpenShift bool) (map[reflect.Type][]rtclient.Object, error) {
+func GetDeployedResources(instance *v1beta2.Broker, client rtclient.Client, onOpenShift bool, gatewayAPIAvailable bool) (map[reflect.Type][]rtclient.Object, error) {
 	log := ctrl.Log.WithName("util_common")
 	reader := read.New(client).WithNamespace(instance.Namespace).WithOwnerObject(instance)
-	var resourceMap map[reflect.Type][]rtclient.Object
-	var err error
-	if onOpenShift {
-		resourceMap, err = reader.ListAll(
-			&corev1.ServiceList{},
-			&appsv1.StatefulSetList{},
-			&routev1.RouteList{},
-			&corev1.SecretList{},
-			&corev1.ConfigMapList{},
-			&policyv1.PodDisruptionBudgetList{},
-			&netv1.IngressList{},
-		)
-	} else {
-		resourceMap, err = reader.ListAll(
-			&corev1.ServiceList{},
-			&appsv1.StatefulSetList{},
-			&netv1.IngressList{},
-			&corev1.SecretList{},
-			&corev1.ConfigMapList{},
-			&policyv1.PodDisruptionBudgetList{},
-		)
+
+	lists := []rtclient.ObjectList{
+		&corev1.ServiceList{},
+		&appsv1.StatefulSetList{},
+		&netv1.IngressList{},
+		&corev1.SecretList{},
+		&corev1.ConfigMapList{},
+		&policyv1.PodDisruptionBudgetList{},
 	}
+	if onOpenShift {
+		lists = append(lists, &routev1.RouteList{})
+	}
+	// gateway routes are only listed when the CRDs are served, listing an
+	// unknown kind fails the whole read
+	if gatewayAPIAvailable {
+		lists = append(lists, &gatewayv1.TLSRouteList{}, &gatewayv1.HTTPRouteList{})
+	}
+
+	resourceMap, err := reader.ListAll(lists...)
 	if err != nil {
 		log.Error(err, "Failed to list deployed objects.")
 		return nil, err
@@ -771,6 +771,63 @@ func DetectOpenshiftWith(config *rest.Config) (bool, error) {
 		isOpenshift = &isOpenShiftResourcePresent
 	}
 	return *isOpenshift, nil
+}
+
+// DetectGatewayAPIWith reports whether the Gateway API resources this operator
+// creates for exposeMode=gateway are served by the cluster. Both httproutes and
+// tlsroutes are required, so a partial install disables gateway exposure rather
+// than failing half way through a reconcile.
+func DetectGatewayAPIWith(config *rest.Config) (bool, error) {
+	if isGatewayAPIAvailable == nil {
+		value, ok := os.LookupEnv("OPERATOR_GATEWAY_API")
+		if ok {
+			ctrl.Log.V(1).Info("Set by env-var 'OPERATOR_GATEWAY_API': " + value)
+			available := strings.ToLower(value) == "true"
+			isGatewayAPIAvailable = &available
+			return available, nil
+		}
+
+		discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
+		if err != nil {
+			return false, err
+		}
+
+		var allPresent bool
+		for i := 0; i < defaultRetries; i++ {
+			allPresent = true
+			for _, resource := range []string{"httproutes", "tlsroutes"} {
+				var present bool
+				present, err = discovery.IsResourceEnabled(discoveryClient,
+					schema.GroupVersionResource{
+						Group:    gatewayv1.GroupName,
+						Version:  "v1",
+						Resource: resource,
+					})
+
+				if err != nil {
+					break
+				}
+
+				if !present {
+					ctrl.Log.V(1).Info("gateway-api resource not served by the cluster", "resource", resource)
+					allPresent = false
+				}
+			}
+
+			if err == nil {
+				break
+			}
+
+			time.Sleep(defaultRetryInterval)
+		}
+
+		if err != nil {
+			return false, err
+		}
+
+		isGatewayAPIAvailable = &allPresent
+	}
+	return *isGatewayAPIAvailable, nil
 }
 
 func GetOperandCertSecretName(cr *v1beta2.Broker, client rtclient.Client) string {

@@ -55,9 +55,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
+	crconfig "sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	brokerv1alpha1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1alpha1"
 	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
@@ -147,6 +149,7 @@ var (
 
 	isFIPSEnabled                             = false
 	isOpenshift                               = false
+	isGatewayAPIAvailable                     = false
 	isIngressSSLPassthroughEnabled            = false
 	verbose                                   = false
 	verboseWithWatch                          = false
@@ -199,6 +202,9 @@ func setUpEnvTest() {
 	setUpK8sClient()
 
 	isOpenshift, err = common.DetectOpenshiftWith(restConfig)
+	Expect(err).NotTo(HaveOccurred())
+
+	isGatewayAPIAvailable, err = common.DetectGatewayAPIWith(restConfig)
 	Expect(err).NotTo(HaveOccurred())
 
 	if isOpenshift {
@@ -489,8 +495,12 @@ func createControllerManager(disableMetrics bool, watchNamespace string) {
 
 	managerCtx, managerCancel = context.WithCancel(ctx)
 
+	skipNameValidation := true
 	mgrOptions := ctrl.Options{
 		Scheme: scheme.Scheme,
+		Controller: crconfig.Controller{
+			SkipNameValidation: &skipNameValidation,
+		},
 	}
 
 	isLocal, watchList := common.ResolveWatchNamespaceForManager(defaultNamespace, watchNamespace)
@@ -529,13 +539,13 @@ func createControllerManager(disableMetrics bool, watchNamespace string) {
 	k8Manager, err = ctrl.NewManager(restConfig, mgrOptions)
 	Expect(err).ToNot(HaveOccurred())
 
-	brokerReconciler = NewActiveMQArtemisReconciler(k8Manager, ctrl.Log, isOpenshift)
+	brokerReconciler = NewActiveMQArtemisReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable)
 
 	if err = brokerReconciler.SetupWithManager(k8Manager); err != nil {
 		ctrl.Log.Error(err, "unable to create controller", "controller", "ActiveMQArtemisReconciler")
 	}
 
-	brokerV1beta2Reconciler := NewBrokerReconciler(k8Manager, ctrl.Log, isOpenshift)
+	brokerV1beta2Reconciler := NewBrokerReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable)
 
 	if err = brokerV1beta2Reconciler.SetupWithManager(k8Manager); err != nil {
 		ctrl.Log.Error(err, "unable to create controller", "controller", "BrokerReconciler")
@@ -863,6 +873,9 @@ func setUpK8sClient() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = brokerv1beta2.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = gatewayv1.Install(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:scheme

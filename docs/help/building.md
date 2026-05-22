@@ -19,7 +19,7 @@ toc: true
 
 ### Go
 
-Download the Go version v1.25.9 from the [download page](https://go.dev/dl/) and install it following the [installation instructions](https://go.dev/doc/install).
+Download the Go version v1.26.3 from the [download page](https://go.dev/dl/) and install it following the [installation instructions](https://go.dev/doc/install).
 
 ### Operator SDK
 

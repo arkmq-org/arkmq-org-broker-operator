@@ -31,6 +31,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	rtclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/go-logr/logr"
 	routev1 "github.com/openshift/api/route/v1"
@@ -43,17 +44,19 @@ import (
 // BrokerReconciler reconciles a Broker object (broker.arkmq.org/v1beta2)
 type BrokerReconciler struct {
 	rtclient.Client
-	Scheme        *runtime.Scheme
-	log           logr.Logger
-	isOnOpenShift bool
+	Scheme                *runtime.Scheme
+	log                   logr.Logger
+	isOnOpenShift         bool
+	isGatewayAPIAvailable bool
 }
 
-func NewBrokerReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShift bool) *BrokerReconciler {
+func NewBrokerReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShift bool, gatewayAPIAvailable bool) *BrokerReconciler {
 	return &BrokerReconciler{
-		isOnOpenShift: isOpenShift,
-		Client:        cluster.GetClient(),
-		Scheme:        cluster.GetScheme(),
-		log:           logger,
+		isOnOpenShift:         isOpenShift,
+		isGatewayAPIAvailable: gatewayAPIAvailable,
+		Client:                cluster.GetClient(),
+		Scheme:                cluster.GetScheme(),
+		log:                   logger,
 	}
 }
 
@@ -137,6 +140,10 @@ func (r *BrokerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	if r.isOnOpenShift {
 		builder.Owns(&routev1.Route{})
+	}
+
+	if r.isGatewayAPIAvailable {
+		builder.Owns(&gatewayv1.TLSRoute{}).Owns(&gatewayv1.HTTPRoute{})
 	}
 
 	return builder.Complete(r)

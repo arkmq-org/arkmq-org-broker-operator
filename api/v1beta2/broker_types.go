@@ -500,15 +500,32 @@ type StorageType struct {
 	StorageClassName string `json:"storageClassName,omitempty"`
 }
 
-// +kubebuilder:validation:Enum=ingress;route
+// +kubebuilder:validation:Enum=ingress;route;gateway
 type ExposeMode string
 
 var ExposeModes = struct {
 	Ingress ExposeMode
 	Route   ExposeMode
+	Gateway ExposeMode
 }{
 	Ingress: "ingress",
 	Route:   "route",
+	Gateway: "gateway",
+}
+
+type GatewayConfig struct {
+	// ParentRef references the Gateway this TLSRoute attaches to
+	// +kubebuilder:validation:Required
+	ParentRef GatewayParentReference `json:"parentRef"`
+}
+
+type GatewayParentReference struct {
+	// Name of the Gateway resource
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+	// Namespace of the Gateway resource
+	// +kubebuilder:validation:Required
+	Namespace string `json:"namespace,omitempty"`
 }
 
 type AcceptorType struct {
@@ -551,9 +568,13 @@ type AcceptorType struct {
 	// Whether or not to expose this acceptor
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Expose",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:booleanSwitch"}
 	Expose bool `json:"expose,omitempty"`
-	// Mode to expose the acceptor. Currently the supported modes are `route` and `ingress`. It is ignored when the field `Expose` is false. Default is `route` on OpenShift and `ingress` on Kubernetes. \n\n* `route` mode uses OpenShift Routes to expose the acceptor.\n* `ingress` mode uses Kubernetes Nginx Ingress to expose the acceptor with TLS passthrough.\n"
+	// Mode to expose the acceptor. Currently the supported modes are `route`, `ingress` and `gateway`. It is ignored when the field `Expose` is false. Default is `route` on OpenShift and `ingress` on Kubernetes. \n\n* `route` mode uses OpenShift Routes to expose the acceptor.\n* `ingress` mode uses Kubernetes Nginx Ingress to expose the acceptor with TLS passthrough.\n"
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Expose Mode",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
 	ExposeMode *ExposeMode `json:"exposeMode,omitempty"`
+	// Defines Gateway API specific configuration for this acceptor. Only used when exposeMode is set to gateway.
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Gateway",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
+	// +optional
+	Gateway *GatewayConfig `json:"gateway,omitempty"`
 	// To indicate which kind of routing type to use.
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Anycast Prefix",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
 	AnycastPrefix string `json:"anycastPrefix,omitempty"`
@@ -584,7 +605,7 @@ type AcceptorType struct {
 	// Provider used for the truststore; "SUN", "SunJCE", etc. Default in broker is null
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="TrustStore Provider",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
 	TrustStoreProvider string `json:"trustStoreProvider,omitempty"`
-	// Host for Ingress and Route resources of the acceptor. It supports the following variables: $(CR_NAME), $(CR_NAMESPACE), $(BROKER_ORDINAL), $(ITEM_NAME), $(RES_NAME) and $(INGRESS_DOMAIN). It is required for the acceptors exposed with the ingress mode when the ingress domain is not specified.
+	// Host for the Ingress, Route, HTTPRoute or TLSRoute resource of the acceptor. It supports the following variables: $(CR_NAME), $(CR_NAMESPACE), $(BROKER_ORDINAL), $(ITEM_NAME), $(RES_NAME) and $(INGRESS_DOMAIN). It is required for the acceptors exposed with the ingress mode when the ingress domain is not specified, and always required for the acceptors exposed with the gateway mode.
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Ingress Host",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
 	IngressHost string `json:"ingressHost,omitempty"`
 	// The name of the truststore secret.
@@ -635,9 +656,13 @@ type ConnectorType struct {
 	// Whether or not to expose this connector
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Expose",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:booleanSwitch"}
 	Expose bool `json:"expose,omitempty"`
-	// Mode to expose the connector. Currently the supported modes are `route` and `ingress`. It is ignored when the field `Expose` is false. Default is `route` on OpenShift and `ingress` on Kubernetes. \n\n* `route` mode uses OpenShift Routes to expose the connector.\n* `ingress` mode uses Kubernetes Nginx Ingress to expose the connector with TLS passthrough.\n"
+	// Mode to expose the connector. Currently the supported modes are `route`, `ingress` and `gateway`. It is ignored when the field `Expose` is false. Default is `route` on OpenShift and `ingress` on Kubernetes. \n\n* `route` mode uses OpenShift Routes to expose the connector.\n* `ingress` mode uses Kubernetes Nginx Ingress to expose the connector with TLS passthrough.\n"
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Expose Mode",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
 	ExposeMode *ExposeMode `json:"exposeMode,omitempty"`
+	// Defines Gateway API specific configuration for this acceptor. Only used when exposeMode is set to gateway.
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Gateway",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
+	// +optional
+	Gateway *GatewayConfig `json:"gateway,omitempty"`
 	// Provider used for the keystore; "SUN", "SunJCE", etc. Default is null
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="KeyStore Provider",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
 	KeyStoreProvider string `json:"keyStoreProvider,omitempty"`
@@ -647,7 +672,7 @@ type ConnectorType struct {
 	// Provider used for the truststore; "SUN", "SunJCE", etc. Default in broker is null
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="TrustStore Provider",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
 	TrustStoreProvider string `json:"trustStoreProvider,omitempty"`
-	// Host for Ingress and Route resources of the acceptor. It supports the following variables: $(CR_NAME), $(CR_NAMESPACE), $(BROKER_ORDINAL), $(ITEM_NAME), $(RES_NAME) and $(INGRESS_DOMAIN). It is required for the connectors exposed with the ingress mode when the ingress domain is not specified.
+	// Host for the Ingress, Route, HTTPRoute or TLSRoute resource of the acceptor. It supports the following variables: $(CR_NAME), $(CR_NAMESPACE), $(BROKER_ORDINAL), $(ITEM_NAME), $(RES_NAME) and $(INGRESS_DOMAIN). It is required for the connectors exposed with the ingress mode when the ingress domain is not specified, and always required for the connectors exposed with the gateway mode.
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Ingress Host",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
 	IngressHost string `json:"ingressHost,omitempty"`
 	// The name of the truststore secret.
@@ -662,9 +687,13 @@ type ConsoleType struct {
 	// Whether or not to expose this port
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Expose",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:booleanSwitch"}
 	Expose bool `json:"expose,omitempty"`
-	// Mode to expose the console. Currently the supported modes are `route` and `ingress`. It is ignored when the field `Expose` is false. Default is `route` on OpenShift and `ingress` on Kubernetes. \n\n* `route` mode uses OpenShift Routes to expose the console.\n* `ingress` mode uses Kubernetes Nginx Ingress to expose the console with TLS passthrough.\n"
+	// Mode to expose the console. Currently the supported modes are `route`, `ingress` and `gateway`. It is ignored when the field `Expose` is false. Default is `route` on OpenShift and `ingress` on Kubernetes. \n\n* `route` mode uses OpenShift Routes to expose the console.\n* `ingress` mode uses Kubernetes Nginx Ingress to expose the console with TLS passthrough.\n"
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Expose Mode",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
 	ExposeMode *ExposeMode `json:"exposeMode,omitempty"`
+	// Defines Gateway API specific configuration for this acceptor. Only used when exposeMode is set to gateway.
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Gateway",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
+	// +optional
+	Gateway *GatewayConfig `json:"gateway,omitempty"`
 	// Whether or not to enable SSL on this port
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="SSL Enabled",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:booleanSwitch"}
 	SSLEnabled bool `json:"sslEnabled,omitempty"`
@@ -674,7 +703,7 @@ type ConsoleType struct {
 	// If the embedded server requires client authentication
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Use Client Auth",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:booleanSwitch"}
 	UseClientAuth bool `json:"useClientAuth,omitempty"`
-	// Host for Ingress and Route resources of the acceptor. It supports the following variables: $(CR_NAME), $(CR_NAMESPACE), $(BROKER_ORDINAL), $(ITEM_NAME), $(RES_NAME) and $(INGRESS_DOMAIN). It is required for the console exposed with the ingress mode when the ingress domain is not specified.
+	// Host for the Ingress, Route, HTTPRoute or TLSRoute resource of the acceptor. It supports the following variables: $(CR_NAME), $(CR_NAMESPACE), $(BROKER_ORDINAL), $(ITEM_NAME), $(RES_NAME) and $(INGRESS_DOMAIN). It is required for the console exposed with the ingress mode when the ingress domain is not specified, and always required for the console exposed with the gateway mode.
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Ingress Host",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
 	IngressHost string `json:"ingressHost,omitempty"`
 	// The name of the truststore secret.

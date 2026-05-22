@@ -490,13 +490,13 @@ func (reconciler *BrokerServiceInstanceReconciler) processService() error {
 // On Update, it enqueues both the old and new service if the binding changed.
 type appToServiceHandler struct{}
 
-func (h *appToServiceHandler) Create(ctx context.Context, evt event.CreateEvent, q workqueue.RateLimitingInterface) {
+func (h *appToServiceHandler) Create(ctx context.Context, evt event.CreateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 	if req := h.getServiceRequest(evt.Object); req != nil {
 		q.Add(*req)
 	}
 }
 
-func (h *appToServiceHandler) Update(ctx context.Context, evt event.UpdateEvent, q workqueue.RateLimitingInterface) {
+func (h *appToServiceHandler) Update(ctx context.Context, evt event.UpdateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 	oldApp := evt.ObjectOld.(*broker.BrokerApp)
 	newApp := evt.ObjectNew.(*broker.BrokerApp)
 
@@ -531,13 +531,13 @@ func sameService(a, b *broker.BrokerServiceBindingStatus) bool {
 	return a.Namespace == b.Namespace && a.Name == b.Name
 }
 
-func (h *appToServiceHandler) Delete(ctx context.Context, evt event.DeleteEvent, q workqueue.RateLimitingInterface) {
+func (h *appToServiceHandler) Delete(ctx context.Context, evt event.DeleteEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 	if req := h.getServiceRequest(evt.Object); req != nil {
 		q.Add(*req)
 	}
 }
 
-func (h *appToServiceHandler) Generic(ctx context.Context, evt event.GenericEvent, q workqueue.RateLimitingInterface) {
+func (h *appToServiceHandler) Generic(ctx context.Context, evt event.GenericEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 	if req := h.getServiceRequest(evt.Object); req != nil {
 		q.Add(*req)
 	}

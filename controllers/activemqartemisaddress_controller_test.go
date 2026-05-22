@@ -283,7 +283,7 @@ var _ = Describe("Address controller tests", func() {
 				}
 				httpClient, err := rest.HTTPClientFor(restConfig)
 				Expect(err).To(BeNil())
-				restClient, err := apiutil.RESTClientForGVK(gvk, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
+				restClient, err := apiutil.RESTClientForGVK(gvk, false, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
 				Expect(err).To(BeNil())
 				deploymentSize := *brokerCrd.Spec.DeploymentPlan.Size
 				for ipod := deploymentSize - 1; ipod >= 0; ipod-- {
@@ -1292,7 +1292,7 @@ func QueueStatAssertionInPod(brokerCrName string, podName string, namespace stri
 
 	httpClient, err := rest.HTTPClientFor(restConfig)
 	Expect(err).To(BeNil())
-	restClient, err := apiutil.RESTClientForGVK(gvk, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
+	restClient, err := apiutil.RESTClientForGVK(gvk, false, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
 	Expect(err).To(BeNil())
 
 	Eventually(func(g Gomega) {

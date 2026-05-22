@@ -51,6 +51,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	routev1 "github.com/openshift/api/route/v1"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/log"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/sdkk8sutil"
@@ -93,6 +94,7 @@ func printVersion() {
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(routev1.AddToScheme(scheme))
+	utilruntime.Must(gatewayv1.Install(scheme))
 
 	utilruntime.Must(brokerv2alpha1.AddToScheme(scheme))
 	utilruntime.Must(brokerv2alpha2.AddToScheme(scheme))
@@ -195,7 +197,6 @@ func main() {
 		Logger:                 setupLog,
 	}
 
-	mgrOptions.Client.WarningHandler.SuppressWarnings = true
 	rest.SetDefaultWarningHandler(&TraceLogWarnings{Log: ctrl.Log})
 
 	isLocal, watchList := common.ResolveWatchNamespaceForManager(oprNamespace, watchNamespace)
@@ -280,10 +281,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	gatewayAPIAvailable, err := common.DetectGatewayAPIWith(cfg)
+	if err != nil {
+		setupLog.Error(err, "can't determine gateway-api availability")
+		os.Exit(1)
+	}
+	setupLog.Info("gateway-api availability", "available", gatewayAPIAvailable)
+
 	brokerReconciler := controllers.NewActiveMQArtemisReconciler(
 		mgr,
 		ctrl.Log.WithName("ActiveMQArtemisReconciler"),
-		isOpenshift)
+		isOpenshift,
+		gatewayAPIAvailable)
 
 	if err = brokerReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ActiveMQArtemis")
@@ -293,7 +302,8 @@ func main() {
 	brokerV1Reconciler := controllers.NewBrokerReconciler(
 		mgr,
 		ctrl.Log.WithName("BrokerReconciler"),
-		isOpenshift)
+		isOpenshift,
+		gatewayAPIAvailable)
 
 	if err = brokerV1Reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Broker")

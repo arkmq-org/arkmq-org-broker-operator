@@ -69,6 +69,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/tools/remotecommand"
 )
@@ -479,7 +480,7 @@ func RunCommandInPodWithNamespace(podName string, podNamespace string, container
 	}
 	httpClient, err := rest.HTTPClientFor(restConfig)
 	Expect(err).To(BeNil())
-	restClient, err := apiutil.RESTClientForGVK(gvk, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
+	restClient, err := apiutil.RESTClientForGVK(gvk, false, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
 	Expect(err).To(BeNil())
 	execReq := restClient.
 		Post().
@@ -552,7 +553,7 @@ func LogsOfPod(podWithOrdinal string, brokerName string, namespace string, g Gom
 	}
 	httpClient, err := rest.HTTPClientFor(restConfig)
 	Expect(err).To(BeNil())
-	restClient, err := apiutil.RESTClientForGVK(gvk, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
+	restClient, err := apiutil.RESTClientForGVK(gvk, false, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
 	g.Expect(err).To(BeNil())
 
 	readCloser, err := restClient.
@@ -583,7 +584,7 @@ func ExecOnPod(podWithOrdinal string, brokerName string, namespace string, comma
 	}
 	httpClient, err := rest.HTTPClientFor(restConfig)
 	g.Expect(err).To(BeNil())
-	restClient, err := apiutil.RESTClientForGVK(gvk, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
+	restClient, err := apiutil.RESTClientForGVK(gvk, false, false, restConfig, serializer.NewCodecFactory(scheme.Scheme), httpClient)
 	g.Expect(err).To(BeNil())
 
 	execReq := restClient.
@@ -1191,6 +1192,9 @@ func (m *NillCluster) GetFieldIndexer() client.FieldIndexer {
 	return nil
 }
 func (m *NillCluster) GetEventRecorderFor(name string) record.EventRecorder {
+	return nil
+}
+func (m *NillCluster) GetEventRecorder(name string) events.EventRecorder {
 	return nil
 }
 func (m *NillCluster) GetRESTMapper() meta.RESTMapper {

@@ -5710,12 +5710,18 @@ spec:
         x-descriptors:
         - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
       - description: Mode to expose the acceptor. Currently the supported modes are
-          `route` and `ingress`. It is ignored when the field `Expose` is false. Default
-          is `route` on OpenShift and `ingress` on Kubernetes. \n\n* `route` mode
-          uses OpenShift Routes to expose the acceptor.\n* `ingress` mode uses Kubernetes
-          Nginx Ingress to expose the acceptor with TLS passthrough.\n"
+          `route`, `ingress` and `gateway`. It is ignored when the field `Expose`
+          is false. Default is `route` on OpenShift and `ingress` on Kubernetes. \n\n*
+          `route` mode uses OpenShift Routes to expose the acceptor.\n* `ingress`
+          mode uses Kubernetes Nginx Ingress to expose the acceptor with TLS passthrough.\n"
         displayName: Expose Mode
         path: acceptors[0].exposeMode
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Defines Gateway API specific configuration for this acceptor.
+          Only used when exposeMode is set to gateway.
+        displayName: Gateway
+        path: acceptors[0].gateway
         x-descriptors:
         - urn:alm:descriptor:com.tectonic.ui:text
       - description: 'Host for Ingress and Route resources of the acceptor. It supports
@@ -6245,12 +6251,18 @@ spec:
         x-descriptors:
         - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
       - description: Mode to expose the connector. Currently the supported modes are
-          `route` and `ingress`. It is ignored when the field `Expose` is false. Default
-          is `route` on OpenShift and `ingress` on Kubernetes. \n\n* `route` mode
-          uses OpenShift Routes to expose the connector.\n* `ingress` mode uses Kubernetes
-          Nginx Ingress to expose the connector with TLS passthrough.\n"
+          `route`, `ingress` and `gateway`. It is ignored when the field `Expose`
+          is false. Default is `route` on OpenShift and `ingress` on Kubernetes. \n\n*
+          `route` mode uses OpenShift Routes to expose the connector.\n* `ingress`
+          mode uses Kubernetes Nginx Ingress to expose the connector with TLS passthrough.\n"
         displayName: Expose Mode
         path: connectors[0].exposeMode
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Defines Gateway API specific configuration for this acceptor.
+          Only used when exposeMode is set to gateway.
+        displayName: Gateway
+        path: connectors[0].gateway
         x-descriptors:
         - urn:alm:descriptor:com.tectonic.ui:text
       - description: Hostname or IP to connect to
@@ -6355,12 +6367,18 @@ spec:
         x-descriptors:
         - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
       - description: Mode to expose the console. Currently the supported modes are
-          `route` and `ingress`. It is ignored when the field `Expose` is false. Default
-          is `route` on OpenShift and `ingress` on Kubernetes. \n\n* `route` mode
-          uses OpenShift Routes to expose the console.\n* `ingress` mode uses Kubernetes
-          Nginx Ingress to expose the console with TLS passthrough.\n"
+          `route`, `ingress` and `gateway`. It is ignored when the field `Expose`
+          is false. Default is `route` on OpenShift and `ingress` on Kubernetes. \n\n*
+          `route` mode uses OpenShift Routes to expose the console.\n* `ingress` mode
+          uses Kubernetes Nginx Ingress to expose the console with TLS passthrough.\n"
         displayName: Expose Mode
         path: console.exposeMode
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Defines Gateway API specific configuration for this acceptor.
+          Only used when exposeMode is set to gateway.
+        displayName: Gateway
+        path: console.gateway
         x-descriptors:
         - urn:alm:descriptor:com.tectonic.ui:text
       - description: 'Host for Ingress and Route resources of the acceptor. It supports

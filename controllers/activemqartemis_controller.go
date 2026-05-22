@@ -40,6 +40,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources"
 	"github.com/go-logr/logr"
 	routev1 "github.com/openshift/api/route/v1"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
@@ -101,27 +102,30 @@ func (r *ActiveMQArtemisReconciler) AddBrokerConfigHandler(namespacedName types.
 // ActiveMQArtemisReconciler reconciles a ActiveMQArtemis object
 type ActiveMQArtemisReconciler struct {
 	rtclient.Client
-	Scheme        *runtime.Scheme
-	events        chan event.GenericEvent
-	log           logr.Logger
-	isOnOpenShift bool
+	Scheme                *runtime.Scheme
+	events                chan event.GenericEvent
+	log                   logr.Logger
+	isOnOpenShift         bool
+	isGatewayAPIAvailable bool
 }
 
-func NewActiveMQArtemisReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShift bool) *ActiveMQArtemisReconciler {
+func NewActiveMQArtemisReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShift bool, gatewayAPIAvailable bool) *ActiveMQArtemisReconciler {
 	return &ActiveMQArtemisReconciler{
-		isOnOpenShift: isOpenShift,
-		Client:        cluster.GetClient(),
-		Scheme:        cluster.GetScheme(),
-		log:           logger,
+		isOnOpenShift:         isOpenShift,
+		isGatewayAPIAvailable: gatewayAPIAvailable,
+		Client:                cluster.GetClient(),
+		Scheme:                cluster.GetScheme(),
+		log:                   logger,
 	}
 }
 
 func (r *ActiveMQArtemisReconciler) toBrokerParent() *BrokerReconciler {
 	return &BrokerReconciler{
-		Client:        r.Client,
-		Scheme:        r.Scheme,
-		log:           r.log,
-		isOnOpenShift: r.isOnOpenShift,
+		Client:                r.Client,
+		Scheme:                r.Scheme,
+		log:                   r.log,
+		isOnOpenShift:         r.isOnOpenShift,
+		isGatewayAPIAvailable: r.isGatewayAPIAvailable,
 	}
 }
 
@@ -136,6 +140,7 @@ func (r *ActiveMQArtemisReconciler) toBrokerParent() *BrokerReconciler {
 //+kubebuilder:rbac:groups=apps,namespace=arkmq-org-broker-operator,resources=deployments;daemonsets;replicasets;statefulsets,verbs=get;list;watch;create;delete;update
 //+kubebuilder:rbac:groups=networking.k8s.io,namespace=arkmq-org-broker-operator,resources=ingresses,verbs=get;list;watch;create;delete;update
 //+kubebuilder:rbac:groups=route.openshift.io,namespace=arkmq-org-broker-operator,resources=routes;routes/custom-host;routes/status,verbs=get;list;watch;create;delete;update
+//+kubebuilder:rbac:groups=gateway.networking.k8s.io,namespace=arkmq-org-broker-operator,resources=httproutes;tlsroutes,verbs=get;list;watch;create;delete;update
 //+kubebuilder:rbac:groups=monitoring.coreos.com,namespace=arkmq-org-broker-operator,resources=servicemonitors,verbs=get;create
 //+kubebuilder:rbac:groups=apps,namespace=arkmq-org-broker-operator,resources=deployments/finalizers,verbs=update
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,namespace=arkmq-org-broker-operator,resources=roles;rolebindings,verbs=create;get;delete
@@ -251,13 +256,16 @@ func (r *ActiveMQArtemisReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		builder.Owns(&routev1.Route{})
 	}
 
+	if r.isGatewayAPIAvailable {
+		builder.Owns(&gatewayv1.TLSRoute{}).Owns(&gatewayv1.HTTPRoute{})
+	}
+
 	var err error
 	controller, err := builder.Build(r)
 	if err == nil {
 		r.events = make(chan event.GenericEvent)
 		err = controller.Watch(
-			&source.Channel{Source: r.events},
-			&handler.EnqueueRequestForObject{},
+			source.Channel(r.events, &handler.EnqueueRequestForObject{}),
 		)
 	}
 	return err
