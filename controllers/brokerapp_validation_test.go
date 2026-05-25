@@ -25,7 +25,7 @@ func TestValidation_ConsumerOf_EmptySubscriptionsArray(t *testing.T) {
 	ns := "default"
 	appName := "invalid-app"
 
-	emptyArray := []string{}
+	pubSubTrue := true
 	app := &broker.BrokerApp{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      appName,
@@ -40,7 +40,8 @@ func TestValidation_ConsumerOf_EmptySubscriptionsArray(t *testing.T) {
 					ConsumerOf: []broker.AddressRef{
 						{
 							Address:       "events",
-							Subscriptions: &emptyArray, // Invalid: cannot consume with empty array
+							PubSub:        &pubSubTrue, // Explicit pub/sub
+							Subscriptions: []string{},  // Invalid: cannot consume with empty subscriptions
 						},
 					},
 				},
@@ -59,7 +60,7 @@ func TestValidation_ConsumerOf_EmptySubscriptionsArray(t *testing.T) {
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "empty subscriptions array not allowed")
+	assert.Contains(t, err.Error(), "pubSub consumers must specify at least one subscription")
 }
 
 // TestValidation_ProducerOf_NonEmptySubscriptionsArray tests that non-empty subscriptions array is rejected
@@ -86,7 +87,7 @@ func TestValidation_ProducerOf_NonEmptySubscriptionsArray(t *testing.T) {
 					ProducerOf: []broker.AddressRef{
 						{
 							Address:       "events",
-							Subscriptions: &subs, // Invalid: producers cannot specify queue names
+							Subscriptions: subs, // Invalid: producers cannot specify queue names
 						},
 					},
 				},
@@ -105,7 +106,7 @@ func TestValidation_ProducerOf_NonEmptySubscriptionsArray(t *testing.T) {
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "subscriptions array cannot contain queue names")
+	assert.Contains(t, err.Error(), "subscriptions cannot contain queue names")
 }
 
 // TestValidation_QueueName_FQQN tests that FQQN format is rejected in queue names
@@ -132,7 +133,7 @@ func TestValidation_QueueName_FQQN(t *testing.T) {
 					ConsumerOf: []broker.AddressRef{
 						{
 							Address:       "events",
-							Subscriptions: &subs,
+							Subscriptions: subs,
 						},
 					},
 				},
@@ -178,7 +179,7 @@ func TestValidation_QueueName_Empty(t *testing.T) {
 					ConsumerOf: []broker.AddressRef{
 						{
 							Address:       "events",
-							Subscriptions: &subs,
+							Subscriptions: subs,
 						},
 					},
 				},

@@ -812,12 +812,10 @@ const (
 	DeployedConditionSelectorEvaluationError      = "AppSelectorEvaluationError"
 	DeployedConditionPortPoolExhaustedReason      = "PortPoolExhausted"
 
-	AppsProvisionedConditionType                    = "AppsProvisioned"
-	AppsProvisionedConditionSyncedReason            = "Synced"
-	AppsProvisionedConditionWaitingReason           = "WaitingForBroker"
-	AppsProvisionedConditionNotReadyReason          = "BrokerNotReady"
-	AppsProvisionedConditionAddressClashReason      = "AddressClash"
-	AppsProvisionedConditionInvalidAddressRefReason = "InvalidAddressRef"
+	AppsProvisionedConditionType           = "AppsProvisioned"
+	AppsProvisionedConditionSyncedReason   = "Synced"
+	AppsProvisionedConditionWaitingReason  = "WaitingForBroker"
+	AppsProvisionedConditionNotReadyReason = "BrokerNotReady"
 
 	ValidConditionType                   = "Valid"
 	ValidConditionSuccessReason          = "ValidationSucceded"
@@ -827,8 +825,6 @@ const (
 	ValidConditionInvalidVersionReason   = "SpecVersionInvalid"
 	ValidConditionInvalidResourceName    = "InvalidResourceName"
 	ValidConditionAddressTypeError       = "AddressTypeError"
-	ValidConditionAddressRefError        = "AddressRefError"
-	ValidConditionAddressClashError      = "AddressClash"
 	ValidConditionSpecSelectorError      = "SpecSelectorError"
 
 	ValidConditionPDBNonNilSelectorReason            = "PodDisruptionBudgetNonNilSelector"

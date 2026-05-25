@@ -195,6 +195,11 @@ func (b *BrokerAppBuilder) WithSharedAddresses(addresses ...v1beta2.AddressType)
 	return b
 }
 
+func (b *BrokerAppBuilder) WithAddresses(addresses ...v1beta2.AddressType) *BrokerAppBuilder {
+	b.app.Spec.Addresses = append(b.app.Spec.Addresses, addresses...)
+	return b
+}
+
 func (b *BrokerAppBuilder) WithMemoryRequest(memory string) *BrokerAppBuilder {
 	if b.app.Spec.Resources.Requests == nil {
 		b.app.Spec.Resources.Requests = corev1.ResourceList{}
@@ -237,7 +242,7 @@ func NewAddressRef(address string) *AddressRefBuilder {
 }
 
 func (a *AddressRefBuilder) WithSubscriptions(subs ...string) *AddressRefBuilder {
-	a.ref.Subscriptions = &subs
+	a.ref.Subscriptions = subs
 	return a
 }
 
@@ -249,6 +254,34 @@ func (a *AddressRefBuilder) WithAppRef(namespace, name string) *AddressRefBuilde
 
 func (a *AddressRefBuilder) Build() v1beta2.AddressRef {
 	return a.ref
+}
+
+// AddressTypeBuilder builds AddressType test fixtures
+type AddressTypeBuilder struct {
+	addrType v1beta2.AddressType
+}
+
+// NewAddressType creates a new AddressType builder
+func NewAddressType(address string) *AddressTypeBuilder {
+	return &AddressTypeBuilder{
+		addrType: v1beta2.AddressType{
+			Address: address,
+		},
+	}
+}
+
+func (a *AddressTypeBuilder) WithSubscriptions(subs ...string) *AddressTypeBuilder {
+	a.addrType.Subscriptions = subs
+	return a
+}
+
+func (a *AddressTypeBuilder) WithPubSub(pubSub bool) *AddressTypeBuilder {
+	a.addrType.PubSub = &pubSub
+	return a
+}
+
+func (a *AddressTypeBuilder) Build() v1beta2.AddressType {
+	return a.addrType
 }
 
 // CreateNamespace creates a test namespace object

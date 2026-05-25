@@ -283,7 +283,7 @@ var _ = Describe("broker-service-poc", func() {
 								{
 									Address: "APP.COMMANDS",
 									// jms consumer queue of the form <address>::<connection client id>.<subscription name>
-									Subscriptions: &[]string{"client-1.sub-1", "client-2.sub-2"},
+									Subscriptions: []string{"client-1.sub-1", "client-2.sub-2"},
 								},
 							},
 						},

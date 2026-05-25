@@ -50,9 +50,15 @@ spec:
                       description: Address is the address identifier (unique within
                         a broker service)
                       type: string
+                    pubSub:
+                      description: |-
+                        PubSub declares publish/subscribe (pubSub) semantics.
+                        PubSub is necessary when an address needs to be declared pubSub without declaring Subscriptions.
+                      type: boolean
                     subscriptions:
-                      description: Subscriptions declares pub/sub semantics and subscriber
-                        queue names for an address
+                      description: |-
+                        Subscriptions declares subscription queue names for an address.
+                        Typical values will be of the form <client id>.<subscription nname>
                       items:
                         type: string
                       type: array
@@ -77,9 +83,15 @@ spec:
                             description: AppNamespace of owning app - for cross-app
                               references  (optional)
                             type: string
+                          pubSub:
+                            description: |-
+                              PubSub declares publish/subscribe (pubSub) semantics.
+                              Used with ProducerOf, to declare pubSub semantics.
+                            type: boolean
                           subscriptions:
-                            description: Subscriptions declares pub/sub semantics
-                              and subscriber queue names for an address
+                            description: |-
+                              Subscriptions declares subscription queue names for an address.
+                              Typical values will be of the form <client id>.<subscription nname>
                             items:
                               type: string
                             type: array
@@ -101,9 +113,15 @@ spec:
                             description: AppNamespace of owning app - for cross-app
                               references  (optional)
                             type: string
+                          pubSub:
+                            description: |-
+                              PubSub declares publish/subscribe (pubSub) semantics.
+                              Used with ProducerOf, to declare pubSub semantics.
+                            type: boolean
                           subscriptions:
-                            description: Subscriptions declares pub/sub semantics
-                              and subscriber queue names for an address
+                            description: |-
+                              Subscriptions declares subscription queue names for an address.
+                              Typical values will be of the form <client id>.<subscription nname>
                             items:
                               type: string
                             type: array
@@ -225,9 +243,15 @@ spec:
                       description: Address is the address identifier (unique within
                         a broker service)
                       type: string
+                    pubSub:
+                      description: |-
+                        PubSub declares publish/subscribe (pubSub) semantics.
+                        PubSub is necessary when an address needs to be declared pubSub without declaring Subscriptions.
+                      type: boolean
                     subscriptions:
-                      description: Subscriptions declares pub/sub semantics and subscriber
-                        queue names for an address
+                      description: |-
+                        Subscriptions declares subscription queue names for an address.
+                        Typical values will be of the form <client id>.<subscription nname>
                       items:
                         type: string
                       type: array

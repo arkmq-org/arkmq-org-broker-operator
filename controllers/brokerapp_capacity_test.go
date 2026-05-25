@@ -397,7 +397,7 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						Namespace: "test",
 					},
 					Spec: brokerv1beta2.BrokerAppSpec{
-						SharedAddresses: []brokerv1beta2.AddressType{{Address: "shared-queue"}},
+						SharedAddresses: []brokerv1beta2.AddressType{NewAddressType("shared-queue").Build()},
 						Capabilities: []brokerv1beta2.AppCapabilityType{
 							{
 								ConsumerOf: []brokerv1beta2.AddressRef{
@@ -469,11 +469,11 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						Namespace: "test",
 					},
 					Spec: brokerv1beta2.BrokerAppSpec{
-						SharedAddresses: []brokerv1beta2.AddressType{{Address: "shared", Subscriptions: &[]string{}}},
+						SharedAddresses: []brokerv1beta2.AddressType{NewAddressType("shared").WithPubSub(true).Build()},
 						Capabilities: []brokerv1beta2.AppCapabilityType{
 							{
 								ConsumerOf: []brokerv1beta2.AddressRef{
-									{Address: "shared", Subscriptions: &[]string{"sub1"}},
+									{Address: "shared", Subscriptions: []string{"sub1"}},
 								},
 							},
 						},
@@ -508,10 +508,10 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						{
 							ProducerOf: []brokerv1beta2.AddressRef{
 								{
-									Address:       "shared",
-									Subscriptions: &[]string{}, // subscription semantics
-									AppNamespace:  "test",
-									AppName:       "existing-app"},
+									Address:      "shared",
+									PubSub:       &[]bool{true}[0], // pub/sub semantics (multicast)
+									AppNamespace: "test",
+									AppName:      "existing-app"},
 							},
 						},
 					},
@@ -541,7 +541,7 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						Namespace: "test",
 					},
 					Spec: brokerv1beta2.BrokerAppSpec{
-						SharedAddresses: []brokerv1beta2.AddressType{{Address: "shared"}},
+						SharedAddresses: []brokerv1beta2.AddressType{NewAddressType("shared").Build()},
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
 								corev1.ResourceMemory: resource.MustParse("512Mi"),

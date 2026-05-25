@@ -230,7 +230,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 							ConsumerOf: []broker.AddressRef{
 								{
 									Address:       "APP2.TOPIC",
-									Subscriptions: &[]string{"client-a.sub-a"},
+									Subscriptions: []string{"client-a.sub-a"},
 								},
 							},
 						},
@@ -643,17 +643,17 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 							corev1.ResourceMemory: resource.MustParse("512Mi"),
 						},
 					},
-					SharedAddresses: []broker.AddressType{{Address: "shared.address", Subscriptions: &[]string{}}},
+					SharedAddresses: []broker.AddressType{{Address: "shared.address", PubSub: &[]bool{true}[0]}},
 					Capabilities: []broker.AppCapabilityType{
 						{
 							ConsumerOf: []broker.AddressRef{
 								{
 									Address:       "app1.address",
-									Subscriptions: &[]string{"queue1"},
+									Subscriptions: []string{"queue1"},
 								},
 								{
 									Address:       "shared.address",
-									Subscriptions: &[]string{"app1-client.app1-shared-queue"},
+									Subscriptions: []string{"app1-client.app1-shared-queue"},
 								},
 							},
 						},
@@ -720,11 +720,11 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 							ConsumerOf: []broker.AddressRef{
 								{
 									Address:       "app2.address",
-									Subscriptions: &[]string{"queue2"},
+									Subscriptions: []string{"queue2"},
 								},
 								{
 									Address:       "shared.address",
-									Subscriptions: &[]string{"app2-client.app2-shared-queue"},
+									Subscriptions: []string{"app2-client.app2-shared-queue"},
 									AppNamespace:  defaultNamespace,
 									AppName:       app1Name,
 								},
@@ -815,7 +815,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 							ConsumerOf: []broker.AddressRef{
 								{
 									Address:       "app3.address",
-									Subscriptions: &[]string{"queue3"},
+									Subscriptions: []string{"queue3"},
 								},
 							},
 						},
@@ -860,11 +860,11 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				createdApp3.Spec.Resources.Requests[corev1.ResourceMemory] = resource.MustParse("256Mi")
 				createdApp3.Spec.Capabilities = []broker.AppCapabilityType{
 					{
-						ProducerOf: []broker.AddressRef{{Address: "shared.address", AppNamespace: defaultNamespace, AppName: app1Name, Subscriptions: &[]string{}}},
+						ProducerOf: []broker.AddressRef{{Address: "shared.address", AppNamespace: defaultNamespace, AppName: app1Name, PubSub: &[]bool{true}[0]}},
 						ConsumerOf: []broker.AddressRef{
 							{
 								Address:       "app3.address",
-								Subscriptions: &[]string{"queue3"},
+								Subscriptions: []string{"queue3"},
 							},
 						},
 					},

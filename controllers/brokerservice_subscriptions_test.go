@@ -15,34 +15,24 @@ limitations under the License.
 package controllers
 
 import (
-	"log"
 	"strings"
 	"testing"
-
-	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestProcessCapabilities_EmptySubscriptionsArray_MulticastOnly(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+// Helper functions for paired tests
 
-	// Address with empty array should generate MULTICAST routing only
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "multicast-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Addresses: []broker.AddressType{
-				{
-					Address:       "events",
-					Subscriptions: &[]string{}, // Empty = multicast only
-				},
-			},
-		},
+func testEmptySubscriptionsArrayMulticastOnly(t *testing.T, useShared bool) {
+	t.Helper()
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
+
+	builder := NewBrokerApp("multicast-app", "test")
+	if useShared {
+		builder.WithSharedAddresses(NewAddressType("events").WithPubSub(true).Build())
+	} else {
+		builder.WithAddresses(NewAddressType("events").WithPubSub(true).Build())
 	}
+	app := builder.Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err != nil {
@@ -50,7 +40,7 @@ func TestProcessCapabilities_EmptySubscriptionsArray_MulticastOnly(t *testing.T)
 	}
 
 	props := string(secret.Data["test-multicast-app-capabilities.properties"])
-	log.Printf("PROPS: \n\n%s\n\n", props)
+	t.Logf("PROPS: \n%s\n", props)
 
 	// Should have addressConfiguration with routing types
 	if !strings.Contains(props, `addressConfigurations."events".routingTypes=`) {
@@ -73,24 +63,18 @@ func TestProcessCapabilities_EmptySubscriptionsArray_MulticastOnly(t *testing.T)
 	}
 }
 
-func TestProcessCapabilities_SingleQueue_AnycastRouting(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+func testSingleQueueAnycastRouting(t *testing.T, useShared bool) {
+	t.Helper()
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
-	// Address with a single queue should generate ANYCAST with that queue
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "anycast-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Addresses: []broker.AddressType{
-				{
-					Address: "orders",
-				},
-			},
-		},
+	builder := NewBrokerApp("anycast-app", "test")
+	if useShared {
+		builder.WithSharedAddresses(NewAddressType("orders").Build())
+	} else {
+		builder.WithAddresses(NewAddressType("orders").Build())
 	}
+	app := builder.Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err != nil {
@@ -98,7 +82,7 @@ func TestProcessCapabilities_SingleQueue_AnycastRouting(t *testing.T) {
 	}
 
 	props := string(secret.Data["test-anycast-app-capabilities.properties"])
-	log.Printf("PROPS: \n\n%s\n\n", props)
+	t.Logf("PROPS: \n%s\n", props)
 
 	// Should have addressConfiguration
 	if !strings.Contains(props, `addressConfigurations."orders".routingTypes=`) {
@@ -126,25 +110,18 @@ func TestProcessCapabilities_SingleQueue_AnycastRouting(t *testing.T) {
 	}
 }
 
-func TestProcessCapabilities_MultipleSubs_AllCreated(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+func testMultipleSubsAllCreated(t *testing.T, useShared bool) {
+	t.Helper()
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
-	// Address with multiple subs should create all of them
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "multi-queue-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Addresses: []broker.AddressType{
-				{
-					Address:       "tasks",
-					Subscriptions: &[]string{"high-priority", "low-priority", "default"},
-				},
-			},
-		},
+	builder := NewBrokerApp("multi-queue-app", "test")
+	if useShared {
+		builder.WithSharedAddresses(NewAddressType("tasks").WithSubscriptions("high-priority", "low-priority", "default").Build())
+	} else {
+		builder.WithAddresses(NewAddressType("tasks").WithSubscriptions("high-priority", "low-priority", "default").Build())
 	}
+	app := builder.Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err != nil {
@@ -152,7 +129,7 @@ func TestProcessCapabilities_MultipleSubs_AllCreated(t *testing.T) {
 	}
 
 	props := string(secret.Data["test-multi-queue-app-capabilities.properties"])
-	log.Printf("PROPS: \n\n%s\n\n", props)
+	t.Logf("PROPS: \n%s\n", props)
 
 	// Should have addressConfiguration
 	if !strings.Contains(props, `addressConfigurations."tasks".routingTypes=`) {
@@ -166,8 +143,8 @@ func TestProcessCapabilities_MultipleSubs_AllCreated(t *testing.T) {
 			t.Errorf("expected queueConfigs for declared queue '%s'", queue)
 		}
 
-		if !strings.Contains(props, `queueConfigs."`+queue+`".routingType=ANYCAST`) {
-			t.Errorf("expected routingType=ANYCAST for queue '%s'", queue)
+		if !strings.Contains(props, `queueConfigs."`+queue+`".routingType=MULTICAST`) {
+			t.Errorf("expected routingType=MULTICAST for queue '%s' (subscriptions imply pub/sub)", queue)
 		}
 
 		if !strings.Contains(props, `queueConfigs."`+queue+`".address=tasks`) {
@@ -176,34 +153,20 @@ func TestProcessCapabilities_MultipleSubs_AllCreated(t *testing.T) {
 	}
 }
 
-func TestProcessCapabilities_SubsWithCapabilities_SubsAndRBAC(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+func testSubsWithCapabilitiesSubsAndRBAC(t *testing.T, useShared bool) {
+	t.Helper()
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
-	// Address with queues AND capabilities should create queues AND RBAC
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "queue-with-caps",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Addresses: []broker.AddressType{
-				{
-					Address: "commands",
-				},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ProducerOf: []broker.AddressRef{
-						{Address: "commands"},
-					},
-					ConsumerOf: []broker.AddressRef{
-						{Address: "commands"},
-					},
-				},
-			},
-		},
+	builder := NewBrokerApp("queue-with-caps", "test")
+	if useShared {
+		builder.WithSharedAddresses(NewAddressType("commands").Build())
+	} else {
+		builder.WithAddresses(NewAddressType("commands").Build())
 	}
+	app := builder.WithProducerOf(NewAddressRef("commands").Build()).
+		WithConsumerOf(NewAddressRef("commands").Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err != nil {
@@ -211,7 +174,7 @@ func TestProcessCapabilities_SubsWithCapabilities_SubsAndRBAC(t *testing.T) {
 	}
 
 	props := string(secret.Data["test-queue-with-caps-capabilities.properties"])
-	log.Printf("PROPS: \n\n%s\n\n", props)
+	t.Logf("PROPS: \n%s\n", props)
 
 	// Should have addressConfiguration
 	if !strings.Contains(props, `addressConfigurations."commands".routingTypes=`) {
@@ -233,33 +196,18 @@ func TestProcessCapabilities_SubsWithCapabilities_SubsAndRBAC(t *testing.T) {
 	}
 }
 
-func TestProcessCapabilities_NoQueuesField_InferredFromCapabilities(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+func testNoQueuesFieldInferredFromCapabilities(t *testing.T, useShared bool) {
+	t.Helper()
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
-	// Address without queues field (omitempty) should use current behavior
-	// (queues inferred from capabilities)
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "inferred-queues",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Addresses: []broker.AddressType{
-				{
-					Address: "legacy",
-					// Queues field omitted - should infer from capabilities
-				},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{Address: "legacy"},
-					},
-				},
-			},
-		},
+	builder := NewBrokerApp("inferred-queues", "test")
+	if useShared {
+		builder.WithSharedAddresses(NewAddressType("legacy").Build())
+	} else {
+		builder.WithAddresses(NewAddressType("legacy").Build())
 	}
+	app := builder.WithConsumerOf(NewAddressRef("legacy").Build()).Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err != nil {
@@ -267,7 +215,7 @@ func TestProcessCapabilities_NoQueuesField_InferredFromCapabilities(t *testing.T
 	}
 
 	props := string(secret.Data["test-inferred-queues-capabilities.properties"])
-	log.Printf("PROPS: \n\n%s\n\n", props)
+	t.Logf("PROPS: \n%s\n", props)
 
 	// Should have addressConfiguration
 	if !strings.Contains(props, `addressConfigurations."legacy".routingTypes=`) {
@@ -286,27 +234,24 @@ func TestProcessCapabilities_NoQueuesField_InferredFromCapabilities(t *testing.T
 	}
 }
 
-func TestProcessCapabilities_MixedMulticastAndAnycast(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+func testMixedMulticastAndAnycast(t *testing.T, useShared bool) {
+	t.Helper()
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "mixed-routing",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Addresses: []broker.AddressType{
-				{
-					Address:       "events",
-					Subscriptions: &[]string{}, // Multicast only
-				},
-				{
-					Address: "commands",
-				},
-			},
-		},
+	builder := NewBrokerApp("mixed-routing", "test")
+	if useShared {
+		builder.WithSharedAddresses(
+			NewAddressType("events").WithPubSub(true).Build(),
+			NewAddressType("commands").Build(),
+		)
+	} else {
+		builder.WithAddresses(
+			NewAddressType("events").WithPubSub(true).Build(),
+			NewAddressType("commands").Build(),
+		)
 	}
+	app := builder.Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err != nil {
@@ -314,7 +259,7 @@ func TestProcessCapabilities_MixedMulticastAndAnycast(t *testing.T) {
 	}
 
 	props := string(secret.Data["test-mixed-routing-capabilities.properties"])
-	log.Printf("PROPS: \n\n%s\n\n", props)
+	t.Logf("PROPS: \n%s\n", props)
 
 	// Should have addressConfigurations for both
 	if !strings.Contains(props, `addressConfigurations."events"`) {
@@ -334,36 +279,18 @@ func TestProcessCapabilities_MixedMulticastAndAnycast(t *testing.T) {
 	}
 }
 
-func TestProcessCapabilities_SubsWithSubscriberCapability(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+func testSubsWithSubscriberCapability(t *testing.T, useShared bool) {
+	t.Helper()
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
-	// Address with subs + Subscriptions should create both declared queues AND
-	// queues from subscription capability
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "subscriber-with-queues",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Addresses: []broker.AddressType{
-				{
-					Address:       "notifications",
-					Subscriptions: &[]string{"email", "sms"},
-				},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address:       "notifications",
-							Subscriptions: &[]string{"push"},
-						},
-					},
-				},
-			},
-		},
+	builder := NewBrokerApp("subscriber-with-queues", "test")
+	if useShared {
+		builder.WithSharedAddresses(NewAddressType("notifications").WithSubscriptions("email", "sms").Build())
+	} else {
+		builder.WithAddresses(NewAddressType("notifications").WithSubscriptions("email", "sms").Build())
 	}
+	app := builder.WithConsumerOf(NewAddressRef("notifications").WithSubscriptions("push").Build()).Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err != nil {
@@ -371,7 +298,7 @@ func TestProcessCapabilities_SubsWithSubscriberCapability(t *testing.T) {
 	}
 
 	props := string(secret.Data["test-subscriber-with-queues-capabilities.properties"])
-	log.Printf("PROPS: \n\n%s\n\n", props)
+	t.Logf("PROPS: \n%s\n", props)
 
 	// Should have queueConfigs for both declared queues (email, sms)
 	if !strings.Contains(props, `queueConfigs."email"`) {
@@ -398,4 +325,60 @@ func TestProcessCapabilities_SubsWithSubscriberCapability(t *testing.T) {
 	if !strings.Contains(props, `queueConfigs."sms".routingType=MULTICAST`) {
 		t.Error("expected MULTICAST routing for declared queue 'sms'")
 	}
+}
+
+func TestProcessCapabilities_EmptySubscriptionsArray_MulticastOnly(t *testing.T) {
+	testEmptySubscriptionsArrayMulticastOnly(t, false)
+}
+
+func TestProcessCapabilities_EmptySubscriptionsArray_MulticastOnly_Shared(t *testing.T) {
+	testEmptySubscriptionsArrayMulticastOnly(t, true)
+}
+
+func TestProcessCapabilities_SingleQueue_AnycastRouting(t *testing.T) {
+	testSingleQueueAnycastRouting(t, false)
+}
+
+func TestProcessCapabilities_SingleQueue_AnycastRouting_Shared(t *testing.T) {
+	testSingleQueueAnycastRouting(t, true)
+}
+
+func TestProcessCapabilities_MultipleSubs_AllCreated(t *testing.T) {
+	testMultipleSubsAllCreated(t, false)
+}
+
+func TestProcessCapabilities_MultipleSubs_AllCreated_Shared(t *testing.T) {
+	testMultipleSubsAllCreated(t, true)
+}
+
+func TestProcessCapabilities_SubsWithCapabilities_SubsAndRBAC(t *testing.T) {
+	testSubsWithCapabilitiesSubsAndRBAC(t, false)
+}
+
+func TestProcessCapabilities_SubsWithCapabilities_SubsAndRBAC_Shared(t *testing.T) {
+	testSubsWithCapabilitiesSubsAndRBAC(t, true)
+}
+
+func TestProcessCapabilities_NoQueuesField_InferredFromCapabilities(t *testing.T) {
+	testNoQueuesFieldInferredFromCapabilities(t, false)
+}
+
+func TestProcessCapabilities_NoQueuesField_InferredFromCapabilities_Shared(t *testing.T) {
+	testNoQueuesFieldInferredFromCapabilities(t, true)
+}
+
+func TestProcessCapabilities_MixedMulticastAndAnycast(t *testing.T) {
+	testMixedMulticastAndAnycast(t, false)
+}
+
+func TestProcessCapabilities_MixedMulticastAndAnycast_Shared(t *testing.T) {
+	testMixedMulticastAndAnycast(t, true)
+}
+
+func TestProcessCapabilities_SubsWithSubscriberCapability(t *testing.T) {
+	testSubsWithSubscriberCapability(t, false)
+}
+
+func TestProcessCapabilities_SubsWithSubscriberCapability_Shared(t *testing.T) {
+	testSubsWithSubscriberCapability(t, true)
 }

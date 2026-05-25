@@ -424,18 +424,18 @@ func (reconciler *BrokerServiceInstanceReconciler) appMatchesSelector(app *broke
 // to be provisioned by this service.
 // Returns (valid, reason):
 //   - (true, "") if app should be provisioned
-//   - (false, reason) if app fails validation and should be skipped
+//   - (false, reason) if app fails validation and should be rejected
 func (reconciler *BrokerServiceInstanceReconciler) validateAppForProvisioning(app *broker.BrokerApp, serviceKey string) (bool, string) {
 	// App's label selector matches service labels
 	if app.Spec.ServiceSelector != nil {
 		selector, err := metav1.LabelSelectorAsSelector(app.Spec.ServiceSelector)
 		if err != nil {
-			reconciler.log.Error(err, "Skipping app with invalid label selector",
+			reconciler.log.Error(err, "Rejecting app with invalid label selector",
 				"app", appName(app))
 			return false, "invalid label selector"
 		}
 		if !selector.Matches(labels.Set(reconciler.instance.Labels)) {
-			reconciler.log.Info("Skipping app that does not match service labels (status.serviceBinding manually set?)",
+			reconciler.log.Info("Rejecting app that does not match service labels (status.serviceBinding manually set?)",
 				"app", appName(app),
 				"service", serviceName(reconciler.instance),
 				"appSelector", app.Spec.ServiceSelector,
@@ -446,7 +446,7 @@ func (reconciler *BrokerServiceInstanceReconciler) validateAppForProvisioning(ap
 
 	// App matches CEL selector expression
 	if !reconciler.appMatchesSelector(app) {
-		reconciler.log.Info("Skipping app that does not match appSelectorExpression (status.serviceBinding manually set?)",
+		reconciler.log.Info("Rejecting app that does not match appSelectorExpression (status.serviceBinding manually set?)",
 			"app", appName(app),
 			"service", serviceName(reconciler.instance),
 			"expression", reconciler.instance.Spec.AppSelectorExpression)
@@ -624,10 +624,11 @@ func (t *AddressTracker) trackAddressType(addrType *broker.AddressType) *Address
 		// AppNamespace and AppName empty = owned/local address
 	}
 	addressConfig := t.track(localAddr)
-	if addrType.Subscriptions != nil {
+	if isMulticastAddress(addrType.PubSub, addrType.Subscriptions) {
 		addressConfig.isMulticast = true
-		for _, subName := range *addrType.Subscriptions {
-			t.track(&broker.AddressRef{Address: addrType.Address + FQQNSeparator + subName})
+		for _, subName := range addrType.Subscriptions {
+			fqqnEntry := t.track(&broker.AddressRef{Address: addrType.Address + FQQNSeparator + subName})
+			fqqnEntry.isMulticast = true
 		}
 	}
 	return addressConfig
@@ -659,47 +660,45 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 			entry = addressTracker.track(&addressRef)
 			entry.senderRoles[role] = role
 
-			// Handle subscriptions field for MULTICAST declaration
-			if addressRef.Subscriptions != nil {
-				// Empty array means "this is a MULTICAST address"
-				// Validation already ensures it's empty (no queue names allowed for producers)
+			// Handle pub/sub declaration (can be explicit via pubSub:true or inferred from subscriptions)
+			if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
+				// pubSub=true (explicit) or has subscriptions means "this is a MULTICAST address"
+				// Validation already ensures subscriptions is empty (no queue names allowed for producers)
 				entry.isMulticast = true
 			}
-			// nil subscriptions means routing type unspecified by producer
 		}
 
 		// Process ConsumerOf
 		for _, addressRef := range capability.ConsumerOf {
 			entry = addressTracker.track(&addressRef)
 
-			if addressRef.Subscriptions == nil {
-				// ANYCAST - direct queue consumption
+			if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
+				// ANYCAST - direct queue consumption (no pubSub, no subscriptions)
 				entry.consumerRoles[role] = role
-				// isMulticast remains false (default)
 
 				// Validate idempotency: check if address was already marked as MULTICAST
 				if entry.isOwned && entry.isMulticast {
 					return fmt.Errorf(
-						"address '%s' is used with both MULTICAST (has subscriptions) and ANYCAST (no subscriptions) routing types. "+
-							"This creates a routing type conflict. Use consistent routing types for the same address",
+						"address '%s' is referenced with both pubSub and non pubSub semantics. "+
+							"This creates a conflict. Use consistent semantics for the same address",
 						addressRef.Address)
 				}
 			} else {
-				// MULTICAST - multicast queue-based consumption
-				// Validation already ensures len > 0 (empty array not allowed for consumers)
+				// MULTICAST - multicast queue-based consumption (pubSub=true or has subscriptions)
+				// Validation already ensures len > 0 (empty subscriptions not allowed for consumers)
 
 				// Validate idempotency: check if address was already used with ANYCAST
 				if entry.isOwned && len(entry.consumerRoles) > 0 && !entry.isMulticast {
 					return fmt.Errorf(
-						"address '%s' is used with both ANYCAST (no subscriptions) and MULTICAST (has subscriptions) routing types. "+
-							"This creates a routing type conflict. Use consistent routing types for the same address",
+						"address '%s' is referenced with both pubSub and non pubSub semantics. "+
+							"This creates a conflict. Use consistent semantics for the same address",
 						addressRef.Address)
 				}
 
 				entry.isMulticast = true
 
 				// Generate FQQN for each multicast queue
-				for _, queueName := range *addressRef.Subscriptions {
+				for _, queueName := range addressRef.Subscriptions {
 					fqqn := addressRef.Address + FQQNSeparator + queueName
 					queueEntry := addressTracker.track(&broker.AddressRef{
 						Address:      fqqn,
@@ -990,12 +989,12 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 	for _, app := range validApps {
 		for _, capability := range app.Spec.Capabilities {
 			for _, addressRef := range capability.ConsumerOf {
-				if addressRef.Subscriptions == nil {
+				if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
 					// ANYCAST - direct queue address
 					consumerAddresses[addressRef.Address] = true
 				} else {
 					// MULTICAST - generate FQQN for each multicast queue
-					for _, queueName := range *addressRef.Subscriptions {
+					for _, queueName := range addressRef.Subscriptions {
 						fqqn := addressRef.Address + FQQNSeparator + queueName
 						consumerAddresses[fqqn] = true
 					}

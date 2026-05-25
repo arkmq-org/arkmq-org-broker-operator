@@ -3,6 +3,8 @@ package controllers
 import (
 	"strings"
 	"testing"
+
+	"github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
 )
 
 // TestProcessCapabilities_AddressRefSubscriptions_ANYCAST tests ANYCAST queue (nil subscriptions)
@@ -74,8 +76,7 @@ func TestProcessCapabilities_AddressRefSubscriptions_MULTICAST(t *testing.T) {
 	}
 }
 
-// TestProcessCapabilities_AddressRefSubscriptions_ProducerMULTICAST tests producer declaring MULTICAST address
-func TestProcessCapabilities_AddressRefSubscriptions_ProducerMULTICAST(t *testing.T) {
+func TestProcessCapabilities_AddressRefEmptySubscriptions_ProducerANYCAST(t *testing.T) {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
@@ -91,14 +92,13 @@ func TestProcessCapabilities_AddressRefSubscriptions_ProducerMULTICAST(t *testin
 	props := string(secret.Data["test-producer-app-capabilities.properties"])
 	t.Logf("PROPS:\n%s\n", props)
 
-	// Should have MULTICAST routing (declared by producer)
-	if !strings.Contains(props, `addressConfigurations."notifications".routingTypes=MULTICAST`) {
-		t.Error("expected routingTypes=MULTICAST for empty subscriptions array in ProducerOf")
+	// Should have ANYCAST routing, empty subs omitted
+	if !strings.Contains(props, `addressConfigurations."notifications".routingTypes=ANYCAST`) {
+		t.Error("expected routingTypes=ANYCAST for empty subscriptions array in ProducerOf")
 	}
 
-	// Should NOT have queue configs (producer doesn't create queues)
-	if strings.Contains(props, `queueConfigs."notifications"`) {
-		t.Error("producer should not create queue configs")
+	if !strings.Contains(props, `queueConfigs."notifications"`) {
+		t.Error("producer should create queue configs")
 	}
 }
 
@@ -119,9 +119,35 @@ func TestProcessCapabilities_AddressRefSubscriptions_Conflict(t *testing.T) {
 		t.Fatal("expected error for routing type conflict")
 	}
 
-	if !strings.Contains(err.Error(), "ANYCAST") || !strings.Contains(err.Error(), "MULTICAST") || !strings.Contains(err.Error(), "conflict") {
+	if !strings.Contains(err.Error(), "conflict") {
 		t.Errorf("error should mention routing type conflict, got: %v", err)
 	}
 
 	t.Logf("Correctly rejected conflict: %v", err)
+}
+
+func TestProcessCapabilities_SharedAddressSubscriptions_OnlyMulticast(t *testing.T) {
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
+
+	app := NewBrokerApp("producer-app", "test").
+		WithSharedAddresses(NewAddressType("events").WithSubscriptions("sub1").Build()).
+		WithProducerOf(v1beta2.AddressRef{Address: "events", PubSub: &[]bool{true}[0]}).Build()
+
+	err := reconciler.processCapabilities(secret, app)
+	if err != nil {
+		t.Fatalf("processCapabilities failed: %v", err)
+	}
+
+	props := string(secret.Data["test-producer-app-capabilities.properties"])
+	t.Logf("PROPS:\n%s\n", props)
+
+	// Should have MULTICAST routing
+	if !strings.Contains(props, `addressConfigurations."events".routingTypes=MULTICAST`) {
+		t.Error("expected routingTypes=MULTICAST for subscriptions array")
+	}
+
+	if strings.Contains(props, `addressConfigurations."events".routingTypes=ANYCAST`) {
+		t.Error("expected only routingTypes=MULTICAST for subscriptions array")
+	}
 }

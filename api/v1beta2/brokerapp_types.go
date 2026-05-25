@@ -53,9 +53,16 @@ type BrokerAppSpec struct {
 type AddressType struct {
 	// Address is the address identifier (unique within a broker service)
 	Address string `json:"address"`
-	// Subscriptions declares pub/sub semantics and subscriber queue names for an address
+
+	// PubSub declares publish/subscribe (pubSub) semantics.
+	// PubSub is necessary when an address needs to be declared pubSub without declaring Subscriptions.
 	// +optional
-	Subscriptions *[]string `json:"subscriptions"` // no omitempty; respect empty array
+	PubSub *bool `json:"pubSub,omitempty"`
+
+	// Subscriptions declares subscription queue names for an address.
+	// Typical values will be of the form <client id>.<subscription nname>
+	// +optional
+	Subscriptions []string `json:"subscriptions,omitempty"`
 }
 
 // AddressRef references an address for use in capabilities
@@ -69,9 +76,15 @@ type AddressRef struct {
 	// AppName of owning app - for cross-app references  (optional)
 	AppName string `json:"appName,omitempty"`
 
-	// Subscriptions declares pub/sub semantics and subscriber queue names for an address
+	// PubSub declares publish/subscribe (pubSub) semantics.
+	// Used with ProducerOf, to declare pubSub semantics.
 	// +optional
-	Subscriptions *[]string `json:"subscriptions"` // no omitempty; respect empty array
+	PubSub *bool `json:"pubSub,omitempty"`
+
+	// Subscriptions declares subscription queue names for an address.
+	// Typical values will be of the form <client id>.<subscription nname>
+	// +optional
+	Subscriptions []string `json:"subscriptions,omitempty"`
 }
 
 type AppCapabilityType struct {

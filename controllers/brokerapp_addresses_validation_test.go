@@ -28,8 +28,8 @@ func TestValidateAddressesDisjoint(t *testing.T) {
 	t.Run("rejects duplicate address in both Addresses and SharedAddresses", func(t *testing.T) {
 		appWithDuplicate := &v1beta2.BrokerApp{
 			Spec: v1beta2.BrokerAppSpec{
-				Addresses:       []v1beta2.AddressType{{Address: "queue1"}},
-				SharedAddresses: []v1beta2.AddressType{{Address: "queue1"}}, // Duplicate!
+				Addresses:       []v1beta2.AddressType{NewAddressType("queue1").Build()},
+				SharedAddresses: []v1beta2.AddressType{NewAddressType("queue1").Build()}, // Duplicate!
 			},
 		}
 		status := &v1beta2.BrokerAppStatus{
@@ -57,8 +57,8 @@ func TestValidateAddressesDisjoint(t *testing.T) {
 	t.Run("allows disjoint addresses", func(t *testing.T) {
 		appDisjoint := &v1beta2.BrokerApp{
 			Spec: v1beta2.BrokerAppSpec{
-				Addresses:       []v1beta2.AddressType{{Address: "private1"}},
-				SharedAddresses: []v1beta2.AddressType{{Address: "public1"}},
+				Addresses:       []v1beta2.AddressType{NewAddressType("private1").Build()},
+				SharedAddresses: []v1beta2.AddressType{NewAddressType("public1").Build()},
 			},
 		}
 		status := &v1beta2.BrokerAppStatus{
@@ -79,7 +79,7 @@ func TestValidateAddressesDisjoint(t *testing.T) {
 	t.Run("allows empty SharedAddresses", func(t *testing.T) {
 		app := &v1beta2.BrokerApp{
 			Spec: v1beta2.BrokerAppSpec{
-				Addresses: []v1beta2.AddressType{{Address: "private1"}},
+				Addresses: []v1beta2.AddressType{NewAddressType("private1").Build()},
 			},
 		}
 		status := &v1beta2.BrokerAppStatus{
@@ -100,7 +100,7 @@ func TestValidateAddressesDisjoint(t *testing.T) {
 	t.Run("allows empty Addresses", func(t *testing.T) {
 		app := &v1beta2.BrokerApp{
 			Spec: v1beta2.BrokerAppSpec{
-				SharedAddresses: []v1beta2.AddressType{{Address: "public1"}},
+				SharedAddresses: []v1beta2.AddressType{NewAddressType("public1").Build()},
 			},
 		}
 		status := &v1beta2.BrokerAppStatus{

@@ -185,7 +185,7 @@ var _ = Describe("broker-service", func() {
 							ConsumerOf: []brokerv1beta2.AddressRef{
 								{
 									Address:       "mytopic",
-									Subscriptions: &[]string{"my-client.mytopic"},
+									Subscriptions: []string{"my-client.mytopic"},
 
 									// no support in the broker for liternal matches yet in security settings
 									// {Address: "mytopic.*::my-client.mytopic.*"},

@@ -1,41 +1,24 @@
 package controllers
 
 import (
-	"log"
 	"strings"
 	"testing"
-
-	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// TestProcessCapabilities_MulticastRoutingForSubscriptions tests that subscription addresses use MULTICAST routing
-func TestProcessCapabilities_MulticastRoutingForSubscriptions(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+// Helper functions for paired tests
 
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "multicast-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			SharedAddresses: []broker.AddressType{
-				{Address: "events"},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address:       "events",
-							Subscriptions: &[]string{"sub1"},
-						},
-					},
-				},
-			},
-		},
+func testMulticastRoutingForSubscriptions(t *testing.T, useShared bool) {
+	t.Helper()
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
+
+	builder := NewBrokerApp("multicast-app", "test")
+	if useShared {
+		builder.WithSharedAddresses(NewAddressType("events").Build())
+	} else {
+		builder.WithAddresses(NewAddressType("events").Build())
 	}
+	app := builder.WithConsumerOf(NewAddressRef("events").WithSubscriptions("sub1").Build()).Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err != nil {
@@ -43,7 +26,7 @@ func TestProcessCapabilities_MulticastRoutingForSubscriptions(t *testing.T) {
 	}
 
 	props := string(secret.Data["test-multicast-app-capabilities.properties"])
-	log.Printf("PROPS:\n\n%s\n\n", props)
+	t.Logf("PROPS:\n%s\n", props)
 
 	// Should use MULTICAST routing type (NOT ANYCAST) for subscription address
 	if !strings.Contains(props, `addressConfigurations."events".routingTypes=MULTICAST`) {
@@ -55,29 +38,18 @@ func TestProcessCapabilities_MulticastRoutingForSubscriptions(t *testing.T) {
 	}
 }
 
-// TestProcessCapabilities_AnycastRoutingForConsumerOf tests that consumerOf addresses use ANYCAST routing
-func TestProcessCapabilities_AnycastRoutingForConsumerOf(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+func testAnycastRoutingForConsumerOf(t *testing.T, useShared bool) {
+	t.Helper()
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "anycast-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			SharedAddresses: []broker.AddressType{
-				{Address: "commands"},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{Address: "commands"},
-					},
-				},
-			},
-		},
+	builder := NewBrokerApp("anycast-app", "test")
+	if useShared {
+		builder.WithSharedAddresses(NewAddressType("commands").Build())
+	} else {
+		builder.WithAddresses(NewAddressType("commands").Build())
 	}
+	app := builder.WithConsumerOf(NewAddressRef("commands").Build()).Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err != nil {
@@ -85,7 +57,7 @@ func TestProcessCapabilities_AnycastRoutingForConsumerOf(t *testing.T) {
 	}
 
 	props := string(secret.Data["test-anycast-app-capabilities.properties"])
-	log.Printf("PROPS:\n\n%s\n\n", props)
+	t.Logf("PROPS:\n%s\n", props)
 
 	// Should use ANYCAST routing type (NOT MULTICAST) for consumerOf address
 	if !strings.Contains(props, `addressConfigurations."commands".routingTypes=ANYCAST`) {
@@ -97,34 +69,21 @@ func TestProcessCapabilities_AnycastRoutingForConsumerOf(t *testing.T) {
 	}
 }
 
-// TestProcessCapabilities_ConflictingRoutingTypes_SameApp tests that an address cannot be used with both
-// Subscriptions (MULTICAST) and ConsumerOf (ANYCAST) in the same app
-func TestProcessCapabilities_ConflictingRoutingTypes_SameApp(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+func testConflictingRoutingTypesSameApp(t *testing.T, useShared bool) {
+	t.Helper()
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "conflict-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			SharedAddresses: []broker.AddressType{
-				{Address: "mixed"},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{Address: "mixed"}, // ANYCAST
-						{
-							Address:       "mixed",
-							Subscriptions: &[]string{"queue1"}, // MULTICAST
-						},
-					},
-				},
-			},
-		},
+	builder := NewBrokerApp("conflict-app", "test")
+	if useShared {
+		builder.WithSharedAddresses(NewAddressType("mixed").Build())
+	} else {
+		builder.WithAddresses(NewAddressType("mixed").Build())
 	}
+	app := builder.WithConsumerOf(
+		NewAddressRef("mixed").Build(),                             // ANYCAST
+		NewAddressRef("mixed").WithSubscriptions("queue1").Build(), // MULTICAST
+	).Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	if err == nil {
@@ -132,7 +91,7 @@ func TestProcessCapabilities_ConflictingRoutingTypes_SameApp(t *testing.T) {
 	}
 
 	// Verify the error message mentions the conflict
-	expectedKeywords := []string{"mixed", "ANYCAST", "MULTICAST", "conflict"}
+	expectedKeywords := []string{"mixed", "pubSub", "conflict"}
 	errMsg := err.Error()
 	for _, keyword := range expectedKeywords {
 		if !strings.Contains(errMsg, keyword) {
@@ -143,57 +102,53 @@ func TestProcessCapabilities_ConflictingRoutingTypes_SameApp(t *testing.T) {
 	t.Logf("Correctly rejected same-app routing conflict: %v", err)
 }
 
+// TestProcessCapabilities_MulticastRoutingForSubscriptions tests that subscription addresses use MULTICAST routing
+func TestProcessCapabilities_MulticastRoutingForSubscriptions(t *testing.T) {
+	testMulticastRoutingForSubscriptions(t, true)
+}
+
+// TestProcessCapabilities_MulticastRoutingForSubscriptions_Private tests MULTICAST routing with private addresses
+func TestProcessCapabilities_MulticastRoutingForSubscriptions_Private(t *testing.T) {
+	testMulticastRoutingForSubscriptions(t, false)
+}
+
+// TestProcessCapabilities_AnycastRoutingForConsumerOf tests that consumerOf addresses use ANYCAST routing
+func TestProcessCapabilities_AnycastRoutingForConsumerOf(t *testing.T) {
+	testAnycastRoutingForConsumerOf(t, true)
+}
+
+// TestProcessCapabilities_AnycastRoutingForConsumerOf_Private tests ANYCAST routing with private addresses
+func TestProcessCapabilities_AnycastRoutingForConsumerOf_Private(t *testing.T) {
+	testAnycastRoutingForConsumerOf(t, false)
+}
+
+// TestProcessCapabilities_ConflictingRoutingTypes_SameApp tests that an address cannot be used with both
+// Subscriptions (MULTICAST) and ConsumerOf (ANYCAST) in the same app
+func TestProcessCapabilities_ConflictingRoutingTypes_SameApp(t *testing.T) {
+	testConflictingRoutingTypesSameApp(t, true)
+}
+
+// TestProcessCapabilities_ConflictingRoutingTypes_SameApp_Private tests conflict detection with private addresses
+func TestProcessCapabilities_ConflictingRoutingTypes_SameApp_Private(t *testing.T) {
+	testConflictingRoutingTypesSameApp(t, false)
+}
+
 // TestProcessCapabilities_ConflictingRoutingTypes_MultipleApps tests the multi-app conflict scenario
 func TestProcessCapabilities_ConflictingRoutingTypes_MultipleApps(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
 	// App 1: Producer with Subscriptions (MULTICAST)
-	app1 := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "producer-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			SharedAddresses: []broker.AddressType{
-				{Address: "shared-events"},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ProducerOf: []broker.AddressRef{
-						{Address: "shared-events"},
-					},
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address:       "shared-events",
-							Subscriptions: &[]string{"producer-sub"}, // MULTICAST
-						},
-					},
-				},
-			},
-		},
-	}
+	app1 := NewBrokerApp("producer-app", "test").
+		WithSharedAddresses(NewAddressType("shared-events").Build()).
+		WithProducerOf(NewAddressRef("shared-events").Build()).
+		WithConsumerOf(NewAddressRef("shared-events").WithSubscriptions("producer-sub").Build()).
+		Build()
 
 	// App 2: Consumer with ConsumerOf (ANYCAST)
-	app2 := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "consumer-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address:      "shared-events",
-							AppNamespace: "test",
-							AppName:      "producer-app",
-						},
-					},
-				},
-			},
-		},
-	}
+	app2 := NewBrokerApp("consumer-app", "test").
+		WithConsumerOf(NewAddressRef("shared-events").WithAppRef("test", "producer-app").Build()).
+		Build()
 
 	// Process app1 first
 	err := reconciler.processCapabilities(secret, app1)
@@ -210,8 +165,8 @@ func TestProcessCapabilities_ConflictingRoutingTypes_MultipleApps(t *testing.T) 
 	props1 := string(secret.Data["test-producer-app-capabilities.properties"])
 	props2 := string(secret.Data["test-consumer-app-capabilities.properties"])
 
-	log.Printf("APP1 PROPS:\n\n%s\n\n", props1)
-	log.Printf("APP2 PROPS:\n\n%s\n\n", props2)
+	t.Logf("APP1 PROPS:\n%s\n", props1)
+	t.Logf("APP2 PROPS:\n%s\n", props2)
 
 	// App1 should have MULTICAST routing for shared-events
 	if !strings.Contains(props1, `addressConfigurations."shared-events".routingTypes=MULTICAST`) {
@@ -237,53 +192,19 @@ func TestProcessCapabilities_ConflictingRoutingTypes_MultipleApps(t *testing.T) 
 // TestProcessCapabilities_SharedAddress_BothSubscriptions tests that two apps can share an address
 // if BOTH use Subscriptions (both MULTICAST)
 func TestProcessCapabilities_SharedAddress_BothSubscriptions(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
 	// App 1: Subscriptions
-	app1 := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "sub-app1",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			SharedAddresses: []broker.AddressType{
-				{Address: "topic"},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address:       "topic",
-							Subscriptions: &[]string{"sub1"},
-						},
-					},
-				},
-			},
-		},
-	}
+	app1 := NewBrokerApp("sub-app1", "test").
+		WithSharedAddresses(NewAddressType("topic").Build()).
+		WithConsumerOf(NewAddressRef("topic").WithSubscriptions("sub1").Build()).
+		Build()
 
 	// App 2: Also Subscriptions (compatible)
-	app2 := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "sub-app2",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address:       "topic",
-							AppNamespace:  "test",
-							AppName:       "sub-app1",
-							Subscriptions: &[]string{"sub2"},
-						},
-					},
-				},
-			},
-		},
-	}
+	app2 := NewBrokerApp("sub-app2", "test").
+		WithConsumerOf(NewAddressRef("topic").WithAppRef("test", "sub-app1").WithSubscriptions("sub2").Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app1)
 	if err != nil {
@@ -298,8 +219,8 @@ func TestProcessCapabilities_SharedAddress_BothSubscriptions(t *testing.T) {
 	props1 := string(secret.Data["test-sub-app1-capabilities.properties"])
 	props2 := string(secret.Data["test-sub-app2-capabilities.properties"])
 
-	log.Printf("APP1 PROPS:\n\n%s\n\n", props1)
-	log.Printf("APP2 PROPS:\n\n%s\n\n", props2)
+	t.Logf("APP1 PROPS:\n%s\n", props1)
+	t.Logf("APP2 PROPS:\n%s\n", props2)
 
 	// Both should have MULTICAST routing (compatible)
 	if !strings.Contains(props1, `addressConfigurations."topic".routingTypes=MULTICAST`) {
@@ -324,49 +245,19 @@ func TestProcessCapabilities_SharedAddress_BothSubscriptions(t *testing.T) {
 // TestProcessCapabilities_SharedAddress_BothConsumerOf tests that two apps can share an address
 // if BOTH use ConsumerOf (both ANYCAST)
 func TestProcessCapabilities_SharedAddress_BothConsumerOf(t *testing.T) {
-	reconciler := &BrokerServiceInstanceReconciler{}
-	secret := &corev1.Secret{Data: make(map[string][]byte)}
+	reconciler := BrokerServiceInstanceReconcilerForTest()
+	secret := CreateSecret("test-secret", "test")
 
 	// App 1: ConsumerOf
-	app1 := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "consumer-app1",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			SharedAddresses: []broker.AddressType{
-				{Address: "queue"},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{Address: "queue"},
-					},
-				},
-			},
-		},
-	}
+	app1 := NewBrokerApp("consumer-app1", "test").
+		WithSharedAddresses(NewAddressType("queue").Build()).
+		WithConsumerOf(NewAddressRef("queue").Build()).
+		Build()
 
 	// App 2: Also ConsumerOf (compatible)
-	app2 := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "consumer-app2",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address:      "queue",
-							AppNamespace: "test",
-							AppName:      "consumer-app1",
-						},
-					},
-				},
-			},
-		},
-	}
+	app2 := NewBrokerApp("consumer-app2", "test").
+		WithConsumerOf(NewAddressRef("queue").WithAppRef("test", "consumer-app1").Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app1)
 	if err != nil {
@@ -381,8 +272,8 @@ func TestProcessCapabilities_SharedAddress_BothConsumerOf(t *testing.T) {
 	props1 := string(secret.Data["test-consumer-app1-capabilities.properties"])
 	props2 := string(secret.Data["test-consumer-app2-capabilities.properties"])
 
-	log.Printf("APP1 PROPS:\n\n%s\n\n", props1)
-	log.Printf("APP2 PROPS:\n\n%s\n\n", props2)
+	t.Logf("APP1 PROPS:\n%s\n", props1)
+	t.Logf("APP2 PROPS:\n%s\n", props2)
 
 	// Both should have ANYCAST routing (compatible)
 	if !strings.Contains(props1, `addressConfigurations."queue".routingTypes=ANYCAST`) {

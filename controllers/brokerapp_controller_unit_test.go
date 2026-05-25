@@ -573,7 +573,7 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 	t.Run("ConsumerOf references MULTICAST address", func(t *testing.T) {
 		ownerApp := NewBrokerApp("owner-app", ns).
 			WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
-			WithSharedAddresses(v1beta2.AddressType{Address: "events", Subscriptions: &[]string{}}).
+			WithSharedAddresses(NewAddressType("events").WithPubSub(true).Build()).
 			WithConsumerOf(NewAddressRef("events").WithSubscriptions("sub1").Build()).
 			WithServiceBinding(svcName, ns, "", 0).
 			Build()
@@ -611,7 +611,7 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 	t.Run("Subscriptions references ANYCAST address", func(t *testing.T) {
 		ownerApp := NewBrokerApp("owner-app-2", ns).
 			WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
-			WithSharedAddresses(v1beta2.AddressType{Address: "commands"}).
+			WithSharedAddresses(NewAddressType("commands").Build()).
 			WithConsumerOf(NewAddressRef("commands").Build()).
 			WithServiceBinding(svcName, ns, "", 0).
 			Build()
@@ -651,7 +651,7 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 	t.Run("Compatible MULTICAST sharing", func(t *testing.T) {
 		ownerApp := NewBrokerApp("owner-app-3", ns).
 			WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
-			WithSharedAddresses(v1beta2.AddressType{Address: "topic"}).
+			WithSharedAddresses(NewAddressType("topic").Build()).
 			WithConsumerOf(NewAddressRef("topic").WithSubscriptions("sub1").Build()).
 			WithServiceBinding(svcName, ns, "", 0).
 			Build()
@@ -687,7 +687,7 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 	t.Run("Compatible ANYCAST sharing", func(t *testing.T) {
 		ownerApp := NewBrokerApp("owner-app-4", ns).
 			WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
-			WithSharedAddresses(v1beta2.AddressType{Address: "queue"}).
+			WithSharedAddresses(NewAddressType("queue").Build()).
 			WithConsumerOf(NewAddressRef("queue").Build()).
 			WithServiceBinding(svcName, ns, "", 0).
 			Build()
