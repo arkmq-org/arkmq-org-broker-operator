@@ -60,6 +60,7 @@ func NewBrokerReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShif
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokers,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokers/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokers/finalizers,verbs=update
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,namespace=arkmq-org-broker-operator,resources=roles;rolebindings,verbs=get;list;watch;create;update;delete
 
 func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
 	reqLogger := r.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "Broker")
@@ -95,13 +96,21 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 		if !reconcileBlocked {
 			err = reconciler.Process(customResource, *namer, r.Client, r.Scheme)
 		}
+	}
+
+	common.UpdateBlockedStatus(customResource, reconcileBlocked)
+	// ProcessStatus must run before ProcessBrokerStatus: it sets the
+	// Deployed condition from live pod state. ProcessBrokerStatus gates on
+	// Deployed=True (via AssertBrokersAvailable), so reversing the order
+	// would cause it to see a missing/stale Deployed condition and
+	// overwrite ConfigApplied with an error.
+	common.ProcessStatus(customResource, r.Client, request.NamespacedName, *namer, err)
+
+	if valid {
 		if reconciler.ProcessBrokerStatus(customResource, r.Client, r.Scheme) {
 			requeueRequest = true
 		}
 	}
-
-	common.UpdateBlockedStatus(customResource, reconcileBlocked)
-	common.ProcessStatus(customResource, r.Client, request.NamespacedName, *namer, err)
 
 	crStatusUpdateErr := r.UpdateBrokerCRStatus(customResource, r.Client, request.NamespacedName)
 	if crStatusUpdateErr != nil {
@@ -109,7 +118,6 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 	}
 
 	if !requeueRequest && !reconcileBlocked && hasExtraMounts(customResource) {
-		reqLogger.V(1).Info("resource has extraMounts, requeuing")
 		requeueRequest = true
 	}
 
@@ -125,7 +133,7 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 }
 
 func (r *BrokerReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	builder := ctrl.NewControllerManagedBy(mgr).
+	bldr := ctrl.NewControllerManagedBy(mgr).
 		For(&v1beta2.Broker{}).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Pod{}).
@@ -136,10 +144,10 @@ func (r *BrokerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&policyv1.PodDisruptionBudget{})
 
 	if r.isOnOpenShift {
-		builder.Owns(&routev1.Route{})
+		bldr.Owns(&routev1.Route{})
 	}
 
-	return builder.Complete(r)
+	return bldr.Complete(r)
 }
 
 func (r *BrokerReconciler) UpdateBrokerCRStatus(desired *v1beta2.Broker, client rtclient.Client, namespacedName types.NamespacedName) error {
@@ -156,7 +164,8 @@ func (r *BrokerReconciler) UpdateBrokerCRStatus(desired *v1beta2.Broker, client 
 
 	if !EqualBrokerCRStatus(&desired.Status, &current.Status) {
 		r.log.V(1).Info("cr.status update", "Namespace", desired.Namespace, "Name", desired.Name, "Observed status", desired.Status)
-		return resources.UpdateStatus(client, desired)
+		desired.Status.DeepCopyInto(&current.Status)
+		return resources.UpdateStatus(client, current)
 	}
 
 	return nil

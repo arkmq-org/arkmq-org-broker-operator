@@ -131,7 +131,7 @@ func (r *ActiveMQArtemisReconciler) toBrokerParent() *BrokerReconciler {
 //+kubebuilder:rbac:groups=broker.amq.io,namespace=arkmq-org-broker-operator,resources=activemqartemises/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=broker.amq.io,namespace=arkmq-org-broker-operator,resources=activemqartemises/finalizers,verbs=update
 //+kubebuilder:rbac:groups=broker.amq.io,namespace=arkmq-org-broker-operator,resources=pods,verbs=get;list
-//+kubebuilder:rbac:groups="",namespace=arkmq-org-broker-operator,resources=pods;services;endpoints;persistentvolumeclaims;events;configmaps;secrets;routes;serviceaccounts,verbs=get;list;watch;create;delete;update
+//+kubebuilder:rbac:groups="",namespace=arkmq-org-broker-operator,resources=pods;services;endpoints;persistentvolumeclaims;events;configmaps;secrets;routes;serviceaccounts,verbs=get;list;watch;create;delete;patch;update
 //+kubebuilder:rbac:groups="",namespace=arkmq-org-broker-operator,resources=namespaces,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,namespace=arkmq-org-broker-operator,resources=deployments;daemonsets;replicasets;statefulsets,verbs=get;list;watch;create;delete;update
 //+kubebuilder:rbac:groups=networking.k8s.io,namespace=arkmq-org-broker-operator,resources=ingresses,verbs=get;list;watch;create;delete;update
@@ -190,19 +190,31 @@ func (r *ActiveMQArtemisReconciler) Reconcile(ctx context.Context, request ctrl.
 		if !reconcileBlocked {
 			err = reconciler.Process(customResource, *namer, r.Client, r.Scheme)
 		}
+	}
+
+	common.UpdateBlockedStatus(customResource, reconcileBlocked)
+	// ProcessStatus must run before ProcessBrokerStatus: it sets the
+	// Deployed condition from live pod state. ProcessBrokerStatus gates on
+	// Deployed=True (via AssertBrokersAvailable), so reversing the order
+	// would cause it to see a missing/stale Deployed condition and
+	// overwrite ConfigApplied with an error.
+	common.ProcessStatus(customResource, r.Client, request.NamespacedName, *namer, err)
+
+	if valid {
 		if reconciler.ProcessBrokerStatus(customResource, r.Client, r.Scheme) {
 			requeueRequest = true
 		}
 	}
-
-	common.UpdateBlockedStatus(customResource, reconcileBlocked)
-	common.ProcessStatus(customResource, r.Client, request.NamespacedName, *namer, err)
 
 	if !requeueRequest {
 		deployedCondition := meta.FindStatusCondition(customResource.Status.Conditions, brokerv1beta1.DeployedConditionType)
 		if deployedCondition != nil && deployedCondition.Status == metav1.ConditionFalse && deployedCondition.Reason == brokerv1beta1.DeployedConditionNotReadyReason {
 			requeueRequest = true
 		}
+	}
+
+	if !requeueRequest && !reconcileBlocked && hasExtraMounts(customResource) {
+		requeueRequest = true
 	}
 
 	if convertErr := ConvertBrokerStatusToArtemis(customResource, artemisResource); convertErr != nil {
@@ -212,11 +224,6 @@ func (r *ActiveMQArtemisReconciler) Reconcile(ctx context.Context, request ctrl.
 
 	crStatusUpdateErr := r.UpdateCRStatus(artemisResource, r.Client, request.NamespacedName)
 	if crStatusUpdateErr != nil {
-		requeueRequest = true
-	}
-
-	if !requeueRequest && !reconcileBlocked && hasExtraMounts(customResource) {
-		reqLogger.V(1).Info("resource has extraMounts, requeuing")
 		requeueRequest = true
 	}
 
@@ -237,7 +244,7 @@ func (r *ActiveMQArtemisReconciler) Reconcile(ctx context.Context, request ctrl.
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ActiveMQArtemisReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	builder := ctrl.NewControllerManagedBy(mgr).
+	bldr := ctrl.NewControllerManagedBy(mgr).
 		For(&brokerv1beta1.ActiveMQArtemis{}).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Pod{}).
@@ -248,11 +255,11 @@ func (r *ActiveMQArtemisReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&policyv1.PodDisruptionBudget{})
 
 	if r.isOnOpenShift {
-		builder.Owns(&routev1.Route{})
+		bldr.Owns(&routev1.Route{})
 	}
 
 	var err error
-	controller, err := builder.Build(r)
+	controller, err := bldr.Build(r)
 	if err == nil {
 		r.events = make(chan event.GenericEvent)
 		err = controller.Watch(
@@ -277,7 +284,8 @@ func (r *ActiveMQArtemisReconciler) UpdateCRStatus(desired *brokerv1beta1.Active
 
 	if !EqualCRStatus(&desired.Status, &current.Status) {
 		r.log.V(1).Info("cr.status update", "Namespace", desired.Namespace, "Name", desired.Name, "Observed status", desired.Status)
-		return resources.UpdateStatus(client, desired)
+		desired.Status.DeepCopyInto(&current.Status)
+		return resources.UpdateStatus(client, current)
 	}
 
 	return nil

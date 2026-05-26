@@ -75,7 +75,6 @@ graph TB
 
     subgraph cert_layer ["Application Certificates"]
         ServerCert["🖥️ Server<br />CN: arkmq-org-broker-<br />operand"]
-        OperatorCert["⚙️ Operator<br />CN: arkmq-org-broker-<br />operator"]
         PrometheusCert["📊 Prometheus<br />CN: prometheus"]
         MessagingCert["💬 Messaging<br />CN: messaging-client"]
     end
@@ -87,13 +86,11 @@ graph TB
     SelfSigned --> RootCA
     RootCA --> CAIssuer
     CAIssuer --> ServerCert
-    CAIssuer --> OperatorCert
     CAIssuer --> PrometheusCert
     CAIssuer --> MessagingCert
 
     RootCA -.-> TrustBundle
     TrustBundle -.-> ServerCert
-    TrustBundle -.-> OperatorCert
     TrustBundle -.-> PrometheusCert
     TrustBundle -.-> MessagingCert
 
@@ -156,14 +153,12 @@ The locked-down broker uses certificate-based authentication. This tutorial uses
     (producer/consumer jobs)
   * You can configure any CN values you need for your application clients
 
-  **Control Plane Realm (HTTP/Jolokia metrics endpoint):**
+  **Prometheus Realm (HTTP metrics endpoint):**
   * Created and configured automatically by the operator in restricted mode
   * The operator reads the actual CN values from the certificate secrets and
     configures access accordingly
   * In this tutorial we use:
-    * `CN=arkmq-org-broker-operator` for operator privileges (management)
     * `CN=prometheus` for metrics access (Prometheus scraping)
-    * `CN=arkmq-org-broker-operand` for health probes
   * You can use different CN values - the operator will extract them from your
     actual certificates
 
@@ -178,11 +173,6 @@ The locked-down broker uses certificate-based authentication. This tutorial uses
     * No environment variable override (uses discovery based on what exists in
       the namespace)
     * CN in this tutorial: `arkmq-org-broker-operand` (used for health probes)
-  * **Operator client certificate** - Default: `arkmq-org-broker-manager-cert`
-    * Operator certificate for authenticating with the broker
-    * Override via env: `ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME`
-    * CN in this tutorial: `arkmq-org-broker-operator` (gets operator
-      privileges)
   * **CA trust bundle** - Default: `arkmq-org-broker-manager-ca`
     * Root certificate that validates all others (key must be `ca.pem`)
     * Override via env: `ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME`
@@ -233,26 +223,20 @@ kubectl config use-context tutorialtester
 minikube addons enable metrics-server --profile tutorialtester
 ```
 ```shell markdown_runner
-* [tutorialtester] minikube v1.36.0 on Fedora 43
+* [tutorialtester] minikube v1.37.0 on Fedora 44
   - MINIKUBE_ROOTLESS=true
 * Automatically selected the kvm2 driver. Other choices: podman, qemu2, ssh
 * Starting "tutorialtester" primary control-plane node in "tutorialtester" cluster
-* Creating kvm2 VM (CPUs=2, Memory=6000MB, Disk=20000MB) ...
-* Preparing Kubernetes v1.33.1 on Docker 28.0.4 ...
-  - Generating certificates and keys ...
-  - Booting up control plane ...
-  - Configuring RBAC rules ...
 * Configuring bridge CNI (Container Networking Interface) ...
 * Verifying Kubernetes components...
   - Using image gcr.io/k8s-minikube/storage-provisioner:v5
-* Enabled addons: storage-provisioner, default-storageclass
+* Enabled addons: default-storageclass, storage-provisioner
 * Done! kubectl is now configured to use "tutorialtester" cluster and "default" namespace by default
-! Image was not built for the current minikube version. To resolve this you can delete and recreate your minikube cluster using the latest images. Expected minikube version: v1.35.0 -> Actual minikube version: v1.36.0
 * minikube profile was successfully set to tutorialtester
 Switched to context "tutorialtester".
 * metrics-server is an addon maintained by Kubernetes. For any concerns contact minikube on GitHub.
 You can view the list of minikube maintainers at: https://github.com/kubernetes/minikube/blob/master/OWNERS
-  - Using image registry.k8s.io/metrics-server/metrics-server:v0.7.2
+  - Using image registry.k8s.io/metrics-server/metrics-server:v0.8.0
 * The 'metrics-server' addon is enabled
 ```
 
@@ -270,9 +254,9 @@ minikube kubectl -- patch deployment -n ingress-nginx ingress-nginx-controller -
 ```shell markdown_runner
 * ingress is an addon maintained by Kubernetes. For any concerns contact minikube on GitHub.
 You can view the list of minikube maintainers at: https://github.com/kubernetes/minikube/blob/master/OWNERS
-  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.5.3
-  - Using image registry.k8s.io/ingress-nginx/controller:v1.12.2
-  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.5.3
+  - Using image registry.k8s.io/ingress-nginx/controller:v1.13.2
+  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.2
+  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.2
 * Verifying ingress addon...
 * The 'ingress' addon is enabled
 deployment.apps/ingress-nginx-controller patched
@@ -312,17 +296,23 @@ namespace.
 Deploying operator to watch single namespace
 Client Version: 4.18.5
 Kustomize Version: v5.4.2
-Kubernetes Version: v1.33.1
-customresourcedefinition.apiextensions.k8s.io/brokers.broker.arkmq.org created
+Kubernetes Version: v1.34.0
+customresourcedefinition.apiextensions.k8s.io/activemqartemises.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisaddresses.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisscaledowns.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemissecurities.broker.amq.io created
+customresourcedefinition.apiextensions.k8s.io/brokers.broker.arkmq.org created
+customresourcedefinition.apiextensions.k8s.io/brokerapps.broker.arkmq.org created
+customresourcedefinition.apiextensions.k8s.io/brokerservices.broker.arkmq.org created
 serviceaccount/arkmq-org-broker-controller-manager created
 role.rbac.authorization.k8s.io/arkmq-org-broker-operator-role created
 rolebinding.rbac.authorization.k8s.io/arkmq-org-broker-operator-rolebinding created
 role.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-role created
 rolebinding.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-rolebinding created
+networkpolicy.networking.k8s.io/arkmq-org-broker-controller-manager-netpol created
 deployment.apps/arkmq-org-broker-controller-manager created
+Warning: unrecognized format "int64"
+Warning: unrecognized format "int32"
 ```
 
 Wait for the Operator to start (status: `running`).
@@ -333,7 +323,7 @@ kubectl wait pod --all --for=condition=Ready --namespace=locked-down-broker --ti
 ```
 ```shell markdown_runner
 deployment.apps/arkmq-org-broker-controller-manager condition met
-pod/arkmq-org-broker-controller-manager-54fbb4f7df-k2kd9 condition met
+pod/arkmq-org-broker-controller-manager-7b565778fc-xcfnc condition met
 ```
 
 ## Install the dependencies
@@ -371,10 +361,11 @@ helm upgrade -i prometheus prometheus-community/kube-prometheus-stack \
 "prometheus-community" already exists with the same configuration, skipping
 Release "prometheus" does not exist. Installing it now.
 NAME: prometheus
-LAST DEPLOYED: Fri Jan 16 10:16:20 2026
+LAST DEPLOYED: Wed Jun 10 16:35:36 2026
 NAMESPACE: locked-down-broker
 STATUS: deployed
 REVISION: 1
+DESCRIPTION: Install complete
 NOTES:
 kube-prometheus-stack has been installed. Check its status by running:
   kubectl --namespace locked-down-broker get pods -l "release=prometheus"
@@ -394,6 +385,25 @@ Get your grafana admin user password by running:
 
 
 Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
+I0610 16:35:35.056181 3306141 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0610 16:35:35.056194 3306141 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0610 16:35:35.227487 3306141 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0610 16:35:35.227505 3306141 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0610 16:35:35.308642 3306141 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0610 16:35:35.308657 3306141 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0610 16:35:35.413301 3306141 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0610 16:35:35.660606 3306141 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0610 16:35:35.660621 3306141 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0610 16:35:35.894628 3306141 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0610 16:35:35.894638 3306141 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0610 16:35:35.964142 3306141 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0610 16:35:36.212054 3306141 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0610 16:35:36.212067 3306141 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0610 16:35:36.287524 3306141 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0610 16:35:36.573704 3306141 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0610 16:35:36.573720 3306141 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0610 16:35:54.486020 3306141 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
+I0610 16:35:54.492008 3306141 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
 ```
 
 ### Install Cert-Manager
@@ -403,17 +413,15 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 ```
 ```shell markdown_runner
 namespace/cert-manager created
+customresourcedefinition.apiextensions.k8s.io/challenges.acme.cert-manager.io created
+customresourcedefinition.apiextensions.k8s.io/orders.acme.cert-manager.io created
 customresourcedefinition.apiextensions.k8s.io/certificaterequests.cert-manager.io created
 customresourcedefinition.apiextensions.k8s.io/certificates.cert-manager.io created
-customresourcedefinition.apiextensions.k8s.io/challenges.acme.cert-manager.io created
 customresourcedefinition.apiextensions.k8s.io/clusterissuers.cert-manager.io created
 customresourcedefinition.apiextensions.k8s.io/issuers.cert-manager.io created
-customresourcedefinition.apiextensions.k8s.io/orders.acme.cert-manager.io created
 serviceaccount/cert-manager-cainjector created
 serviceaccount/cert-manager created
 serviceaccount/cert-manager-webhook created
-configmap/cert-manager created
-configmap/cert-manager-webhook created
 clusterrole.rbac.authorization.k8s.io/cert-manager-cainjector created
 clusterrole.rbac.authorization.k8s.io/cert-manager-controller-issuers created
 clusterrole.rbac.authorization.k8s.io/cert-manager-controller-clusterissuers created
@@ -439,10 +447,13 @@ clusterrolebinding.rbac.authorization.k8s.io/cert-manager-controller-certificate
 clusterrolebinding.rbac.authorization.k8s.io/cert-manager-webhook:subjectaccessreviews created
 role.rbac.authorization.k8s.io/cert-manager-cainjector:leaderelection created
 role.rbac.authorization.k8s.io/cert-manager:leaderelection created
+role.rbac.authorization.k8s.io/cert-manager-tokenrequest created
 role.rbac.authorization.k8s.io/cert-manager-webhook:dynamic-serving created
 rolebinding.rbac.authorization.k8s.io/cert-manager-cainjector:leaderelection created
 rolebinding.rbac.authorization.k8s.io/cert-manager:leaderelection created
+rolebinding.rbac.authorization.k8s.io/cert-manager-tokenrequest created
 rolebinding.rbac.authorization.k8s.io/cert-manager-webhook:dynamic-serving created
+service/cert-manager-cainjector created
 service/cert-manager created
 service/cert-manager-webhook created
 deployment.apps/cert-manager-cainjector created
@@ -450,6 +461,8 @@ deployment.apps/cert-manager created
 deployment.apps/cert-manager-webhook created
 mutatingwebhookconfiguration.admissionregistration.k8s.io/cert-manager-webhook created
 validatingwebhookconfiguration.admissionregistration.k8s.io/cert-manager-webhook created
+Warning: unrecognized format "int32"
+Warning: unrecognized format "int64"
 ```
 
 Wait for `cert-manager` to be ready.
@@ -458,9 +471,9 @@ Wait for `cert-manager` to be ready.
 kubectl wait pod --all --for=condition=Ready --namespace=cert-manager --timeout=600s
 ```
 ```shell markdown_runner
-pod/cert-manager-58f8dcbb68-6wr4t condition met
-pod/cert-manager-cainjector-7588b6f5cc-8ghht condition met
-pod/cert-manager-webhook-768c67c955-8w5qq condition met
+pod/cert-manager-66487b786-fj98m condition met
+pod/cert-manager-cainjector-65fdc9b9d7-rlrfr condition met
+pod/cert-manager-webhook-7d96469bf8-gljmx condition met
 ```
 
 ### Install Trust Manager
@@ -483,20 +496,21 @@ helm upgrade trust-manager jetstack/trust-manager --install --namespace cert-man
 ```shell markdown_runner
 Release "trust-manager" does not exist. Installing it now.
 NAME: trust-manager
-LAST DEPLOYED: Fri Jan 16 10:17:28 2026
+LAST DEPLOYED: Wed Jun 10 16:36:52 2026
 NAMESPACE: cert-manager
 STATUS: deployed
 REVISION: 1
+DESCRIPTION: Install complete
 TEST SUITE: None
 NOTES:
 ⚠️  WARNING: Consider increasing the Helm value `replicaCount` to 2 if you require high availability.
 ⚠️  WARNING: Consider setting the Helm value `podDisruptionBudget.enabled` to true if you require high availability.
 
-trust-manager v0.20.3 has been deployed successfully!
+trust-manager v0.22.1 has been deployed successfully!
 Your installation includes a default CA package, using the following
 default CA package image:
 
-quay.io/jetstack/trust-pkg-debian-bookworm:20230311-deb12u1.2
+:
 
 It's imperative that you keep the default CA package image up to date.
 To find out more about securely running trust-manager and to get started
@@ -504,6 +518,7 @@ with creating your first bundle, check out the documentation on the
 cert-manager website:
 
 https://cert-manager.io/docs/projects/trust-manager/
+I0610 16:36:52.740594 3308464 warnings.go:107] "Warning: unrecognized format \"int64\""
 ```
 
 Wait for `trust bundles crd` to be ready.
@@ -514,10 +529,10 @@ kubectl wait pod --all --for=condition=Ready --namespace=cert-manager --timeout=
 ```
 ```shell markdown_runner
 customresourcedefinition.apiextensions.k8s.io/bundles.trust.cert-manager.io condition met
-pod/cert-manager-58f8dcbb68-6wr4t condition met
-pod/cert-manager-cainjector-7588b6f5cc-8ghht condition met
-pod/cert-manager-webhook-768c67c955-8w5qq condition met
-pod/trust-manager-86b75967bc-xqvw2 condition met
+pod/cert-manager-66487b786-fj98m condition met
+pod/cert-manager-cainjector-65fdc9b9d7-rlrfr condition met
+pod/cert-manager-webhook-7d96469bf8-gljmx condition met
+pod/trust-manager-584465694f-pzf5d condition met
 ```
 
 ## Create Certificate Authority and Issuers
@@ -641,12 +656,10 @@ With the certificate infrastructure in place, we can now deploy the broker.
 
 ### Create Broker and Client Certificates
 
-We need three certificates:
+We need two certificates:
 
 1. A server certificate for the broker pod (`broker-cert`)
-2. A client certificate for the operator to authenticate with the broker
-   (`arkmq-org-broker-manager-cert`)
-3. A client certificate for Prometheus to scrape metrics (`prometheus-cert`)
+2. A client certificate for Prometheus to scrape metrics (`prometheus-cert`)
 
 ```{"stage":"deploy", "runtime":"bash", "label":"create broker and client certs"}
 kubectl apply -f - <<EOF
@@ -671,18 +684,6 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: arkmq-org-broker-manager-cert
-  namespace: locked-down-broker
-spec:
-  secretName: arkmq-org-broker-manager-cert
-  commonName: arkmq-org-broker-operator
-  issuerRef:
-    name: ca-issuer
-    kind: ClusterIssuer
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
   name: prometheus-cert
   namespace: locked-down-broker
 spec:
@@ -695,7 +696,6 @@ EOF
 ```
 ```shell markdown_runner
 certificate.cert-manager.io/broker-cert created
-certificate.cert-manager.io/arkmq-org-broker-manager-cert created
 certificate.cert-manager.io/prometheus-cert created
 ```
 
@@ -703,12 +703,10 @@ Wait for the secrets to be created.
 
 ```{"stage":"deploy", "runtime":"bash", "label":"wait for secrets"}
 kubectl wait --for=condition=Ready certificate broker-cert -n locked-down-broker --timeout=300s
-kubectl wait --for=condition=Ready certificate arkmq-org-broker-manager-cert -n locked-down-broker --timeout=300s
 kubectl wait --for=condition=Ready certificate prometheus-cert -n locked-down-broker --timeout=300s
 ```
 ```shell markdown_runner
 certificate.cert-manager.io/broker-cert condition met
-certificate.cert-manager.io/arkmq-org-broker-manager-cert condition met
 certificate.cert-manager.io/prometheus-cert condition met
 ```
 
@@ -1007,7 +1005,7 @@ kubectl rollout status statefulset/prometheus-artemis-prometheus -n locked-down-
 ```
 ```shell markdown_runner
 Waiting for 1 pods to be ready...
-statefulset rolling update complete 1 pods at revision prometheus-artemis-prometheus-765678bf49...
+statefulset rolling update complete 1 pods at revision prometheus-artemis-prometheus-7d4468f787...
 ```
 
 ## Deploy and Configure Grafana
@@ -1095,7 +1093,6 @@ kubectl rollout status deployment prometheus-grafana -n locked-down-broker --tim
 ```
 ```shell markdown_runner
 deployment.apps/prometheus-grafana restarted
-Waiting for deployment spec update to be observed...
 Waiting for deployment "prometheus-grafana" rollout to finish: 0 out of 1 new replicas have been updated...
 Waiting for deployment "prometheus-grafana" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "prometheus-grafana" rollout to finish: 1 old replicas are pending termination...
@@ -1599,7 +1596,7 @@ export BROKER_VERSION=$(kubectl get Broker artemis-broker --namespace=locked-dow
 echo broker version: $BROKER_VERSION
 ```
 ```shell markdown_runner
-broker version: 2.44.0
+broker version: 2.53.0
 ```
 
 ```bash {"stage":"messaging", "label":"run producer and consumer", "runtime":"bash"}

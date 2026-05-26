@@ -83,15 +83,6 @@ var _ = Describe("broker-service", func() {
 			})
 			InstallCaBundle(common.DefaultOperatorCASecretName, rootCertSecretName, caPemTrustStoreName)
 
-			By("installing operator cert")
-			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-				candidate.Spec.CommonName = "activemq-artemis-operator"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 		}
 
@@ -103,7 +94,6 @@ var _ = Describe("broker-service", func() {
 			UnInstallCaBundle(common.DefaultOperatorCASecretName)
 			UninstallClusteredIssuer(caIssuerName)
 			UninstallCert(rootCert.Name, rootCert.Namespace)
-			UninstallCert(common.DefaultOperatorCertSecretName, defaultNamespace)
 			UninstallClusteredIssuer(rootIssuerName)
 
 			if installedCertManager {
@@ -132,6 +122,17 @@ var _ = Describe("broker-service", func() {
 				candidate.Spec.SecretName = sharedOperandCertName
 				candidate.Spec.CommonName = serviceName
 				candidate.Spec.DNSNames = []string{serviceName, common.ClusterDNSWildCard(serviceName, defaultNamespace)}
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
+
+			prometheusCertName := serviceName + "-prometheus-cert"
+			By("installing prometheus cert")
+			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = prometheusCertName
+				candidate.Spec.CommonName = "prometheus"
 				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
 					Name: caIssuer.Name,
 					Kind: "ClusterIssuer",
@@ -304,10 +305,16 @@ var _ = Describe("broker-service", func() {
 					ServerName:         serverName,
 					InsecureSkipVerify: false,
 				}
-				httpClientTransport.TLSClientConfig.GetClientCertificate =
-					func(cri *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-						return common.GetOperatorClientCertificate(k8sClient, cri)
-					}
+
+				promCertSecret := &corev1.Secret{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: prometheusCertName, Namespace: defaultNamespace}, promCertSecret)).Should(Succeed())
+				certPEM := promCertSecret.Data["tls.crt"]
+				keyPEM := promCertSecret.Data["tls.key"]
+				g.Expect(certPEM).ShouldNot(BeEmpty())
+				g.Expect(keyPEM).ShouldNot(BeEmpty())
+				promCert, certErr := tls.X509KeyPair(certPEM, keyPEM)
+				g.Expect(certErr).Should(Succeed())
+				httpClientTransport.TLSClientConfig.Certificates = []tls.Certificate{promCert}
 
 				if rootCas, err := common.GetRootCAs(k8sClient); err == nil {
 					httpClientTransport.TLSClientConfig.RootCAs = rootCas

@@ -7039,6 +7039,7 @@ spec:
           - delete
           - get
           - list
+          - patch
           - update
           - watch
         - apiGroups:
@@ -7188,6 +7189,9 @@ spec:
           - create
           - delete
           - get
+          - list
+          - update
+          - watch
         - apiGroups:
           - route.openshift.io
           resources:

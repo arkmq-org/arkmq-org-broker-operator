@@ -21,7 +21,6 @@ import (
 	"strconv"
 	"strings"
 
-	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/environments"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/resources/secrets"
@@ -59,26 +58,6 @@ func GetBrokers(resource types.NamespacedName, ssInfos []ss.StatefulSetInfo, cli
 	}
 
 	reqLogger.V(1).Info("Gathered some mgmt array", "size", len(artemisArray))
-	return artemisArray
-}
-
-func GetMinimalJolokiaAgents(cr *v1beta2.Broker, client rtclient.Client) []*JkInfo {
-	var artemisArray []*JkInfo = []*JkInfo{} // empty slice
-	var i int32 = 0
-	for i = 0; i < cr.Status.DeploymentPlanSize; i++ {
-
-		ordinalFqdn := common.OrdinalFQDNS(cr.Name, cr.Namespace, i)
-
-		artemis := mgmt.GetArtemisAgentForRestricted(client, environments.ResolveBrokerNameFromEnvs(cr.Spec.Env, cr.Name), ordinalFqdn)
-
-		jkInfo := JkInfo{
-			Artemis: artemis,
-			IP:      ordinalFqdn,
-			Ordinal: strconv.FormatInt(int64(i), 10),
-		}
-		artemisArray = append(artemisArray, &jkInfo)
-	}
-
 	return artemisArray
 }
 

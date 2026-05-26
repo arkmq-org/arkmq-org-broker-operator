@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -82,15 +83,6 @@ var _ = Describe("broker-service-poc", func() {
 			})
 			InstallCaBundle(common.DefaultOperatorCASecretName, rootCertSecretName, caPemTrustStoreName)
 
-			By("installing operator cert")
-			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-				candidate.Spec.CommonName = "arkmq-org-broker-operator"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 		}
 
@@ -102,7 +94,6 @@ var _ = Describe("broker-service-poc", func() {
 			UnInstallCaBundle(common.DefaultOperatorCASecretName)
 			UninstallClusteredIssuer(caIssuerName)
 			UninstallCert(rootCert.Name, rootCert.Namespace)
-			UninstallCert(common.DefaultOperatorCertSecretName, defaultNamespace)
 			UninstallClusteredIssuer(rootIssuerName)
 
 			if installedCertManager {
@@ -800,7 +791,7 @@ var _ = Describe("broker-service-poc", func() {
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("scraping prometheus metrics and verifying queue-level metrics are exposed")
+			By("scraping prometheus metrics with prometheus cert and verifying queue-level metrics are exposed")
 			serverName := common.OrdinalFQDNS(serviceName, defaultNamespace, 0)
 
 			Eventually(func(g Gomega) {
@@ -815,10 +806,19 @@ var _ = Describe("broker-service-poc", func() {
 					ServerName:         serverName,
 					InsecureSkipVerify: false,
 				}
-				httpClientTransport.TLSClientConfig.GetClientCertificate =
-					func(cri *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-						return common.GetOperatorClientCertificate(k8sClient, cri)
-					}
+
+				promCertSecret := &corev1.Secret{}
+				promCertSecretKey := types.NamespacedName{Name: prometheusCertName, Namespace: defaultNamespace}
+				g.Expect(k8sClient.Get(ctx, promCertSecretKey, promCertSecret)).Should(Succeed())
+
+				certPEM := promCertSecret.Data["tls.crt"]
+				keyPEM := promCertSecret.Data["tls.key"]
+				g.Expect(certPEM).ShouldNot(BeEmpty())
+				g.Expect(keyPEM).ShouldNot(BeEmpty())
+
+				promCert, err := tls.X509KeyPair(certPEM, keyPEM)
+				g.Expect(err).Should(Succeed())
+				httpClientTransport.TLSClientConfig.Certificates = []tls.Certificate{promCert}
 
 				if rootCas, err := common.GetRootCAs(k8sClient); err == nil {
 					httpClientTransport.TLSClientConfig.RootCAs = rootCas
@@ -840,7 +840,6 @@ var _ = Describe("broker-service-poc", func() {
 						fmt.Printf("Metrics response (first 20000 chars):\n%s\n", bodyStr[:min(20000, len(bodyStr))])
 					}
 
-					// Verify queue-level metrics for app queues are present
 					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.ONE"`), "should have MessageCount for METRICS.QUEUE.ONE")
 					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.TWO"`), "should have MessageCount for METRICS.QUEUE.TWO")
 					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.ONE"`), "should have ConsumerCount for METRICS.QUEUE.ONE")
@@ -909,6 +908,55 @@ var _ = Describe("broker-service-poc", func() {
 					*/
 				}
 
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("attempting exploit: prometheus cert + status-script basic auth to fetch broker status via prometheus endpoint")
+			basicAuthB64 := base64.StdEncoding.EncodeToString([]byte("sidecar:sidecar"))
+			jolokiaStatusPath := fmt.Sprintf("jolokia/read/org.apache.activemq.artemis:broker=%%22%s%%22/Status", serviceName)
+
+			Eventually(func(g Gomega) {
+				transport := http.DefaultTransport.(*http.Transport).Clone()
+				httpClient := http.Client{
+					Transport: transport,
+					Timeout:   time.Second * 5,
+				}
+
+				httpClientTransport := httpClient.Transport.(*http.Transport)
+				httpClientTransport.TLSClientConfig = &tls.Config{
+					ServerName:         serverName,
+					InsecureSkipVerify: false,
+				}
+
+				promCertSecret := &corev1.Secret{}
+				promCertKey := types.NamespacedName{Name: prometheusCertName, Namespace: defaultNamespace}
+				g.Expect(k8sClient.Get(ctx, promCertKey, promCertSecret)).Should(Succeed())
+
+				certPEM := promCertSecret.Data["tls.crt"]
+				keyPEM := promCertSecret.Data["tls.key"]
+				promCert, err := tls.X509KeyPair(certPEM, keyPEM)
+				g.Expect(err).Should(Succeed())
+				httpClientTransport.TLSClientConfig.Certificates = []tls.Certificate{promCert}
+
+				if rootCas, err := common.GetRootCAs(k8sClient); err == nil {
+					httpClientTransport.TLSClientConfig.RootCAs = rootCas
+				}
+
+				statusURL := fmt.Sprintf("https://%s:8888/%s", serverName, jolokiaStatusPath)
+				req, err := http.NewRequest("GET", statusURL, nil)
+				g.Expect(err).Should(Succeed())
+				req.Header.Set("Authorization", "Basic "+basicAuthB64)
+
+				resp, err := httpClient.Do(req)
+				g.Expect(err).Should(Succeed())
+				g.Expect(resp).ShouldNot(BeNil())
+				defer resp.Body.Close()
+				body, readErr := io.ReadAll(resp.Body)
+				g.Expect(readErr).Should(Succeed())
+				bodyStr := string(body)
+				fmt.Printf("Exploit (prometheus cert + status-script basic auth → jolokia status) result: HTTP %d, body: %s\n", resp.StatusCode, bodyStr[:min(500, len(bodyStr))])
+				g.Expect(bodyStr).ShouldNot(ContainSubstring("propertiesStatus"), "prometheus cert holder must not be able to read broker status")
+				g.Expect(bodyStr).ShouldNot(ContainSubstring("\"status\""), "prometheus cert holder must not be able to read broker status")
+				g.Expect(bodyStr).ShouldNot(ContainSubstring("\"value\""), "response must not contain Jolokia value payload")
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("tidy up")
