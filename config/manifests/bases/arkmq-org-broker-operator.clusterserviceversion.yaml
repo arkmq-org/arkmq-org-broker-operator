@@ -7580,7 +7580,7 @@ spec:
   - email: info@arkmq.org
     name: ArkMQ
   maturity: beta
-  minKubeVersion: 1.22.0
+  minKubeVersion: 1.33.0
   provider:
     name: ArkMQ
     url: https://arkmq.org

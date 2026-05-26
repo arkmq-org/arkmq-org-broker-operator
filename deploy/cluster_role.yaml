@@ -172,6 +172,9 @@ rules:
   - create
   - delete
   - get
+  - list
+  - patch
+  - watch
 - apiGroups:
   - route.openshift.io
   resources:
