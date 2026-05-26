@@ -137,7 +137,7 @@ kubectl wait clusterissuer broker-ca-issuer --for=condition=Ready --timeout=300s
 
 #### Create Operator Certificate
 
-##### Install the CA Bundle in the `cert-manager` namespace
+#### Install the CA Bundle in the `cert-manager` namespace
 
 ```bash {"stage":"deploy_certs", "label":"create ca bundle", "runtime":"bash"}
 kubectl apply -f - <<EOF

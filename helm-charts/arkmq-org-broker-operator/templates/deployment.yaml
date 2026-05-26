@@ -234,6 +234,12 @@ spec:
         - name: RELATED_IMAGE_BROKER_KUBERNETES_2540
           value: {{ quote (printf "%s@%s" .Values.controllerManager.manager.relatedImages.brokerKubernetesRepository .Values.controllerManager.manager.relatedImages.brokerKubernetes2540.digest)
             }}
+        - name: RELATED_IMAGE_BROKER_INIT_2550
+          value: {{ quote (printf "%s@%s" .Values.controllerManager.manager.relatedImages.brokerInitRepository .Values.controllerManager.manager.relatedImages.brokerInit2550.digest)
+            }}
+        - name: RELATED_IMAGE_BROKER_KUBERNETES_2550
+          value: {{ quote (printf "%s@%s" .Values.controllerManager.manager.relatedImages.brokerKubernetesRepository .Values.controllerManager.manager.relatedImages.brokerKubernetes2550.digest)
+            }}
         - name: OPERATOR_NAME
           valueFrom:
             fieldRef:
