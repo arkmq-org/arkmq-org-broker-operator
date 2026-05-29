@@ -1110,19 +1110,27 @@ func TestBrokerServiceValidCondition(t *testing.T) {
 		// Reconcile
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: invalidName, Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), req)
-		assert.Error(t, err)
+		// ValidationError results in no error returned (no retry until spec changes)
+		assert.NoError(t, err)
 
 		// Verify Status
 		updatedSvc := &v1beta2.BrokerService{}
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 		assert.NoError(t, err)
 
-		// Check Valid condition
+		// Check Valid condition should be set to False for invalid resource name
 		validCondition := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ValidConditionType)
-		assert.NotNil(t, validCondition)
+		assert.NotNil(t, validCondition, "Valid condition should be set for validation errors")
 		assert.Equal(t, metav1.ConditionFalse, validCondition.Status)
 		assert.Equal(t, v1beta2.ValidConditionInvalidResourceName, validCondition.Reason)
 		assert.NotEmpty(t, validCondition.Message)
+
+		// Check Deployed condition should also reflect the validation error
+		deployedCondition := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.DeployedConditionType)
+		assert.NotNil(t, deployedCondition)
+		assert.Equal(t, metav1.ConditionFalse, deployedCondition.Status)
+		assert.Equal(t, v1beta2.ValidConditionInvalidResourceName, deployedCondition.Reason)
+		assert.NotEmpty(t, deployedCondition.Message)
 	})
 
 	t.Run("Valid condition persists across reconciles", func(t *testing.T) {

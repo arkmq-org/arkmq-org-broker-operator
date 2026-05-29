@@ -322,6 +322,12 @@ spec:
                   - type
                   type: object
                 type: array
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the most recent generation observed for this BrokerApp.
+                  It corresponds to the BrokerApp's generation, which is updated on mutation by the API Server.
+                format: int64
+                type: integer
               service:
                 description: Service references the BrokerService this app is bound
                   to and its binding secret

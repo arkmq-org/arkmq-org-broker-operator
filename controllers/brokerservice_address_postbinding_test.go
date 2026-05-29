@@ -747,11 +747,15 @@ var _ = Describe("broker-service address post-binding validation", func() {
 				deployedCond := meta.FindStatusCondition(createdOwner.Status.Conditions, broker.DeployedConditionType)
 				g.Expect(deployedCond).ShouldNot(BeNil())
 				g.Expect(deployedCond.Status).Should(Equal(metav1.ConditionTrue))
+				g.Expect(deployedCond.ObservedGeneration).To(BeNumerically(">", 0))
+				g.Expect(deployedCond.ObservedGeneration).To(BeNumerically("<", createdOwner.Generation))
 
 				validCond := meta.FindStatusCondition(createdOwner.Status.Conditions, broker.ValidConditionType)
 				g.Expect(validCond).ShouldNot(BeNil())
 				g.Expect(validCond.Status).Should(Equal(metav1.ConditionFalse))
 				g.Expect(validCond.Reason).Should(Equal(broker.ValidConditionAddressTypeError))
+				g.Expect(validCond.ObservedGeneration).Should(Equal(createdOwner.Generation))
+				g.Expect(createdOwner.Status.ObservedGeneration).Should(Equal(createdOwner.Generation))
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 

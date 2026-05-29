@@ -8,6 +8,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -59,8 +60,18 @@ func TestValidation_ConsumerOf_EmptySubscriptionsArray(t *testing.T) {
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "pubSub consumers must specify at least one subscription")
+	// ValidationError results in no error returned (no retry until spec changes)
+	assert.NoError(t, err)
+
+	// Check the Valid condition reflects the validation error
+	updatedApp := &broker.BrokerApp{}
+	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+	assert.NoError(t, err)
+
+	validCond := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
+	assert.NotNil(t, validCond)
+	assert.Equal(t, v1.ConditionFalse, validCond.Status)
+	assert.Contains(t, validCond.Message, "pubSub consumers must specify at least one subscription")
 }
 
 // TestValidation_ProducerOf_NonEmptySubscriptionsArray tests that non-empty subscriptions array is rejected
@@ -105,8 +116,18 @@ func TestValidation_ProducerOf_NonEmptySubscriptionsArray(t *testing.T) {
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "subscriptions cannot contain queue names")
+	// ValidationError results in no error returned
+	assert.NoError(t, err)
+
+	// Check the Valid condition reflects the validation error
+	updatedApp := &broker.BrokerApp{}
+	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+	assert.NoError(t, err)
+
+	validCond := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
+	assert.NotNil(t, validCond)
+	assert.Equal(t, v1.ConditionFalse, validCond.Status)
+	assert.Contains(t, validCond.Message, "subscriptions cannot contain queue names")
 }
 
 // TestValidation_QueueName_FQQN tests that FQQN format is rejected in queue names
@@ -151,8 +172,18 @@ func TestValidation_QueueName_FQQN(t *testing.T) {
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "FQQN")
+	// ValidationError results in no error returned
+	assert.NoError(t, err)
+
+	// Check the Valid condition
+	updatedApp := &broker.BrokerApp{}
+	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+	assert.NoError(t, err)
+
+	validCond := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
+	assert.NotNil(t, validCond)
+	assert.Equal(t, v1.ConditionFalse, validCond.Status)
+	assert.Contains(t, validCond.Message, "FQQN")
 }
 
 // TestValidation_QueueName_Empty tests that empty queue names are rejected
@@ -197,8 +228,16 @@ func TestValidation_QueueName_Empty(t *testing.T) {
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "queue name cannot be empty")
+	assert.NoError(t, err)
+
+	updatedApp := &broker.BrokerApp{}
+	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+	assert.NoError(t, err)
+
+	validCond := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
+	assert.NotNil(t, validCond)
+	assert.Equal(t, v1.ConditionFalse, validCond.Status)
+	assert.Contains(t, validCond.Message, "queue name cannot be empty")
 }
 
 // TestValidation_ProducerOf_FQQN tests that FQQN format is rejected in ProducerOf address
@@ -241,7 +280,15 @@ func TestValidation_ProducerOf_FQQN(t *testing.T) {
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "FQQN")
-	assert.Contains(t, err.Error(), "ProducerOf")
+	assert.NoError(t, err)
+
+	updatedApp := &broker.BrokerApp{}
+	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+	assert.NoError(t, err)
+
+	validCond := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
+	assert.NotNil(t, validCond)
+	assert.Equal(t, v1.ConditionFalse, validCond.Status)
+	assert.Contains(t, validCond.Message, "FQQN")
+	assert.Contains(t, validCond.Message, "ProducerOf")
 }

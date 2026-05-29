@@ -115,6 +115,11 @@ func (s *BrokerServiceBindingStatus) Key() string {
 
 type BrokerAppStatus struct {
 
+	// ObservedGeneration is the most recent generation observed for this BrokerApp.
+	// It corresponds to the BrokerApp's generation, which is updated on mutation by the API Server.
+	//+optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// Current state of the resource
 	// Conditions represent the latest available observations of an object's state
 	//+optional

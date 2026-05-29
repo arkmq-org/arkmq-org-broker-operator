@@ -104,14 +104,28 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 		}
 	}
 
+	reqLogger.V(2).Info("Reconciler Processed...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation, "error", err)
+
 	statusErr, retry := processor.processStatus(err)
-	if err == nil {
-		err = statusErr
+	if err != nil {
+		// Handle reconcile error based on type
+		if _, ok := err.(*ValidationError); ok {
+			// Validation error - don't retry (wait for spec change)
+			return ctrl.Result{}, nil
+		}
+
+		// exponential backoff retry
+		return ctrl.Result{}, err
 	}
-	if err == nil && retry {
+	if statusErr != nil {
+		return ctrl.Result{}, fmt.Errorf("Failed to update status: error %v", statusErr)
+	}
+	if retry {
 		return ctrl.Result{RequeueAfter: common.GetReconcileResyncPeriod()}, nil
 	}
-	return ctrl.Result{}, err
+
+	// Success
+	return ctrl.Result{}, nil
 }
 
 // instance specifics for a reconciler loop
@@ -132,29 +146,19 @@ func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
 
 func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
 	// Validate resource name
-	if err := ValidateResourceNameAndSetCondition(reconciler.instance.Name, &reconciler.status.Conditions); err != nil {
+	if err := ValidateResourceName(reconciler.instance.Name); err != nil {
 		return err
 	}
 
 	// Validate CEL expression if provided
 	if reconciler.instance.Spec.AppSelectorExpression != "" {
 		if err := appselector.ValidateExpression(reconciler.instance.Spec.AppSelectorExpression); err != nil {
-			meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-				Type:    broker.ValidConditionType,
-				Status:  metav1.ConditionFalse,
-				Reason:  broker.ValidConditionSpecSelectorError,
-				Message: fmt.Sprintf("invalid appSelectorExpression: %v", err),
-			})
-			return err
+			return NewValidationError(
+				broker.ValidConditionSpecSelectorError,
+				"invalid appSelectorExpression: %v", err)
 		}
 	}
 
-	// All validations passed - set Valid=True
-	meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-		Type:   broker.ValidConditionType,
-		Status: metav1.ConditionTrue,
-		Reason: broker.ValidConditionSuccessReason,
-	})
 	return nil
 }
 
@@ -300,7 +304,25 @@ func certSecretName(cr *broker.BrokerService) string {
 	return fmt.Sprintf("%s-%s", cr.Name, common.DefaultOperandCertSecretName)
 }
 
+func (reconciler *BrokerServiceInstanceReconciler) setValidCondition(err error) {
+	condition := metav1.Condition{
+		Type:   broker.ValidConditionType,
+		Status: metav1.ConditionTrue,
+		Reason: broker.ValidConditionSuccessReason,
+	}
+
+	if validErr, ok := err.(*ValidationError); ok {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = validErr.ConditionReason()
+		condition.Message = validErr.Error()
+	}
+
+	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
+}
+
 func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError error) (err error, retry bool) {
+	// Set Valid condition (always updated)
+	reconciler.setValidCondition(reconcilerError)
 
 	var deployedCondition metav1.Condition = metav1.Condition{
 		Type:   broker.DeployedConditionType,
@@ -315,11 +337,15 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 	}
 
 	if reconcilerError != nil {
-		// Check if error is a ConditionError with a specific reason
-		if condErr, ok := AsConditionError(reconcilerError); ok {
+		// Check if error is a TransientError with a specific reason
+		if transErr, ok := reconcilerError.(*TransientError); ok {
 			deployedCondition.Status = metav1.ConditionFalse
-			deployedCondition.Reason = condErr.Reason
-			deployedCondition.Message = condErr.Message
+			deployedCondition.Reason = transErr.ConditionReason()
+			deployedCondition.Message = transErr.Error()
+		} else if validErr, ok := reconcilerError.(*ValidationError); ok {
+			deployedCondition.Status = metav1.ConditionFalse
+			deployedCondition.Reason = validErr.ConditionReason()
+			deployedCondition.Message = validErr.Error()
 		} else {
 			// Generic error (API errors, update errors, etc.)
 			deployedCondition.Status = metav1.ConditionUnknown

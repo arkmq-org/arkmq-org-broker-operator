@@ -141,7 +141,7 @@ type BrokerAppInstanceReconciler struct {
 
 func (reconciler BrokerAppInstanceReconciler) validateSpec() error {
 	// Validate resource name
-	if err := ValidateResourceNameAndSetCondition(reconciler.instance.Name, &reconciler.status.Conditions); err != nil {
+	if err := ValidateResourceName(reconciler.instance.Name); err != nil {
 		return err
 	}
 
@@ -239,23 +239,26 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 			}
 		}
 	}
-	// Note: If validation fails, we don't update the broker, so Deployed condition
-	// reflects the previous valid deployment state (processStatus handles this)
 
-	statusErr, retry := processor.processStatus(err)
-
-	if _, isCondErr := AsConditionError(err); isCondErr {
-		// reflected in status, don't return to the event loop
-		err = nil
-	}
-	if err == nil {
-		err = statusErr
-	}
+	// Update status with conditions
+	statusErr := processor.processStatus(err)
 	reqLogger.V(2).Info("Reconciler Processed...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation, "error", err)
-	if err == nil && retry {
-		return ctrl.Result{Requeue: true, RequeueAfter: common.GetReconcileResyncPeriod()}, nil
+
+	if err != nil {
+		// Handle reconcile error based on type
+		if _, ok := err.(*ValidationError); ok {
+			// Validation error - don't retry (wait for spec change)
+			return ctrl.Result{}, nil
+		}
+
+		// exponential backoff retry
+		return ctrl.Result{}, err
 	}
-	return ctrl.Result{}, err
+	if statusErr != nil {
+		return ctrl.Result{}, fmt.Errorf("Failed to update status: error %v", statusErr)
+	}
+	// Success
+	return ctrl.Result{}, nil
 }
 
 // instance specifics for a reconciler loop
@@ -275,29 +278,18 @@ func (reconciler *BrokerAppInstanceReconciler) resolveBrokerService() error {
 	var list = &broker.BrokerServiceList{}
 	var opts, err = metav1.LabelSelectorAsSelector(reconciler.instance.Spec.ServiceSelector)
 	if err != nil {
-		err = fmt.Errorf("failed to evaluate Spec.Selector %v", err)
-		meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-			Type:    broker.ValidConditionType,
-			Status:  metav1.ConditionFalse,
-			Reason:  broker.ValidConditionSpecSelectorError,
-			Message: err.Error(),
-		})
-		return err
+		return NewValidationError(
+			broker.ValidConditionSpecSelectorError,
+			"failed to evaluate Spec.Selector: %v", err)
 	}
 	err = reconciler.Client.List(context.TODO(), list, &client.ListOptions{LabelSelector: opts})
 	if err != nil {
-		// API error, not a CR validation issue - let processStatus handle it in Deployed condition
-		return fmt.Errorf("Spec.Selector list error %v", err)
+		// API error, not a CR validation issue - wrap as TransientError
+		return NewTransientErrorWithCause(
+			broker.DeployedConditionCrudKindErrorReason,
+			"failed to list BrokerServices",
+			err)
 	}
-
-	// CR spec is valid (selector syntax was valid)
-	// Set this early so it's always set even if we return errors below
-	// Runtime issues (no matching services, no capacity, API errors) are handled in Deployed condition
-	meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-		Type:   broker.ValidConditionType,
-		Status: metav1.ConditionTrue,
-		Reason: broker.ValidConditionSuccessReason,
-	})
 
 	var service *broker.BrokerService
 	needsServiceAssignment := false
@@ -393,15 +385,23 @@ func (reconciler *BrokerAppInstanceReconciler) resolveBrokerService() error {
 
 		if len(list.Items) == 0 {
 			// No matching services is a runtime issue, not a CR validation issue
-			// Let processStatus handle it in Deployed condition
-			return NewConditionError(broker.DeployedConditionNoMatchingServiceReason,
-				"no matching services available for selector %v", opts)
+			return NewTransientError(
+				broker.DeployedConditionNoMatchingServiceReason,
+				fmt.Sprintf("no matching services available for selector %v", opts))
 		}
 
 		var assignedPort int32
 		service, assignedPort, err = reconciler.findServiceWithCapacity(list)
+		if err != nil {
+			// If findServiceWithCapacity returned a TransientError, preserve it
+			if _, isTransient := err.(*TransientError); !isTransient {
+				// Otherwise wrap with NoServiceCapacity
+				err = NewTransientError(
+					broker.DeployedConditionNoServiceCapacityReason,
+					fmt.Sprintf("no service with capacity available for selector %v, %v", opts, err))
+			}
+		}
 		if service != nil {
-			// findServiceWithCapacity already found a service and assigned a port
 			// Set service binding including assigned port
 			reconciler.status.Service = &broker.BrokerServiceBindingStatus{
 				Name:         service.Name,
@@ -413,16 +413,6 @@ func (reconciler *BrokerAppInstanceReconciler) resolveBrokerService() error {
 				"app", reconciler.instance.Name,
 				"service", service.Name,
 				"port", assignedPort)
-		} else {
-			// Check if error is already a ConditionError (e.g., AppSelectorNoMatch)
-			if _, isCondErr := AsConditionError(err); isCondErr {
-				// Already a ConditionError, return as-is
-				return err
-			}
-			// No service with capacity is a runtime issue, not a CR validation issue
-			// Let processStatus handle it in Deployed condition
-			err = NewConditionError(broker.DeployedConditionNoServiceCapacityReason,
-				"no service with capacity available for selector %v, %v", opts, err)
 		}
 	}
 
@@ -673,10 +663,12 @@ func (reconciler *BrokerAppInstanceReconciler) buildCapacityError(
 					break
 				}
 			}
-			return NewConditionError(broker.DeployedConditionSelectorEvaluationError,
-				"no services match app selector: %s", celErrMsg)
+			return NewTransientError(
+				broker.DeployedConditionSelectorEvaluationError,
+				fmt.Sprintf("no services match app selector: %s", celErrMsg))
 		}
-		return NewConditionError(broker.DeployedConditionNoMatchingServiceReason,
+		return NewTransientError(
+			broker.DeployedConditionNoMatchingServiceReason,
 			"no services match app selector")
 	}
 
@@ -1122,14 +1114,9 @@ func (reconciler *BrokerAppInstanceReconciler) verifyCapabilityAddressType() (er
 		}
 	}
 	if err != nil {
-		meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-			Type:    broker.ValidConditionType,
-			Status:  metav1.ConditionFalse,
-			Reason:  broker.ValidConditionAddressTypeError,
-			Message: err.Error(),
-		})
+		return NewValidationError(broker.ValidConditionAddressTypeError, "%v", err)
 	}
-	return err
+	return nil
 }
 
 // validateAddressesDisjoint ensures Addresses and SharedAddresses don't overlap.
@@ -1148,15 +1135,10 @@ func (reconciler *BrokerAppInstanceReconciler) validateAddressesDisjoint() error
 	// Check for overlap with SharedAddresses
 	for _, sharedAddr := range reconciler.instance.Spec.SharedAddresses {
 		if privateAddresses[sharedAddr.Address] {
-			err := fmt.Errorf("address '%s' appears in both spec.addresses and spec.sharedAddresses (cannot be both private and public)",
+			return NewValidationError(
+				broker.ValidConditionAddressTypeError,
+				"address '%s' appears in both spec.addresses and spec.sharedAddresses (cannot be both private and public)",
 				sharedAddr.Address)
-			meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-				Type:    broker.ValidConditionType,
-				Status:  metav1.ConditionFalse,
-				Reason:  broker.ValidConditionAddressTypeError,
-				Message: err.Error(),
-			})
-			return err
 		}
 	}
 
@@ -1198,33 +1180,21 @@ func (reconciler *BrokerAppInstanceReconciler) validateAddressCapabilityConsiste
 					usageIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
 
 					if declaredIsMulticast && !usageIsMulticast {
-						err := fmt.Errorf(
+						return NewValidationError(
+							broker.ValidConditionAddressTypeError,
 							"address '%s' is declared with pubSub semantics in spec.addresses or spec.sharedAddresses, "+
 								"but is used without pubSub semantics in capabilities.producerOf. "+
 								"Address declaration and usage must have consistent routing semantics",
 							addressRef.Address)
-						meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-							Type:    broker.ValidConditionType,
-							Status:  metav1.ConditionFalse,
-							Reason:  broker.ValidConditionAddressTypeError,
-							Message: err.Error(),
-						})
-						return err
 					}
 
 					if !declaredIsMulticast && usageIsMulticast {
-						err := fmt.Errorf(
+						return NewValidationError(
+							broker.ValidConditionAddressTypeError,
 							"address '%s' is declared without pubSub semantics in spec.addresses or spec.sharedAddresses, "+
 								"but is used with pubSub semantics in capabilities.producerOf. "+
 								"Address declaration and usage must have consistent routing semantics",
 							addressRef.Address)
-						meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-							Type:    broker.ValidConditionType,
-							Status:  metav1.ConditionFalse,
-							Reason:  broker.ValidConditionAddressTypeError,
-							Message: err.Error(),
-						})
-						return err
 					}
 				}
 			}
@@ -1240,33 +1210,21 @@ func (reconciler *BrokerAppInstanceReconciler) validateAddressCapabilityConsiste
 					usageIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
 
 					if declaredIsMulticast && !usageIsMulticast {
-						err := fmt.Errorf(
+						return NewValidationError(
+							broker.ValidConditionAddressTypeError,
 							"address '%s' is declared with pubSub semantics in spec.addresses or spec.sharedAddresses, "+
 								"but is used without pubSub semantics in capabilities.consumerOf. "+
 								"Address declaration and usage must have consistent routing semantics",
 							addressRef.Address)
-						meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-							Type:    broker.ValidConditionType,
-							Status:  metav1.ConditionFalse,
-							Reason:  broker.ValidConditionAddressTypeError,
-							Message: err.Error(),
-						})
-						return err
 					}
 
 					if !declaredIsMulticast && usageIsMulticast {
-						err := fmt.Errorf(
+						return NewValidationError(
+							broker.ValidConditionAddressTypeError,
 							"address '%s' is declared without pubSub semantics in spec.addresses or spec.sharedAddresses, "+
 								"but is used with pubSub semantics in capabilities.consumerOf. "+
 								"Address declaration and usage must have consistent routing semantics",
 							addressRef.Address)
-						meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-							Type:    broker.ValidConditionType,
-							Status:  metav1.ConditionFalse,
-							Reason:  broker.ValidConditionAddressTypeError,
-							Message: err.Error(),
-						})
-						return err
 					}
 				}
 			}
@@ -1287,89 +1245,152 @@ func (reconciler *BrokerAppInstanceReconciler) isAppRejectedByService(service *b
 	return false
 }
 
-func (reconciler *BrokerAppInstanceReconciler) processStatus(reconcilerError error) (err error, retry bool) {
+func (reconciler *BrokerAppInstanceReconciler) processStatus(reconcilerError error) error {
+	// Set Valid condition (always updated with current generation)
+	reconciler.setValidCondition(reconcilerError)
 
-	var deployedCondition metav1.Condition = metav1.Condition{
-		Type: broker.DeployedConditionType,
-	}
-	if reconciler.status.Service != nil {
-		serviceName := reconciler.status.Service.Key()
+	// Set Deployed condition (only updated when validation passes)
+	reconciler.setDeployedCondition(reconcilerError)
 
-		deployedCondition.Status = metav1.ConditionFalse
-		deployedCondition.Reason = broker.DeployedConditionProvisioningPendingReason
-		deployedCondition.Message = "Waiting for broker to apply application properties"
+	// Set Ready condition (always reflects current generation)
+	reconciler.setReadyCondition()
 
-		if reconciler.service != nil {
-			// We looked up the service - check if app is in ProvisionedApps
-			appIdentity := AppIdentity(reconciler.instance)
-			for _, appliedApp := range reconciler.service.Status.ProvisionedApps {
-				if appliedApp == appIdentity {
-					deployedCondition.Status = metav1.ConditionTrue
-					deployedCondition.Reason = broker.DeployedConditionProvisionedReason
-					deployedCondition.Message = ""
-					break
-				}
-			}
-		} else if reconcilerError != nil {
-			// We didn't look up the service - error occurred before service validation
-			// (validateSpec failed, selector parsing failed, API error, or CEL evaluation error)
-			// Check previous Deployed condition to determine deployment state
-			prevDeployed := meta.FindStatusCondition(reconciler.instance.Status.Conditions, broker.DeployedConditionType)
-			if prevDeployed != nil && prevDeployed.Status == metav1.ConditionTrue {
-				// Was previously deployed, and we didn't update the broker (early return)
-				// Deployment is still active with previous valid configuration
-				deployedCondition.Status = metav1.ConditionTrue
-				deployedCondition.Reason = broker.DeployedConditionProvisionedReason
-				deployedCondition.Message = "Deployed with previous configuration"
-			} else {
-				// Never deployed OR was previously Deployed=False
-				// We didn't update the broker (early return due to error)
-				// Therefore: definitely not deployed
-				deployedCondition.Status = metav1.ConditionFalse
-				// Preserve the specific error reason if it's a ConditionError, otherwise generic
-				if condErr, ok := AsConditionError(reconcilerError); ok {
-					deployedCondition.Reason = condErr.Reason
-					deployedCondition.Message = condErr.Message
-				} else {
-					deployedCondition.Reason = broker.DeployedConditionCrudKindErrorReason
-					deployedCondition.Message = fmt.Sprintf("Not deployed - error before service lookup: %v", reconcilerError)
-				}
-			}
-		} else {
-			// No error but service not looked up - shouldn't happen
-			deployedCondition.Status = metav1.ConditionFalse
-			deployedCondition.Reason = broker.DeployedConditionMatchedServiceNotFoundReason
-			deployedCondition.Message = fmt.Sprintf("matching service from status binding %s not found", serviceName)
-		}
+	// Update status-level observedGeneration
+	reconciler.status.ObservedGeneration = reconciler.instance.Generation
 
-	} else if reconcilerError != nil {
-		// No service binding exists - this is either a new app or unbound app with error
-		// We know we didn't deploy anything (error occurred), so Deployed=False
-		deployedCondition.Status = metav1.ConditionFalse
-		// Use specific reason from ConditionError if available, otherwise generic
-		if condErr, ok := AsConditionError(reconcilerError); ok {
-			deployedCondition.Reason = condErr.Reason
-			deployedCondition.Message = condErr.Message
-		} else {
-			// Validation errors, API errors, etc.
-			deployedCondition.Reason = broker.DeployedConditionCrudKindErrorReason
-			deployedCondition.Message = fmt.Sprintf("Not deployed - error during reconcile: %v", reconcilerError)
-		}
-	} else {
-		// No binding and no error means we haven't tried to assign yet
-		deployedCondition.Status = metav1.ConditionFalse
-		deployedCondition.Reason = broker.DeployedConditionNoMatchingServiceReason
-	}
-	meta.SetStatusCondition(&reconciler.status.Conditions, deployedCondition)
-	common.SetReadyCondition(&reconciler.status.Conditions)
-
+	// Update status if changed
 	if !reflect.DeepEqual(reconciler.instance.Status, *reconciler.status) {
 		reconciler.instance.Status = *reconciler.status
-		err = resources.UpdateStatus(reconciler.Client, reconciler.instance)
+		return resources.UpdateStatus(reconciler.Client, reconciler.instance)
 	}
-	retry = meta.IsStatusConditionTrue(reconciler.instance.Status.Conditions, broker.ValidConditionType) &&
-		meta.IsStatusConditionFalse(reconciler.instance.Status.Conditions, broker.DeployedConditionType)
-	return err, retry
+
+	return nil
+}
+
+func (reconciler *BrokerAppInstanceReconciler) setValidCondition(err error) {
+	condition := metav1.Condition{
+		Type:               broker.ValidConditionType,
+		Status:             metav1.ConditionTrue,
+		Reason:             broker.ValidConditionSuccessReason,
+		ObservedGeneration: reconciler.instance.Generation,
+	}
+
+	if validErr, ok := err.(*ValidationError); ok {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = validErr.ConditionReason()
+		condition.Message = validErr.Error()
+
+		// Add note if app is already deployed on previous generation
+		deployedCond := meta.FindStatusCondition(reconciler.status.Conditions, broker.DeployedConditionType)
+		if deployedCond != nil && deployedCond.Status == metav1.ConditionTrue &&
+			deployedCond.ObservedGeneration < reconciler.instance.Generation {
+			condition.Message += fmt.Sprintf(" (reconcile blocked, app continues running at generation %d)",
+				deployedCond.ObservedGeneration)
+		}
+	}
+
+	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
+}
+
+func (reconciler *BrokerAppInstanceReconciler) setDeployedCondition(err error) {
+	// If validation failed, check if we need to initialize Deployed condition
+	if _, isValidationErr := err.(*ValidationError); isValidationErr {
+		// Check if Deployed condition exists
+		existing := meta.FindStatusCondition(reconciler.status.Conditions, broker.DeployedConditionType)
+		if existing != nil {
+			// Deployed condition exists - don't update it
+			// Keeps old observedGeneration to show old spec still running
+			return
+		}
+
+		// No existing Deployed condition - create one for new apps
+		// Set with observedGeneration=0 to indicate never attempted deployment
+		condition := metav1.Condition{
+			Type:               broker.DeployedConditionType,
+			Status:             metav1.ConditionFalse,
+			Reason:             broker.DeployedConditionValidationFailedReason,
+			Message:            "Cannot deploy due to validation failure",
+			ObservedGeneration: 0, // 0 indicates no deployment attempted
+		}
+		meta.SetStatusCondition(&reconciler.status.Conditions, condition)
+		return
+	}
+
+	// Validation passed, we attempted deployment - update with current generation
+	condition := metav1.Condition{
+		Type:               broker.DeployedConditionType,
+		ObservedGeneration: reconciler.instance.Generation,
+	}
+
+	// Determine deployment result
+	if transErr, ok := err.(*TransientError); ok {
+		// Transient error (capacity, routing, API error)
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = transErr.ConditionReason()
+		condition.Message = transErr.Error()
+	} else if err != nil {
+		// Other error
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = broker.DeployedConditionCrudKindErrorReason
+		condition.Message = err.Error()
+	} else if reconciler.status.Service != nil && reconciler.service != nil {
+		// Check if actually deployed
+		appIdentity := AppIdentity(reconciler.instance)
+		isProvisioned := false
+		for _, appliedApp := range reconciler.service.Status.ProvisionedApps {
+			if appliedApp == appIdentity {
+				isProvisioned = true
+				break
+			}
+		}
+
+		if isProvisioned {
+			condition.Status = metav1.ConditionTrue
+			condition.Reason = broker.DeployedConditionProvisionedReason
+			condition.Message = "Application provisioned to broker"
+		} else {
+			condition.Status = metav1.ConditionFalse
+			condition.Reason = broker.DeployedConditionProvisioningPendingReason
+			condition.Message = "Waiting for broker to provision"
+		}
+	} else if reconciler.status.Service != nil {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = broker.DeployedConditionMatchedServiceNotFoundReason
+		condition.Message = fmt.Sprintf("matching service %s not found", reconciler.status.Service.Key())
+	} else {
+		// No matching service
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = broker.DeployedConditionNoMatchingServiceReason
+		condition.Message = "No matching BrokerService found"
+	}
+
+	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
+}
+
+func (reconciler *BrokerAppInstanceReconciler) setReadyCondition() {
+	condition := metav1.Condition{
+		Type:               broker.ReadyConditionType,
+		ObservedGeneration: reconciler.instance.Generation,
+	}
+
+	validCond := meta.FindStatusCondition(reconciler.status.Conditions, broker.ValidConditionType)
+	deployedCond := meta.FindStatusCondition(reconciler.status.Conditions, broker.DeployedConditionType)
+
+	// Ready = Valid AND Deployed, both at current generation
+	if validCond != nil && validCond.Status == metav1.ConditionTrue &&
+		validCond.ObservedGeneration == reconciler.instance.Generation &&
+		deployedCond != nil && deployedCond.Status == metav1.ConditionTrue &&
+		deployedCond.ObservedGeneration == reconciler.instance.Generation {
+		condition.Status = metav1.ConditionTrue
+		condition.Reason = broker.ReadyConditionReason
+		condition.Message = "BrokerApp is ready"
+	} else {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = broker.NotReadyConditionReason
+		condition.Message = "Waiting for Valid and Deployed conditions at current generation"
+	}
+
+	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
 }
 
 func (r *BrokerAppReconciler) enqueueAppsForService() handler.EventHandler {
@@ -1410,10 +1431,16 @@ func shouldPropagateWatchForReferencedApp(app *broker.BrokerApp) bool {
 	validCond := meta.FindStatusCondition(app.Status.Conditions, broker.ValidConditionType)
 	deployedCond := meta.FindStatusCondition(app.Status.Conditions, broker.DeployedConditionType)
 
-	isValidAndDeployed := validCond != nil && validCond.Status == metav1.ConditionTrue &&
-		deployedCond != nil && deployedCond.Status == metav1.ConditionTrue
+	// Only propagate when current generation is both valid and deployed
+	// This prevents reconciling cross-app references on stale or invalid configurations
+	isValidAndDeployedAtCurrentGen := validCond != nil &&
+		validCond.Status == metav1.ConditionTrue &&
+		validCond.ObservedGeneration == app.Generation &&
+		deployedCond != nil &&
+		deployedCond.Status == metav1.ConditionTrue &&
+		deployedCond.ObservedGeneration == app.Generation
 
-	return isValidAndDeployed
+	return isValidAndDeployedAtCurrentGen
 }
 
 func (r *BrokerAppReconciler) enqueueAppsForReferencedApp() handler.EventHandler {

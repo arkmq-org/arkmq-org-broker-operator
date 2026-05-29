@@ -19,9 +19,6 @@ import (
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
 	"github.com/stretchr/testify/assert"
-
-	"k8s.io/apimachinery/pkg/api/meta"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestValidateAddressesDisjoint(t *testing.T) {
@@ -32,26 +29,21 @@ func TestValidateAddressesDisjoint(t *testing.T) {
 				SharedAddresses: []v1beta2.AddressType{NewAddressType("queue1").Build()}, // Duplicate!
 			},
 		}
-		status := &v1beta2.BrokerAppStatus{
-			Conditions: []v1.Condition{},
-		}
 
 		reconciler := &BrokerAppInstanceReconciler{
 			instance: appWithDuplicate,
-			status:   status,
 		}
 
 		err := reconciler.validateAddressesDisjoint()
 
 		assert.Error(t, err)
-		assert.Len(t, status.Conditions, 1)
 
-		validCond := meta.FindStatusCondition(status.Conditions, v1beta2.ValidConditionType)
-		assert.NotNil(t, validCond)
-		assert.Equal(t, v1.ConditionFalse, validCond.Status)
-		assert.Equal(t, v1beta2.ValidConditionAddressTypeError, validCond.Reason)
-		assert.Contains(t, validCond.Message, "cannot be both private and public")
-		assert.Contains(t, validCond.Message, "queue1")
+		// Check it's a ValidationError with correct reason
+		validErr, ok := err.(*ValidationError)
+		assert.True(t, ok, "expected ValidationError")
+		assert.Equal(t, v1beta2.ValidConditionAddressTypeError, validErr.ConditionReason())
+		assert.Contains(t, validErr.Message, "cannot be both private and public")
+		assert.Contains(t, validErr.Message, "queue1")
 	})
 
 	t.Run("allows disjoint addresses", func(t *testing.T) {
@@ -61,19 +53,14 @@ func TestValidateAddressesDisjoint(t *testing.T) {
 				SharedAddresses: []v1beta2.AddressType{NewAddressType("public1").Build()},
 			},
 		}
-		status := &v1beta2.BrokerAppStatus{
-			Conditions: []v1.Condition{},
-		}
 
 		reconciler := &BrokerAppInstanceReconciler{
 			instance: appDisjoint,
-			status:   status,
 		}
 
 		err := reconciler.validateAddressesDisjoint()
 
 		assert.NoError(t, err)
-		assert.Len(t, status.Conditions, 0)
 	})
 
 	t.Run("allows empty SharedAddresses", func(t *testing.T) {
@@ -82,19 +69,14 @@ func TestValidateAddressesDisjoint(t *testing.T) {
 				Addresses: []v1beta2.AddressType{NewAddressType("private1").Build()},
 			},
 		}
-		status := &v1beta2.BrokerAppStatus{
-			Conditions: []v1.Condition{},
-		}
 
 		reconciler := &BrokerAppInstanceReconciler{
 			instance: app,
-			status:   status,
 		}
 
 		err := reconciler.validateAddressesDisjoint()
 
 		assert.NoError(t, err)
-		assert.Len(t, status.Conditions, 0)
 	})
 
 	t.Run("allows empty Addresses", func(t *testing.T) {
@@ -103,18 +85,13 @@ func TestValidateAddressesDisjoint(t *testing.T) {
 				SharedAddresses: []v1beta2.AddressType{NewAddressType("public1").Build()},
 			},
 		}
-		status := &v1beta2.BrokerAppStatus{
-			Conditions: []v1.Condition{},
-		}
 
 		reconciler := &BrokerAppInstanceReconciler{
 			instance: app,
-			status:   status,
 		}
 
 		err := reconciler.validateAddressesDisjoint()
 
 		assert.NoError(t, err)
-		assert.Len(t, status.Conditions, 0)
 	})
 }

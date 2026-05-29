@@ -59,10 +59,12 @@ func TestDeployedCondition_ValidationError_WithPreviousDeployment(t *testing.T) 
 	}
 
 	// Create an app that was previously successfully deployed
+	// Generation=2 simulates that the spec was changed (from gen 1 to gen 2)
 	app := &v1beta2.BrokerApp{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-app",
-			Namespace: "test",
+			Name:       "test-app",
+			Namespace:  "test",
+			Generation: 2, // Current generation (spec was updated to invalid)
 		},
 		Spec: v1beta2.BrokerAppSpec{
 			ServiceSelector: &metav1.LabelSelector{
@@ -119,9 +121,8 @@ func TestDeployedCondition_ValidationError_WithPreviousDeployment(t *testing.T) 
 	}
 	result, err := reconciler.Reconcile(context.TODO(), req)
 
-	// Validation errors are returned (not ConditionErrors)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot be both private and public")
+	// ValidationError results in no error returned (no retry until spec changes)
+	assert.NoError(t, err)
 	assert.Equal(t, reconcile.Result{}, result)
 
 	// Fetch updated app
@@ -135,16 +136,19 @@ func TestDeployedCondition_ValidationError_WithPreviousDeployment(t *testing.T) 
 	assert.Equal(t, metav1.ConditionFalse, validCond.Status, "Valid should be False due to address conflict")
 	assert.Equal(t, v1beta2.ValidConditionAddressTypeError, validCond.Reason)
 	assert.Contains(t, validCond.Message, "cannot be both private and public")
+	// Valid condition should have current generation
+	assert.Equal(t, app.Generation, validCond.ObservedGeneration)
 
 	deployedCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
 	assert.NotNil(t, deployedCond)
-	// KEY ASSERTION: Deployed should still be True because we didn't update the broker
-	// The old valid configuration is still active
+	// KEY ASSERTION: Deployed condition is NOT updated when validation fails
+	// It retains the old observedGeneration, showing old config is still active
 	assert.Equal(t, metav1.ConditionTrue, deployedCond.Status,
 		"Deployed should remain True - validation failed but broker wasn't updated, old config still active")
 	assert.Equal(t, v1beta2.DeployedConditionProvisionedReason, deployedCond.Reason)
-	assert.Equal(t, "Deployed with previous configuration", deployedCond.Message,
-		"Message should indicate deployment is from previous config")
+	// ObservedGeneration should NOT be updated (stays at old generation or 0 if not set)
+	assert.True(t, deployedCond.ObservedGeneration < app.Generation,
+		"Deployed observedGeneration should be less than current generation - it reflects old spec (may be 0 if condition predates observedGeneration)")
 
 	// Service binding should still be present (not cleared by validation failure)
 	assert.NotNil(t, updatedApp.Status.Service)
@@ -219,9 +223,8 @@ func TestDeployedCondition_ValidationError_WithoutPreviousDeployment(t *testing.
 	}
 	result, err := reconciler.Reconcile(context.TODO(), req)
 
-	// Validation errors are returned
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot be both private and public")
+	// ValidationError results in no error returned (no retry until spec changes)
+	assert.NoError(t, err)
 	assert.Equal(t, reconcile.Result{}, result)
 
 	// Fetch updated app
@@ -339,8 +342,8 @@ func TestDeployedCondition_ValidationError_WithPreviousDeployedFalse(t *testing.
 	}
 	result, err := reconciler.Reconcile(context.TODO(), req)
 
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot be both private and public")
+	// ValidationError results in no error returned
+	assert.NoError(t, err)
 	assert.Equal(t, reconcile.Result{}, result)
 
 	// Fetch updated app

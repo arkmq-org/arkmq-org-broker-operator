@@ -110,9 +110,9 @@ func TestReconcileNoMatchingService(t *testing.T) {
 
 	// Reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
-	res, err := r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err) // err is reflected in the status
-	assert.True(t, res.Requeue)
+	_, err := r.Reconcile(context.TODO(), req)
+	// TransientError (no matching service) results in requeue
+	assert.Error(t, err)
 
 	// Verify BrokerApp status
 	updatedApp := &v1beta2.BrokerApp{}
@@ -151,9 +151,7 @@ func TestReconcileValidConditionTransition(t *testing.T) {
 	// 1. Reconcile with non-matching selector
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
-	res, err := r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err) // err is reflected in the status
-	assert.True(t, res.Requeue)
+	assert.Error(t, err)
 
 	// Verify Valid condition is True (selector syntax is valid)
 	updatedApp := &v1beta2.BrokerApp{}
@@ -289,7 +287,8 @@ func TestReconcileAddressTypeError(t *testing.T) {
 	// Reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err)
+	// ValidationError results in no error returned (no retry until spec changes)
+	assert.NoError(t, err)
 
 	// Verify BrokerApp status
 	updatedApp := &v1beta2.BrokerApp{}
@@ -460,7 +459,8 @@ func TestReconcileInvalidResourceName(t *testing.T) {
 	// Reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: invalidName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err)
+	// ValidationError results in no error returned (no retry until spec changes)
+	assert.NoError(t, err)
 
 	// Verify BrokerApp status
 	updatedApp := &v1beta2.BrokerApp{}
@@ -498,7 +498,8 @@ func TestReconcileInvalidSelectorSyntax(t *testing.T) {
 	// Reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
-	assert.Error(t, err)
+	// ValidationError results in no error returned (no retry until spec changes)
+	assert.NoError(t, err)
 
 	// Verify BrokerApp status
 	updatedApp := &v1beta2.BrokerApp{}
@@ -587,10 +588,10 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 		r := env.Reconciler
 		cl := env.Client
 
-		// Reconcile consumer app - should fail to find matching service due to routing conflict
+		// Reconcile consumer app - should requeue (addressRef conflict is transient)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "consumer-app", Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), req)
-		assert.NoError(t, err) // Reconcile succeeds but sets condition
+		assert.Error(t, err)
 
 		// Check that Deployed condition is False (no matching service due to AddressRef conflict)
 		updatedApp := &v1beta2.BrokerApp{}
@@ -628,10 +629,10 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 		r := env.Reconciler
 		cl := env.Client
 
-		// Reconcile subscriber app - should fail to find matching service due to routing conflict
+		// Reconcile subscriber app - should requeue (addressRef conflict is transient)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "subscriber-app", Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), req)
-		assert.NoError(t, err) // Reconcile succeeds but sets condition
+		assert.Error(t, err)
 
 		// Check that Deployed condition is False (no matching service due to AddressRef conflict)
 		updatedApp := &v1beta2.BrokerApp{}
@@ -668,10 +669,13 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 		r := env.Reconciler
 		cl := env.Client
 
-		// Reconcile subscriber app - should succeed (both MULTICAST)
+		// Reconcile subscriber app - expected behavior:
+		// ownerApp declares "topic" without pubSub but uses it with subscriptions (inconsistent)
+		// subscriberApp references it with subscriptions
+		// This is an addressRef semantic conflict detected at runtime
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "subscriber-app-2", Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), req)
-		assert.NoError(t, err)
+		assert.Error(t, err)
 
 		// Check that Valid condition is True
 		updatedApp := &v1beta2.BrokerApp{}

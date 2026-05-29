@@ -213,9 +213,8 @@ func TestBrokerAppRejectsNonDeployedService(t *testing.T) {
 	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
-	res, err := r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err) // error in the status
-	assert.True(t, res.Requeue)
+	_, err := r.Reconcile(context.TODO(), req)
+	assert.Error(t, err) // error in the status
 
 	updatedApp := &v1beta2.BrokerApp{}
 	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)

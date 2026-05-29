@@ -21,53 +21,79 @@ import (
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ConditionError wraps an error with a condition reason string
-// This allows errors to carry structured metadata about which condition
-// reason should be set when the error is processed
-type ConditionError struct {
+// ValidationError represents a spec validation error.
+// User must fix the spec - no auto-retry until spec changes (new generation).
+type ValidationError struct {
 	Reason  string
 	Message string
 }
 
-func (e *ConditionError) Error() string {
+func (e *ValidationError) Error() string {
 	return e.Message
 }
 
-// NewConditionError creates a new ConditionError with the given reason and message
-func NewConditionError(reason string, format string, args ...interface{}) *ConditionError {
-	return &ConditionError{
+func (e *ValidationError) ConditionReason() string {
+	return e.Reason
+}
+
+// NewValidationError creates a new ValidationError with the given reason and message
+func NewValidationError(reason string, format string, args ...interface{}) *ValidationError {
+	return &ValidationError{
 		Reason:  reason,
 		Message: fmt.Sprintf(format, args...),
 	}
 }
 
-// AsConditionError attempts to extract a ConditionError from an error
-// Returns the ConditionError and true if the error is a ConditionError, nil and false otherwise
-func AsConditionError(err error) (*ConditionError, bool) {
-	if err == nil {
-		return nil, false
-	}
-	if ce, ok := err.(*ConditionError); ok {
-		return ce, true
-	}
-	return nil, false
+// TransientError represents a runtime issue that may resolve on retry.
+// Used for: capacity issues, routing issues, API errors, network failures.
+// Controller-runtime will retry these with exponential backoff.
+type TransientError struct {
+	Reason  string
+	Message string
+	Cause   error // Optional: wrapped underlying error
 }
 
-// ValidateResourceNameAndSetCondition validates a resource name and sets the Valid condition accordingly
-// Returns an error if the name is invalid, nil otherwise
-func ValidateResourceNameAndSetCondition(resourceName string, conditions *[]metav1.Condition) error {
+func (e *TransientError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %v", e.Message, e.Cause)
+	}
+	return e.Message
+}
+
+func (e *TransientError) ConditionReason() string {
+	return e.Reason
+}
+
+func (e *TransientError) Unwrap() error {
+	return e.Cause
+}
+
+// NewTransientError creates a new TransientError with the given reason and message
+func NewTransientError(reason, message string) *TransientError {
+	return &TransientError{
+		Reason:  reason,
+		Message: message,
+	}
+}
+
+// NewTransientErrorWithCause creates a new TransientError with a cause
+func NewTransientErrorWithCause(reason, message string, cause error) *TransientError {
+	return &TransientError{
+		Reason:  reason,
+		Message: message,
+		Cause:   cause,
+	}
+}
+
+// ValidateResourceName validates a resource name and returns a ValidationError if invalid
+func ValidateResourceName(resourceName string) error {
 	err := common.ValidateResourceName(resourceName)
 	if err != nil {
-		meta.SetStatusCondition(conditions, metav1.Condition{
-			Type:    broker.ValidConditionType,
-			Status:  metav1.ConditionFalse,
-			Reason:  broker.ValidConditionInvalidResourceName,
-			Message: err.Error(),
-		})
+		return NewValidationError(
+			broker.ValidConditionInvalidResourceName,
+			"invalid resource name: %v", err)
 	}
-	return err
+	return nil
 }

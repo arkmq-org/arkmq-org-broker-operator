@@ -205,9 +205,8 @@ func TestAppSelectorDeniedNamespace(t *testing.T) {
 	// Reconcile the app
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: deniedNs}}
 
-	res, err := r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err) // err is reflected in the status
-	assert.True(t, res.Requeue)
+	_, err := r.Reconcile(context.TODO(), req)
+	assert.Error(t, err) // err is reflected in the status
 
 	// Verify BrokerApp status
 	updatedApp := &v1beta2.BrokerApp{}
@@ -388,9 +387,8 @@ func TestAppSelectorEmptyAllowlistDifferentNamespace(t *testing.T) {
 
 	// Reconcile the app
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: appNs}}
-	res, err := r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err) // err is reflected in the status
-	assert.True(t, res.Requeue)
+	_, err := r.Reconcile(context.TODO(), req)
+	assert.Error(t, err) // err is reflected in the status
 
 	// Verify BrokerApp status
 	updatedApp := &v1beta2.BrokerApp{}
@@ -504,9 +502,8 @@ func TestAppSelectorRevokedAccess(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Reconcile again - app should be unbound and unauthorized
-	res, err := r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err) // err is reflected in the status
-	assert.True(t, res.Requeue)
+	_, err = r.Reconcile(context.TODO(), req)
+	assert.Error(t, err) // err is reflected in the status
 
 	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
 	assert.NoError(t, err)
@@ -644,9 +641,8 @@ func TestAppSelectorMultipleNamespaces(t *testing.T) {
 
 	// Reconcile app-denied (should fail)
 	reqDenied := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app-denied", Namespace: "team-d"}}
-	res, err := r.Reconcile(context.TODO(), reqDenied)
-	assert.NoError(t, err) // err is reflected in the status
-	assert.True(t, res.Requeue)
+	_, err = r.Reconcile(context.TODO(), reqDenied)
+	assert.Error(t, err)
 
 	updatedAppDenied := &v1beta2.BrokerApp{}
 	err = cl.Get(context.TODO(), reqDenied.NamespacedName, updatedAppDenied)
@@ -840,9 +836,8 @@ func TestAppSelectorPrefix(t *testing.T) {
 	// Reconcile non-matching app - should fail
 	reqNoMatch := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app-nomatch", Namespace: "other-namespace"}}
 
-	res, err := r.Reconcile(context.TODO(), reqNoMatch)
-	assert.NoError(t, err) // err is reflected in the status
-	assert.True(t, res.Requeue)
+	_, err = r.Reconcile(context.TODO(), reqNoMatch)
+	assert.Error(t, err) // err is reflected in the status
 
 	updatedNoMatch := &v1beta2.BrokerApp{}
 	err = cl.Get(context.TODO(), reqNoMatch.NamespacedName, updatedNoMatch)
@@ -947,9 +942,8 @@ func TestAppSelectorSuffix(t *testing.T) {
 
 	// Reconcile non-matching app
 	reqNoMatch := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app-nomatch", Namespace: "team-a-dev"}}
-	res, err := r.Reconcile(context.TODO(), reqNoMatch)
-	assert.NoError(t, err)
-	assert.True(t, res.Requeue)
+	_, err = r.Reconcile(context.TODO(), reqNoMatch)
+	assert.Error(t, err)
 
 	updatedNoMatch := &v1beta2.BrokerApp{}
 	err = cl.Get(context.TODO(), reqNoMatch.NamespacedName, updatedNoMatch)
@@ -1071,8 +1065,7 @@ func TestAppSelectorPrefixAndSuffix(t *testing.T) {
 	// Test no match
 	reqNoMatch := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app-nomatch", Namespace: "team-a-dev"}}
 
-	res, err := r.Reconcile(context.TODO(), reqNoMatch)
-	assert.NoError(t, err)
-	assert.True(t, res.Requeue)
+	_, err = r.Reconcile(context.TODO(), reqNoMatch)
+	assert.Error(t, err)
 
 }
