@@ -13,8 +13,6 @@ import (
 	rtclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const JOLOKIA_AGENT_PORT = "8778"
-
 type IData interface {
 	Print()
 }
@@ -56,20 +54,7 @@ type Jolokia struct {
 	user       string
 	password   string
 	protocol   string
-	restricted bool
-	client     rtclient.Client
-}
-
-func GetRestrictedJolokia(client rtclient.Client, _ip string, _port string, _path string) *Jolokia {
-	j := Jolokia{
-		ip:         _ip,
-		port:       _port,
-		jolokiaURL: _ip + ":" + _port + _path,
-		protocol:   "https",
-		restricted: true,
-		client:     client,
-	}
-	return &j
+	client rtclient.Client
 }
 
 func GetJolokia(_client rtclient.Client, _ip string, _port string, _path string, _user string, _password string, _protocol string) *Jolokia {

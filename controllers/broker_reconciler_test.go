@@ -450,6 +450,248 @@ func TestExtractErrors(t *testing.T) {
 
 }
 
+func TestCheckProjectionStatus(t *testing.T) {
+	checksum := alder32FromData([]byte("globalMaxSize=128m"))
+
+	extractStatus := func(inst *BrokerInstanceStatus, fileName string) (propertiesStatus, bool) {
+		if ps, ok := inst.PropertiesStatus[fileName]; ok {
+			return instanceToPropertiesStatus(ps), true
+		}
+		return propertiesStatus{}, false
+	}
+
+	buildClient := func(instance *BrokerInstanceStatus) client.Client {
+		raw := brokerStatus{
+			ServerStatus: serverStatus{
+				State:   instance.ServerState,
+				Version: instance.ServerVersion,
+				NodeId:  instance.NodeID,
+				Uptime:  instance.Uptime,
+			},
+			BrokerConfigStatus: brokerConfigStatus{
+				PropertiesStatus: make(map[string]propertiesStatus),
+			},
+		}
+		for k, v := range instance.PropertiesStatus {
+			ps := propertiesStatus{Alder32: v.Alder32, FileAlder32: v.FileAlder32, ReloadTime: v.ReloadTime}
+			for _, e := range v.ApplyErrors {
+				ps.ApplyErrors = append(ps.ApplyErrors, applyError{PropKeyValue: e.Value, Reason: e.Reason})
+			}
+			raw.BrokerConfigStatus.PropertiesStatus[k] = ps
+		}
+		payload, _ := json.Marshal(raw)
+		return fake.NewClientBuilder().
+			WithScheme(scheme.Scheme).
+			WithObjects(&v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ss-0",
+					Namespace: "test-ns",
+					Labels:    map[string]string{"ActiveMQArtemis": "test"},
+					Annotations: map[string]string{
+						BrokerStatusAnnotationKey: string(payload),
+					},
+				},
+			}).
+			Build()
+	}
+
+	newReconciler := func() *BrokerReconcilerImpl {
+		cr := &v1beta2.Broker{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "test-ns"},
+		}
+		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, false)
+		return NewBrokerReconcilerImpl(cr, r)
+	}
+
+	t.Run("all synced returns nil", func(t *testing.T) {
+		proj := &projection{
+			Name:            "test-props",
+			ResourceVersion: "1",
+			Files:           map[string]propertyFile{"broker.properties": {Alder32: checksum}},
+		}
+		instance := &BrokerInstanceStatus{
+			PodName: "test-ss-0",
+			PropertiesStatus: map[string]PropertiesFileStatus{
+				"broker.properties": {Alder32: checksum},
+			},
+		}
+		ri := newReconciler()
+		result := ri.checkProjectionStatus(ri.customResource, buildClient(instance), proj, extractStatus)
+		assert.Nil(t, result)
+		assert.Contains(t, proj.Ordinals, "0")
+	})
+
+	t.Run("checksum mismatch returns OutOfSync", func(t *testing.T) {
+		proj := &projection{
+			Name:            "test-props",
+			ResourceVersion: "1",
+			Files:           map[string]propertyFile{"broker.properties": {Alder32: checksum}},
+		}
+		instance := &BrokerInstanceStatus{
+			PodName: "test-ss-0",
+			PropertiesStatus: map[string]PropertiesFileStatus{
+				"broker.properties": {Alder32: "99999"},
+			},
+		}
+		ri := newReconciler()
+		result := ri.checkProjectionStatus(ri.customResource, buildClient(instance), proj, extractStatus)
+		assert.NotNil(t, result)
+		_, ok := result.(statusOutOfSyncError)
+		assert.True(t, ok, "expected statusOutOfSyncError, got %T", result)
+		assert.Contains(t, result.Error(), "mismatched checksum")
+	})
+
+	t.Run("synced with apply errors returns InSyncApplyError", func(t *testing.T) {
+		proj := &projection{
+			Name:            "test-props",
+			ResourceVersion: "1",
+			Files:           map[string]propertyFile{"broker.properties": {Alder32: checksum}},
+		}
+		instance := &BrokerInstanceStatus{
+			PodName: "test-ss-0",
+			PropertiesStatus: map[string]PropertiesFileStatus{
+				"broker.properties": {
+					Alder32: checksum,
+					ApplyErrors: []PropertyApplyError{
+						{Value: "addressFullMessagePolicy=INVALID", Reason: "IllegalArgumentException"},
+					},
+				},
+			},
+		}
+		ri := newReconciler()
+		result := ri.checkProjectionStatus(ri.customResource, buildClient(instance), proj, extractStatus)
+		assert.NotNil(t, result)
+		_, ok := result.(inSyncApplyError)
+		assert.True(t, ok, "expected inSyncApplyError, got %T", result)
+		assert.Contains(t, result.Error(), "addressFullMessagePolicy=INVALID")
+	})
+
+	t.Run("unchecked prefix files are ignored when missing", func(t *testing.T) {
+		proj := &projection{
+			Name:            "test-props",
+			ResourceVersion: "1",
+			Files: map[string]propertyFile{
+				"broker.properties":         {Alder32: checksum},
+				"_jolokia.config":           {Alder32: "ignored"},
+				"_prometheus_exporter.yaml": {Alder32: "ignored"},
+			},
+		}
+		instance := &BrokerInstanceStatus{
+			PodName: "test-ss-0",
+			PropertiesStatus: map[string]PropertiesFileStatus{
+				"broker.properties": {Alder32: checksum},
+			},
+		}
+		ri := newReconciler()
+		result := ri.checkProjectionStatus(ri.customResource, buildClient(instance), proj, extractStatus)
+		assert.Nil(t, result, "underscore-prefixed files should not cause missing key errors")
+	})
+
+	t.Run("login.config is ignored when missing", func(t *testing.T) {
+		proj := &projection{
+			Name:            "test-props",
+			ResourceVersion: "1",
+			Files: map[string]propertyFile{
+				"broker.properties": {Alder32: checksum},
+				"login.config":      {Alder32: "ignored"},
+			},
+		}
+		instance := &BrokerInstanceStatus{
+			PodName: "test-ss-0",
+			PropertiesStatus: map[string]PropertiesFileStatus{
+				"broker.properties": {Alder32: checksum},
+			},
+		}
+		ri := newReconciler()
+		result := ri.checkProjectionStatus(ri.customResource, buildClient(instance), proj, extractStatus)
+		assert.Nil(t, result, "login.config should be skipped when missing from broker status")
+	})
+
+	t.Run("ordinal-prefixed files are ignored when missing", func(t *testing.T) {
+		proj := &projection{
+			Name:            "test-props",
+			ResourceVersion: "1",
+			Files: map[string]propertyFile{
+				"broker.properties": {Alder32: checksum},
+				"_ordinal.0.properties.broker-scaledown.properties": {Alder32: "ignored"},
+			},
+		}
+		instance := &BrokerInstanceStatus{
+			PodName: "test-ss-0",
+			PropertiesStatus: map[string]PropertiesFileStatus{
+				"broker.properties": {Alder32: checksum},
+			},
+		}
+		ri := newReconciler()
+		result := ri.checkProjectionStatus(ri.customResource, buildClient(instance), proj, extractStatus)
+		assert.Nil(t, result, "ordinal-prefixed files should be skipped when missing from broker status")
+	})
+
+	t.Run("apply errors take precedence over missing keys", func(t *testing.T) {
+		otherChecksum := alder32FromData([]byte("other=value"))
+		proj := &projection{
+			Name:            "test-props",
+			ResourceVersion: "1",
+			Files: map[string]propertyFile{
+				"broker.properties": {Alder32: checksum},
+				"other.properties":  {Alder32: otherChecksum},
+			},
+		}
+		instance := &BrokerInstanceStatus{
+			PodName: "test-ss-0",
+			PropertiesStatus: map[string]PropertiesFileStatus{
+				"broker.properties": {
+					Alder32: checksum,
+					ApplyErrors: []PropertyApplyError{
+						{Value: "badProp=badVal", Reason: "error"},
+					},
+				},
+			},
+		}
+		ri := newReconciler()
+		result := ri.checkProjectionStatus(ri.customResource, buildClient(instance), proj, extractStatus)
+		assert.NotNil(t, result)
+		_, ok := result.(inSyncApplyError)
+		assert.True(t, ok, "apply errors should be returned before missing keys, got %T", result)
+	})
+
+	t.Run("multiple files accumulate apply errors", func(t *testing.T) {
+		otherChecksum := alder32FromData([]byte("other=value"))
+		proj := &projection{
+			Name:            "test-props",
+			ResourceVersion: "1",
+			Files: map[string]propertyFile{
+				"broker.properties": {Alder32: checksum},
+				"other.properties":  {Alder32: otherChecksum},
+			},
+		}
+		instance := &BrokerInstanceStatus{
+			PodName: "test-ss-0",
+			PropertiesStatus: map[string]PropertiesFileStatus{
+				"broker.properties": {
+					Alder32: checksum,
+					ApplyErrors: []PropertyApplyError{
+						{Value: "badProp1=val1", Reason: "error1"},
+					},
+				},
+				"other.properties": {
+					Alder32: otherChecksum,
+					ApplyErrors: []PropertyApplyError{
+						{Value: "badProp2=val2", Reason: "error2"},
+					},
+				},
+			},
+		}
+		ri := newReconciler()
+		result := ri.checkProjectionStatus(ri.customResource, buildClient(instance), proj, extractStatus)
+		assert.NotNil(t, result)
+		_, ok := result.(inSyncApplyError)
+		assert.True(t, ok, "expected inSyncApplyError, got %T", result)
+		assert.Contains(t, result.Error(), "badProp1=val1")
+		assert.Contains(t, result.Error(), "badProp2=val2")
+	})
+}
+
 func TestGetJaasConfigExtraMountPath(t *testing.T) {
 	cr := &v1beta2.Broker{
 		Spec: v1beta2.BrokerSpec{

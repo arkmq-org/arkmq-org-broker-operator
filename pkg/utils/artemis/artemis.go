@@ -52,16 +52,6 @@ type Artemis struct {
 	jolokia     jolokia.IJolokia
 }
 
-func GetArtemisAgentForRestricted(client rtclient.Client, brokerName string, ordinalFqdn string) *Artemis {
-	artemis := Artemis{
-		ip:          ordinalFqdn,
-		jolokiaPort: jolokia.JOLOKIA_AGENT_PORT,
-		name:        brokerName,
-		jolokia:     jolokia.GetRestrictedJolokia(client, ordinalFqdn, jolokia.JOLOKIA_AGENT_PORT, "/jolokia"),
-	}
-	return &artemis
-
-}
 
 func GetArtemis(_client rtclient.Client, _ip string, _jolokiaPort string, _name string, _user string, _password string, _protocol string) *Artemis {
 

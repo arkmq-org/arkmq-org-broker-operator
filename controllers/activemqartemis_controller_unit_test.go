@@ -16,31 +16,24 @@ package controllers
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 
 	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
 	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
-	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	artemis_client "github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/artemis"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/common"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/jolokia"
-	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/jolokia_client"
 	"github.com/arkmq-org/arkmq-org-broker-operator/pkg/utils/selectors"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -154,7 +147,7 @@ func TestValidateBrokerPropsDuplicateOnFirstEqualsCorrect(t *testing.T) {
 	assert.True(t, meta.IsStatusConditionTrue(cr.Status.Conditions, brokerv1beta1.ValidConditionType))
 }
 
-func TestStatusPodsCheckCached(t *testing.T) {
+func TestCheckStatusNoBrokerInstances(t *testing.T) {
 
 	replicas := int32(1)
 	cr := &v1beta2.Broker{
@@ -172,110 +165,68 @@ func TestStatusPodsCheckCached(t *testing.T) {
 		},
 	}
 
+	s := runtime.NewScheme()
+	corev1.AddToScheme(s)
+	cl := fake.NewClientBuilder().WithScheme(s).WithObjects(
+		&corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "broker-ss-0",
+				Namespace: "some-ns",
+				Labels:    map[string]string{selectors.LabelResourceKey: "broker"},
+			},
+		},
+	).Build()
+
 	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
 	ri := NewBrokerReconcilerImpl(cr, r)
 
-	checkOk := func(brokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError {
+	checkOk := func(ordinal string, instance *BrokerInstanceStatus) ArtemisError {
 		return nil
 	}
 
-	var times = 0
-	interceptorFuncs := interceptor.Funcs{
-		Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			times++
-			return apierrors.NewNotFound(schema.GroupResource{}, "")
-		},
-	}
-
-	client := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
-
-	valid := ri.CheckStatus(cr, client, checkOk)
-	assert.NotNil(t, valid)
-	assert.Contains(t, valid.Error(), "Waiting for")
-	assert.Equal(t, times, 1)
-
-	// repeat to verify fake client not called again
-	valid = ri.CheckStatus(cr, client, checkOk)
-	assert.NotNil(t, valid)
-	assert.Contains(t, valid.Error(), "Waiting for")
-
-	assert.Equal(t, times, 1)
+	err := ri.CheckBrokerInstanceStatuses(cr, cl, checkOk)
+	assert.NotNil(t, err)
+	assert.Contains(t, err.Error(), "Waiting for")
 }
 
-func TestJolokiaStatusCached(t *testing.T) {
+func TestCheckBrokerInstanceStatuses(t *testing.T) {
 
 	cr := &v1beta2.Broker{
-		ObjectMeta: v1.ObjectMeta{Name: "a"},
+		ObjectMeta: v1.ObjectMeta{Name: "a", Namespace: "test"},
 		Spec:       v1beta2.BrokerSpec{},
 	}
 
+	s := runtime.NewScheme()
+	corev1.AddToScheme(s)
+	cl := fake.NewClientBuilder().WithScheme(s).WithObjects(
+		&corev1.Pod{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "a-ss-0",
+				Namespace: "test",
+				Labels:    map[string]string{selectors.LabelResourceKey: "a"},
+				Annotations: map[string]string{
+					BrokerStatusAnnotationKey: `{"configuration":{"properties":{}},"server":{"state":"STARTED","version":"2.33.0","nodeId":"test-node","uptime":"1 min"}}`,
+				},
+			},
+		},
+	).Build()
+
 	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
 	ri := NewBrokerReconcilerImpl(cr, r)
 
-	checkOk := func(brokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError {
+	var callCount int
+	checkFn := func(ordinal string, instance *BrokerInstanceStatus) ArtemisError {
+		callCount++
+		assert.Equal(t, "0", ordinal)
+		assert.Equal(t, "a-ss-0", instance.PodName)
+		assert.Equal(t, "STARTED", instance.ServerState)
+		assert.Equal(t, "2.33.0", instance.ServerVersion)
 		return nil
 	}
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	j := jolokia.NewMockIJolokia(ctrl)
-	a := artemis_client.GetArtemisWithJolokia(j, "a")
-
-	j.EXPECT().
-		Read(gomock.Eq("org.apache.activemq.artemis:broker=\"a\"/Status")).
-		DoAndReturn(func(_ string) (*jolokia.ResponseData, error) {
-			return &jolokia.ResponseData{
-				Status:    404,
-				Value:     "",
-				ErrorType: "javax.management.AttributeNotFoundException",
-				Error:     "javax.management.AttributeNotFoundException : No such attribute: Status",
-			}, fmt.Errorf("javax.management.AttributeNotFoundException")
-		}).Times(1)
-
-	valid := ri.CheckStatusFromJolokia(&jolokia_client.JkInfo{Artemis: a, IP: "IP", Ordinal: "0"}, checkOk)
-	assert.NotNil(t, valid)
-	assert.True(t, strings.Contains(valid.Error(), "AttributeNotFoundException"))
-
-	// verify status call is cached for second call
-	valid = ri.CheckStatusFromJolokia(&jolokia_client.JkInfo{Artemis: a, IP: "IP", Ordinal: "0"}, checkOk)
-	assert.NotNil(t, valid)
-	assert.True(t, strings.Contains(valid.Error(), "AttributeNotFoundException"))
-
-}
-
-func TestErrOnNotFoundSecret(t *testing.T) {
-
-	boolTrue = true
-	cr := &v1beta2.Broker{
-		ObjectMeta: v1.ObjectMeta{Name: "a"},
-		Spec: v1beta2.BrokerSpec{
-			Restricted: &boolTrue,
-		},
-	}
-
-	namer := MakeNamers(cr)
-
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
-
-	var times = 0
-	interceptorFuncs := interceptor.Funcs{
-		Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			times++
-			return apierrors.NewNotFound(schema.GroupResource{}, key.Name)
-		},
-	}
-
-	common.SetOperatorNameSpace("test")
-	t.Cleanup(common.UnsetOperatorNameSpace)
-
-	client := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
-
-	error := ri.Process(cr, *namer, client, nil)
-
-	assert.NotNil(t, error)
-	assert.ErrorContains(t, error, "not found")
+	err := ri.CheckBrokerInstanceStatuses(cr, cl, checkFn)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, callCount)
 }
 
 func TestMakeExtraVolumeMounts_NoExtraVolumes(t *testing.T) {
@@ -397,91 +348,12 @@ func TestMakeExtraVolumeMounts_WithBothExtraVolumesAndClaims(t *testing.T) {
 	assert.Equal(t, "my-pvc", volumeMounts[1].Name)
 }
 
-func TestValidateRestrictedNeedsSecret(t *testing.T) {
-
-	cr := &v1beta2.Broker{
-		ObjectMeta: v1.ObjectMeta{Name: "a"},
-		Spec: v1beta2.BrokerSpec{
-			Restricted: &boolTrue,
-		},
-	}
-
-	namer := MakeNamers(cr)
-
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
-
-	fakeSecrets := map[string]client.Object{}
-	interceptorFuncs := interceptor.Funcs{
-		Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			if o, found := fakeSecrets[key.Name]; found {
-				obj.SetName(o.GetName())
-				return nil
-			}
-			return apierrors.NewNotFound(schema.GroupResource{}, key.Name)
-		},
-	}
-
-	common.SetOperatorNameSpace("test")
-	t.Cleanup(common.UnsetOperatorNameSpace)
-
-	client := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
-
-	valid, retry := ri.validate(cr, client, *namer)
-
-	assert.False(t, valid)
-	assert.True(t, retry)
-
-	assert.True(t, meta.IsStatusConditionFalse(cr.Status.Conditions, brokerv1beta1.ValidConditionType))
-
-	condition := meta.FindStatusCondition(cr.Status.Conditions, brokerv1beta1.ValidConditionType)
-	assert.Equal(t, condition.Reason, brokerv1beta1.ValidConditionMissingResourcesReason)
-	assert.Contains(t, condition.Message, "failed to get secret")
-	assert.Contains(t, condition.Message, common.DefaultOperatorCertSecretName)
-
-	fakeSecrets[common.DefaultOperatorCertSecretName] = &corev1.Secret{
-		ObjectMeta: v1.ObjectMeta{Name: common.DefaultOperatorCertSecretName},
-	}
-
-	valid, retry = ri.validate(cr, client, *namer)
-
-	assert.False(t, valid)
-	assert.True(t, retry)
-	assert.True(t, meta.IsStatusConditionFalse(cr.Status.Conditions, brokerv1beta1.ValidConditionType))
-	condition = meta.FindStatusCondition(cr.Status.Conditions, brokerv1beta1.ValidConditionType)
-	assert.Equal(t, condition.Reason, brokerv1beta1.ValidConditionMissingResourcesReason)
-	assert.Contains(t, condition.Message, "failed to get secret")
-	assert.Contains(t, condition.Message, common.DefaultOperatorCASecretName)
-
-	fakeSecrets[common.DefaultOperatorCASecretName] = &corev1.Secret{
-		ObjectMeta: v1.ObjectMeta{Name: common.DefaultOperatorCASecretName},
-	}
-	valid, retry = ri.validate(cr, client, *namer)
-
-	assert.False(t, valid)
-	assert.True(t, retry)
-	assert.True(t, meta.IsStatusConditionFalse(cr.Status.Conditions, brokerv1beta1.ValidConditionType))
-	condition = meta.FindStatusCondition(cr.Status.Conditions, brokerv1beta1.ValidConditionType)
-	assert.Equal(t, condition.Reason, brokerv1beta1.ValidConditionMissingResourcesReason)
-	assert.Contains(t, condition.Message, "failed to get secret")
-	assert.Contains(t, condition.Message, common.DefaultOperandCertSecretName)
-
-	fakeSecrets[common.DefaultOperandCertSecretName] = &corev1.Secret{
-		ObjectMeta: v1.ObjectMeta{Name: common.DefaultOperandCertSecretName},
-	}
-	valid, retry = ri.validate(cr, client, *namer)
-
-	assert.True(t, valid)
-	assert.False(t, retry)
-	assert.True(t, meta.IsStatusConditionTrue(cr.Status.Conditions, brokerv1beta1.ValidConditionType))
-
-}
-
 func TestReconcileRequeuesOnNotReady(t *testing.T) {
 	s := runtime.NewScheme()
 	_ = brokerv1beta1.AddToScheme(s)
 	_ = corev1.AddToScheme(s)
 	_ = appsv1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
 
 	crd := &brokerv1beta1.ActiveMQArtemis{
 		ObjectMeta: v1.ObjectMeta{
@@ -511,4 +383,147 @@ func TestReconcileRequeuesOnNotReady(t *testing.T) {
 	// refresh the crd to see the status update
 	assert.NoError(t, cl.Get(context.TODO(), req.NamespacedName, crd))
 	assert.True(t, meta.IsStatusConditionFalse(crd.Status.Conditions, brokerv1beta1.DeployedConditionType))
+}
+
+func TestAggregateSyncStatusNoStatusData(t *testing.T) {
+	cr := &v1beta2.Broker{
+		ObjectMeta: v1.ObjectMeta{Name: "broker", Namespace: "test"},
+	}
+	s := runtime.NewScheme()
+	corev1.AddToScheme(s)
+	cl := fake.NewClientBuilder().WithScheme(s).Build()
+
+	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerReconcilerImpl(cr, r)
+
+	condition := ri.aggregateSyncStatus(cr, cl)
+	assert.Equal(t, v1beta2.ConfigAppliedConditionType, condition.Type)
+	assert.Equal(t, v1.ConditionUnknown, condition.Status)
+	assert.Equal(t, v1beta2.ConfigAppliedConditionOutOfSyncReason, condition.Reason)
+	assert.Contains(t, condition.Message, "status script")
+}
+
+func TestAggregateSyncStatusWithPropertiesData(t *testing.T) {
+	cr := &v1beta2.Broker{
+		ObjectMeta: v1.ObjectMeta{Name: "broker", Namespace: "test"},
+		Spec: v1beta2.BrokerSpec{
+			DeploymentPlan: v1beta2.DeploymentPlanType{
+				ExtraMounts: v1beta2.ExtraMountsType{
+					Secrets: []string{"my-secret-dp"},
+				},
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "broker-ss-0",
+			Namespace: "test",
+			Labels:    map[string]string{selectors.LabelResourceKey: "broker"},
+			Annotations: map[string]string{
+				BrokerStatusAnnotationKey: `{"configuration":{"properties":{"broker.properties":{"alder32":"123","fileAlder32":"456"}}},"server":{"state":"STARTED","version":"2.55.0","nodeId":"abc","uptime":"1 min"}}`,
+			},
+		},
+	}
+	s := runtime.NewScheme()
+	corev1.AddToScheme(s)
+	cl := fake.NewClientBuilder().WithScheme(s).WithObjects(pod).Build()
+
+	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerReconcilerImpl(cr, r)
+
+	condition := ri.aggregateSyncStatus(cr, cl)
+	assert.Equal(t, v1beta2.ConfigAppliedConditionType, condition.Type)
+	assert.Equal(t, v1.ConditionTrue, condition.Status)
+	assert.Equal(t, v1beta2.ConfigAppliedConditionSynchedReason, condition.Reason)
+}
+
+func TestAggregateSyncStatusReloadInProgress(t *testing.T) {
+	cr := &v1beta2.Broker{
+		ObjectMeta: v1.ObjectMeta{Name: "broker", Namespace: "test"},
+	}
+	// Pod has the annotation key present but empty (cleared by status script)
+	pod := &corev1.Pod{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "broker-ss-0",
+			Namespace: "test",
+			Labels:    map[string]string{selectors.LabelResourceKey: "broker"},
+			Annotations: map[string]string{
+				BrokerStatusAnnotationKey: "",
+			},
+		},
+	}
+	s := runtime.NewScheme()
+	corev1.AddToScheme(s)
+	cl := fake.NewClientBuilder().WithScheme(s).WithObjects(pod).Build()
+
+	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerReconcilerImpl(cr, r)
+
+	condition := ri.aggregateSyncStatus(cr, cl)
+	assert.Equal(t, v1beta2.ConfigAppliedConditionType, condition.Type)
+	assert.Equal(t, v1.ConditionUnknown, condition.Status)
+	assert.Contains(t, condition.Message, "Reload in progress")
+}
+
+func TestAggregateSyncStatusReloadInProgressMixedPods(t *testing.T) {
+	cr := &v1beta2.Broker{
+		ObjectMeta: v1.ObjectMeta{Name: "broker", Namespace: "test"},
+	}
+	// Pod 0 has completed status, pod 1 is reloading
+	pod0 := &corev1.Pod{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "broker-ss-0",
+			Namespace: "test",
+			Labels:    map[string]string{selectors.LabelResourceKey: "broker"},
+			Annotations: map[string]string{
+				BrokerStatusAnnotationKey: `{"configuration":{"properties":{"broker.properties":{"alder32":"123","fileAlder32":"123"}}},"server":{"state":"STARTED","version":"2.55.0","nodeId":"abc","uptime":"1 min"}}`,
+			},
+		},
+	}
+	pod1 := &corev1.Pod{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "broker-ss-1",
+			Namespace: "test",
+			Labels:    map[string]string{selectors.LabelResourceKey: "broker"},
+			Annotations: map[string]string{
+				BrokerStatusAnnotationKey: "",
+			},
+		},
+	}
+	s := runtime.NewScheme()
+	corev1.AddToScheme(s)
+	cl := fake.NewClientBuilder().WithScheme(s).WithObjects(pod0, pod1).Build()
+
+	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerReconcilerImpl(cr, r)
+
+	// Even though pod0 is synced, pod1 is reloading so overall status is Unknown
+	condition := ri.aggregateSyncStatus(cr, cl)
+	assert.Equal(t, v1beta2.ConfigAppliedConditionType, condition.Type)
+	assert.Equal(t, v1.ConditionUnknown, condition.Status)
+	assert.Contains(t, condition.Message, "Reload in progress")
+}
+
+func TestDefaultLoggingConfigWithReloadAppender(t *testing.T) {
+	config := defaultLoggingConfigWithReloadAppender()
+	assert.Contains(t, config, "reload_trigger")
+	assert.Contains(t, config, "AMQ221087")
+	assert.Contains(t, config, "appender.reload_trigger.type = File")
+	assert.Contains(t, config, "${sys:artemis.instance}/log/reload.log")
+	assert.Contains(t, config, "STDOUT")
+}
+
+func TestMergeReloadAppender(t *testing.T) {
+	userConfig := "appender.stdout.name = STDOUT\nappender.stdout.type = Console\nrootLogger = info, STDOUT\n"
+
+	merged := mergeReloadAppender(userConfig)
+	assert.Contains(t, merged, "reload_trigger")
+	assert.Contains(t, merged, "AMQ221087")
+	assert.Contains(t, merged, userConfig)
+}
+
+func TestMergeReloadAppenderAlreadyPresent(t *testing.T) {
+	configWithReload := "appender.reload_trigger.name = reload_trigger\nappender.reload_trigger.type = File\n"
+	merged := mergeReloadAppender(configWithReload)
+	assert.Equal(t, configWithReload, merged)
 }

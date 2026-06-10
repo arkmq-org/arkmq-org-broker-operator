@@ -13,9 +13,6 @@ limitations under the License.
 */
 // +kubebuilder:docs-gen:collapse=Apache License
 
-/*
-As usual, we start with the necessary imports. We also define some utility variables.
-*/
 package controllers
 
 import (
@@ -24,8 +21,6 @@ import (
 	"os"
 	"time"
 
-	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -40,59 +35,15 @@ import (
 
 var _ = Describe("broker name", func() {
 
-	var installedCertManager bool = false
-
 	BeforeEach(func() {
 		BeforeEachSpec()
 
 		if verbose {
 			fmt.Println("Time with MicroSeconds: ", time.Now().Format("2006-01-02 15:04:05.000000"), " test:", CurrentSpecReport())
 		}
-
-		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			//if cert manager/trust manager is not installed, install it
-			if !CertManagerInstalled() {
-				Expect(InstallCertManager()).To(Succeed())
-				installedCertManager = true
-			}
-
-			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
-
-			rootCert = InstallCert(rootCertName, rootCertNamespce, func(candidate *cmv1.Certificate) {
-				candidate.Spec.IsCA = true
-				candidate.Spec.CommonName = "artemis.root.ca"
-				candidate.Spec.SecretName = rootCertSecretName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: rootIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			caIssuer = InstallClusteredIssuer(caIssuerName, func(candidate *cmv1.ClusterIssuer) {
-				candidate.Spec.SelfSigned = nil
-				candidate.Spec.CA = &cmv1.CAIssuer{
-					SecretName: rootCertSecretName,
-				}
-			})
-			InstallCaBundle(common.DefaultOperatorCASecretName, rootCertSecretName, caPemTrustStoreName)
-
-		}
-
 	})
 
 	AfterEach(func() {
-		if false && os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			UnInstallCaBundle(common.DefaultOperatorCASecretName)
-			UninstallClusteredIssuer(caIssuerName)
-			UninstallCert(rootCert.Name, rootCert.Namespace)
-			UninstallClusteredIssuer(rootIssuerName)
-
-			if installedCertManager {
-				Expect(UninstallCertManager()).To(Succeed())
-				installedCertManager = false
-			}
-		}
-
 		AfterEachSpec()
 	})
 
@@ -146,27 +97,8 @@ var _ = Describe("broker name", func() {
 
 			BeforeEach(func() {
 				if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
-					Skip("MST be run with USE_EXISTING_CLUSTER=true")
+					Skip("MUST be run with USE_EXISTING_CLUSTER=true")
 				}
-
-				By("installing operator cert in operator namespace")
-				InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
-					candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-					candidate.Spec.CommonName = "arkmq-org-broker-operator"
-					candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-						Name: caIssuer.Name,
-						Kind: "ClusterIssuer",
-					}
-				})
-			})
-
-			AfterEach(func() {
-				if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
-					return
-				}
-
-				By("uninstalling operator cert")
-				UninstallCert(common.DefaultOperatorCertSecretName, defaultNamespace)
 			})
 
 			It("in same namespace as operator", func() {
@@ -182,18 +114,6 @@ var _ = Describe("broker name", func() {
 						Namespace: defaultNamespace,
 					},
 				}
-
-				operandCertName := crd.Name + "-" + common.DefaultOperandCertSecretName
-				By("installing restricted mtls broker cert for: " + crd.Name)
-				InstallCert(operandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-					candidate.Spec.SecretName = operandCertName
-					candidate.Spec.CommonName = "arkmq-org-broker-operand"
-					candidate.Spec.DNSNames = []string{common.OrdinalFQDNS(crd.Name, defaultNamespace, 0)}
-					candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-						Name: caIssuer.Name,
-						Kind: "ClusterIssuer",
-					}
-				})
 
 				crd.Spec.Restricted = common.NewTrue()
 				crd.Spec.Env = []corev1.EnvVar{
@@ -220,7 +140,6 @@ var _ = Describe("broker name", func() {
 
 				By("Cleaning up")
 				Expect(k8sClient.Delete(ctx, createdCrd)).Should(Succeed())
-				UninstallCert(operandCertName, defaultNamespace)
 			})
 
 			It("in different namespace from operator", func() {
@@ -230,13 +149,6 @@ var _ = Describe("broker name", func() {
 				By("creating broker namespace " + brokerNamespace + " with restricted security policy")
 				restrictedSecurityPolicy := "restricted"
 				Expect(createNamespace(brokerNamespace, &restrictedSecurityPolicy)).To(Succeed())
-
-				By("waiting for CA bundle to be synced to broker namespace " + brokerNamespace)
-				caSecretKey := types.NamespacedName{Name: common.DefaultOperatorCASecretName, Namespace: brokerNamespace}
-				Eventually(func(g Gomega) {
-					caSecret := &corev1.Secret{}
-					g.Expect(k8sClient.Get(ctx, caSecretKey, caSecret)).Should(Succeed())
-				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 				crd := brokerv1beta1.ActiveMQArtemis{
 					TypeMeta: metav1.TypeMeta{
@@ -248,18 +160,6 @@ var _ = Describe("broker name", func() {
 						Namespace: brokerNamespace,
 					},
 				}
-
-				operandCertName := crd.Name + "-" + common.DefaultOperandCertSecretName
-				By("installing restricted mtls broker cert for: " + crd.Name)
-				InstallCert(operandCertName, brokerNamespace, func(candidate *cmv1.Certificate) {
-					candidate.Spec.SecretName = operandCertName
-					candidate.Spec.CommonName = "arkmq-org-broker-operand"
-					candidate.Spec.DNSNames = []string{common.OrdinalFQDNS(crd.Name, brokerNamespace, 0)}
-					candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-						Name: caIssuer.Name,
-						Kind: "ClusterIssuer",
-					}
-				})
 
 				crd.Spec.Restricted = common.NewTrue()
 				crd.Spec.Env = []corev1.EnvVar{
@@ -286,7 +186,6 @@ var _ = Describe("broker name", func() {
 
 				By("Cleaning up")
 				Expect(k8sClient.Delete(ctx, createdCrd)).Should(Succeed())
-				UninstallCert(operandCertName, brokerNamespace)
 
 				By("deleting broker namespace " + brokerNamespace)
 				deleteNamespace(brokerNamespace, true, Default)
