@@ -118,10 +118,14 @@ if [[ -z $NAMESPACE || -z $CLUSTER ]]; then
   echo "Auto-discovering AMQ Broker clusters..."
   echo ""
 
-  # Try to get all ActiveMQArtemis instances across all namespaces
+  # Try to get all ActiveMQArtemis and Broker instances across all namespaces
   AMQ_INSTANCES=$($KUBE_CLIENT get activemqartemises.broker.amq.io --all-namespaces --no-headers -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name 2>/dev/null)
+  BROKER_INSTANCES=$($KUBE_CLIENT get brokers.broker.arkmq.org --all-namespaces --no-headers -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name 2>/dev/null)
 
-  if [[ -z $AMQ_INSTANCES ]]; then
+  # Combine both instance types
+  ALL_INSTANCES=$(echo -e "$AMQ_INSTANCES\n$BROKER_INSTANCES" | grep -v '^$')
+
+  if [[ -z $ALL_INSTANCES ]]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "⚠️  INSUFFICIENT CLUSTER ADMIN RIGHTS DETECTED"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -149,7 +153,7 @@ if [[ -z $NAMESPACE || -z $CLUSTER ]]; then
   echo ""
 
   # Create array of instances
-  mapfile -t INSTANCES < <(echo "$AMQ_INSTANCES")
+  mapfile -t INSTANCES < <(echo "$ALL_INSTANCES")
 
   # Display menu with index
   count=1
@@ -209,7 +213,17 @@ if [[ $($KUBE_CLIENT get ns "$NAMESPACE" &>/dev/null) == "1" ]]; then
   error "Namespace $NAMESPACE not found! Exiting"
 fi
 
-if [[ -z $($KUBE_CLIENT get activemqartemises.broker.amq.io "$CLUSTER" -o name -n "$NAMESPACE" --ignore-not-found) ]]; then
+# Check if cluster exists (try both CRD types)
+CLUSTER_EXISTS=false
+if [[ -n $($KUBE_CLIENT get activemqartemises.broker.amq.io "$CLUSTER" -o name -n "$NAMESPACE" --ignore-not-found 2>/dev/null) ]]; then
+  CLUSTER_EXISTS=true
+  CLUSTER_TYPE="activemqartemis"
+elif [[ -n $($KUBE_CLIENT get brokers.broker.arkmq.org "$CLUSTER" -o name -n "$NAMESPACE" --ignore-not-found 2>/dev/null) ]]; then
+  CLUSTER_EXISTS=true
+  CLUSTER_TYPE="broker"
+fi
+
+if [[ $CLUSTER_EXISTS == false ]]; then
   error "AMQ Broker cluster $CLUSTER in namespace $NAMESPACE not found! Exiting"
 fi
 
@@ -253,7 +267,12 @@ echo ""
 get_masked_secrets() {
   echo "secrets"
   mkdir -p "$OUT_DIR"/reports/secrets
-  local resources && resources=$($KUBE_CLIENT get secrets -l ActiveMQArtemis="$CLUSTER" -o name -n "$NAMESPACE")
+  # Try both label types
+  local resources
+  resources=$($KUBE_CLIENT get secrets -l ActiveMQArtemis="$CLUSTER" -o name -n "$NAMESPACE" 2>/dev/null)
+  if [[ -z $resources ]]; then
+    resources=$($KUBE_CLIENT get secrets -l Broker="$CLUSTER" -o name -n "$NAMESPACE" 2>/dev/null)
+  fi
   for res in $resources; do
     local filename && filename=$(echo "$res" | cut -f 2 -d "/")
     echo "    $res"
@@ -270,7 +289,11 @@ get_namespaced_yamls() {
   local type="$1"
   mkdir -p "$OUT_DIR"/reports/"$type"
   local resources
+  # Try both label types
   resources=$($KUBE_CLIENT get "$type" -l ActiveMQArtemis="$CLUSTER" -o name -n "$NAMESPACE" 2>/dev/null ||true)
+  if [[ -z $resources ]]; then
+    resources=$($KUBE_CLIENT get "$type" -l Broker="$CLUSTER" -o name -n "$NAMESPACE" 2>/dev/null ||true)
+  fi
   echo "$type"
   if [[ -n $resources ]]; then
     for res in $resources; do
@@ -296,8 +319,15 @@ get_nonnamespaced_yamls() {
   mkdir -p "$OUT_DIR"/reports/"$type"
   local resources
   local error_output
+  # Try both label types
   error_output=$($KUBE_CLIENT get "$type" -l ActiveMQArtemis=$CLUSTER -o name 2>&1)
   local exit_code=$?
+
+  # If first label didn't work, try the second
+  if [[ $exit_code -ne 0 ]] || [[ -z $error_output ]]; then
+    error_output=$($KUBE_CLIENT get "$type" -l Broker=$CLUSTER -o name 2>&1)
+    exit_code=$?
+  fi
 
   if [[ $exit_code -ne 0 ]]; then
     if [[ "$error_output" == *"Forbidden"* ]] || [[ "$error_output" == *"forbidden"* ]]; then
@@ -398,6 +428,9 @@ AMQ_CRDS=(
   "activemqartemisaddresses.broker.amq.io"
   "activemqartemisscaledowns.broker.amq.io"
   "activemqartemissecurities.broker.amq.io"
+  "brokers.broker.arkmq.org"
+  "brokerapps.broker.arkmq.org"
+  "brokerservices.broker.arkmq.org"
 )
 CRDS=""
 for crd_name in "${AMQ_CRDS[@]}"; do
@@ -419,35 +452,49 @@ for CRD in $CRDS; do
   fi
 done
 
-# Collect extraMounts ConfigMaps and Secrets from ActiveMQArtemis CRs
+# Collect extraMounts ConfigMaps and Secrets from ActiveMQArtemis/Broker CRs
 echo "extramounts"
 mkdir -p "$OUT_DIR"/reports/extramounts/configmaps "$OUT_DIR"/reports/extramounts/secrets
-# Get the ActiveMQArtemis CR for this cluster
+
+# Try ActiveMQArtemis CR first
 ARTEMIS_CR=$($KUBE_CLIENT get activemqartemises.broker.amq.io "$CLUSTER" -n "$NAMESPACE" -o jsonpath='{.spec.deploymentPlan.extraMounts}' 2>/dev/null)
+EXTRA_CONFIGMAPS=""
+EXTRA_SECRETS=""
+
 if [[ -n $ARTEMIS_CR ]]; then
   # Extract ConfigMaps from extraMounts using jsonpath
   EXTRA_CONFIGMAPS=$($KUBE_CLIENT get activemqartemises.broker.amq.io "$CLUSTER" -n "$NAMESPACE" -o jsonpath='{.spec.deploymentPlan.extraMounts.configMaps[*]}' 2>/dev/null || true)
-  if [[ -n $EXTRA_CONFIGMAPS ]]; then
-    echo "    configmaps from extraMounts:"
-    for cm in $EXTRA_CONFIGMAPS; do
-      echo "        $cm"
-      $KUBE_CLIENT get configmap "$cm" -n "$NAMESPACE" -o yaml > "$OUT_DIR"/reports/extramounts/configmaps/"$cm".yaml 2>/dev/null || echo "        WARNING: ConfigMap $cm not found"
-    done
-  fi
-
   # Extract Secrets from extraMounts using jsonpath
   EXTRA_SECRETS=$($KUBE_CLIENT get activemqartemises.broker.amq.io "$CLUSTER" -n "$NAMESPACE" -o jsonpath='{.spec.deploymentPlan.extraMounts.secrets[*]}' 2>/dev/null || true)
-  if [[ -n $EXTRA_SECRETS ]]; then
-    echo "    secrets from extraMounts:"
-    for secret in $EXTRA_SECRETS; do
-      echo "        $secret"
-      if [[ "$SECRETS_OPT" == "all" ]]; then
-        $KUBE_CLIENT get secret "$secret" -n "$NAMESPACE" -o yaml > "$OUT_DIR"/reports/extramounts/secrets/"$secret".yaml 2>/dev/null || echo "        WARNING: Secret $secret not found"
-      elif [[ "$SECRETS_OPT" == "hidden" ]]; then
-        $KUBE_CLIENT get secret "$secret" -n "$NAMESPACE" -o yaml 2>/dev/null | sed "$SE" > "$OUT_DIR"/reports/extramounts/secrets/"$secret".yaml 2>/dev/null || echo "        WARNING: Secret $secret not found"
-      fi
-    done
+else
+  # Try Broker CR
+  BROKER_CR=$($KUBE_CLIENT get brokers.broker.arkmq.org "$CLUSTER" -n "$NAMESPACE" -o jsonpath='{.spec.deploymentPlan.extraMounts}' 2>/dev/null)
+  if [[ -n $BROKER_CR ]]; then
+    # Extract ConfigMaps from extraMounts using jsonpath
+    EXTRA_CONFIGMAPS=$($KUBE_CLIENT get brokers.broker.arkmq.org "$CLUSTER" -n "$NAMESPACE" -o jsonpath='{.spec.deploymentPlan.extraMounts.configMaps[*]}' 2>/dev/null || true)
+    # Extract Secrets from extraMounts using jsonpath
+    EXTRA_SECRETS=$($KUBE_CLIENT get brokers.broker.arkmq.org "$CLUSTER" -n "$NAMESPACE" -o jsonpath='{.spec.deploymentPlan.extraMounts.secrets[*]}' 2>/dev/null || true)
   fi
+fi
+
+if [[ -n $EXTRA_CONFIGMAPS ]]; then
+  echo "    configmaps from extraMounts:"
+  for cm in $EXTRA_CONFIGMAPS; do
+    echo "        $cm"
+    $KUBE_CLIENT get configmap "$cm" -n "$NAMESPACE" -o yaml > "$OUT_DIR"/reports/extramounts/configmaps/"$cm".yaml 2>/dev/null || echo "        WARNING: ConfigMap $cm not found"
+  done
+fi
+
+if [[ -n $EXTRA_SECRETS ]]; then
+  echo "    secrets from extraMounts:"
+  for secret in $EXTRA_SECRETS; do
+    echo "        $secret"
+    if [[ "$SECRETS_OPT" == "all" ]]; then
+      $KUBE_CLIENT get secret "$secret" -n "$NAMESPACE" -o yaml > "$OUT_DIR"/reports/extramounts/secrets/"$secret".yaml 2>/dev/null || echo "        WARNING: Secret $secret not found"
+    elif [[ "$SECRETS_OPT" == "hidden" ]]; then
+      $KUBE_CLIENT get secret "$secret" -n "$NAMESPACE" -o yaml 2>/dev/null | sed "$SE" > "$OUT_DIR"/reports/extramounts/secrets/"$secret".yaml 2>/dev/null || echo "        WARNING: Secret $secret not found"
+    fi
+  done
 fi
 
 echo "events"
@@ -459,7 +506,11 @@ fi
 
 echo "podlogs"
 mkdir -p "$OUT_DIR"/reports/configs
-PODS=$($KUBE_CLIENT get po -l ActiveMQArtemis="$CLUSTER" -o name -n "$NAMESPACE" | cut -d "/" -f 2)
+# Try both label types
+PODS=$($KUBE_CLIENT get po -l ActiveMQArtemis="$CLUSTER" -o name -n "$NAMESPACE" 2>/dev/null | cut -d "/" -f 2)
+if [[ -z $PODS ]]; then
+  PODS=$($KUBE_CLIENT get po -l Broker="$CLUSTER" -o name -n "$NAMESPACE" 2>/dev/null | cut -d "/" -f 2)
+fi
 readonly PODS
 for POD in $PODS; do
   echo "    $POD"
