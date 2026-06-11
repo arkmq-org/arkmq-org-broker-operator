@@ -24,6 +24,7 @@ import (
 
 	"github.com/RHsyseng/operator-utils/pkg/olm"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -281,6 +282,59 @@ var _ = Describe("Common Test", func() {
 
 			_, err := GetOperatorClientCertSecret(fakeClient)
 			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Describe("DetermineImageToUse dev.latest (0.0.0)", func() {
+		const devLatestKubeImage = "quay.io/arkmq-org/arkmq-org-broker-kubernetes@sha256:fakedevlatest"
+		const devLatestInitImage = "quay.io/arkmq-org/arkmq-org-broker-init@sha256:fakedevlatest"
+
+		AfterEach(func() {
+			os.Unsetenv("RELATED_IMAGE_BROKER_KUBERNETES_000")
+			os.Unsetenv("RELATED_IMAGE_BROKER_INIT_000")
+			version.ResetDefaults()
+		})
+
+		It("should use 0.0.0 images when RELATED_IMAGE_BROKER_*_000 are set and CR has no version", func() {
+			os.Setenv("RELATED_IMAGE_BROKER_KUBERNETES_000", devLatestKubeImage)
+			os.Setenv("RELATED_IMAGE_BROKER_INIT_000", devLatestInitImage)
+			version.ResetDefaults()
+
+			cr := &v1beta2.Broker{}
+
+			kubeImage := DetermineImageToUse(cr, BrokerImageKey)
+			Expect(kubeImage).To(Equal(devLatestKubeImage))
+
+			initImage := DetermineImageToUse(cr, InitImageKey)
+			Expect(initImage).To(Equal(devLatestInitImage))
+		})
+
+		It("should not use 0.0.0 images when CR pins an older version", func() {
+			os.Setenv("RELATED_IMAGE_BROKER_KUBERNETES_000", devLatestKubeImage)
+			version.ResetDefaults()
+
+			cr := &v1beta2.Broker{
+				Spec: v1beta2.BrokerSpec{
+					Version: "2.52.0",
+				},
+			}
+
+			kubeImage := DetermineImageToUse(cr, BrokerImageKey)
+			Expect(kubeImage).NotTo(Equal(devLatestKubeImage))
+		})
+
+		It("should not use 0.0.0 images when CR explicitly requests latest released version", func() {
+			os.Setenv("RELATED_IMAGE_BROKER_KUBERNETES_000", devLatestKubeImage)
+			version.ResetDefaults()
+
+			cr := &v1beta2.Broker{
+				Spec: v1beta2.BrokerSpec{
+					Version: "2.53.0",
+				},
+			}
+
+			kubeImage := DetermineImageToUse(cr, BrokerImageKey)
+			Expect(kubeImage).NotTo(Equal(devLatestKubeImage))
 		})
 	})
 })

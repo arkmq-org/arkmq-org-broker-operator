@@ -272,7 +272,7 @@ var _ = Describe("work queue", func() {
 									Containers: []corev1.Container{
 										{
 											Name:    name,
-											Image:   version.GetDefaultKubeImage(),
+											Image:   version.GetLatestKubeImage(),
 											Command: command,
 										},
 									},

@@ -219,8 +219,8 @@ var _ = Describe("artemis controller", Label("do"), func() {
 
 				By("install the operator again with custom related images")
 				setupEnvs := make(map[string]string)
-				setupEnvs["RELATED_IMAGE_BROKER_KUBERNETES_"+version.GetDefaultCompactVersion()] = "quay.io/arkmq-org/fake-broker:latest"
-				setupEnvs["RELATED_IMAGE_BROKER_INIT_"+version.GetDefaultCompactVersion()] = "quay.io/arkmq-org/fake-broker-init:latest"
+				setupEnvs["RELATED_IMAGE_BROKER_KUBERNETES_"+version.GetLatestCompactVersion()] = "quay.io/arkmq-org/fake-broker:latest"
+				setupEnvs["RELATED_IMAGE_BROKER_INIT_"+version.GetLatestCompactVersion()] = "quay.io/arkmq-org/fake-broker-init:latest"
 				installOperator(setupEnvs, defaultNamespace)
 
 				By("deploy a broker")
@@ -250,7 +250,7 @@ var _ = Describe("artemis controller", Label("do"), func() {
 
 					g.Expect(createdBrokerCr.Status.Version.Image).Should(ContainSubstring("fake"))
 					g.Expect(createdBrokerCr.Status.Version.InitImage).Should(ContainSubstring("fake"))
-					g.Expect(createdBrokerCr.Status.Version.BrokerVersion).Should(Equal(version.GetDefaultVersion()))
+					g.Expect(createdBrokerCr.Status.Version.BrokerVersion).Should(Equal(version.GetLatestVersion()))
 
 					g.Expect(createdBrokerCr.Status.Upgrade.MajorUpdates).Should(BeTrue())
 					g.Expect(createdBrokerCr.Status.Upgrade.MinorUpdates).Should(BeTrue())
