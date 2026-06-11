@@ -14,68 +14,87 @@ var (
 	BuildTimestamp = ""
 )
 
-const (
-	// LatestVersion product version supported
-	LatestVersion        = "2.53.0"
-	CompactLatestVersion = "2530"
-
-	LatestKubeImage = "quay.io/arkmq-org/arkmq-org-broker-kubernetes:artemis." + LatestVersion
-	LatestInitImage = "quay.io/arkmq-org/arkmq-org-broker-init:artemis." + LatestVersion
-)
+const latestVersion = "2.53.0"
 
 var (
 	defaultVersion        string
 	defaultCompactVersion string
-
-	defaultKubeImage string
-	defaultInitImage string
+	defaultKubeImage      string
+	defaultInitImage      string
 )
 
-func GetDefaultVersion() string {
+func IsDevLatestBuild() bool {
+	_, exists := os.LookupEnv("RELATED_IMAGE_BROKER_KUBERNETES_000")
+	return exists
+}
+
+func init() {
+	if IsDevLatestBuild() {
+		FullVersionFromCompactVersion["000"] = "0.0.0"
+		YacfgProfileVersionFromFullVersion["0.0.0"] = YacfgProfileVersionFromFullVersion[latestVersion]
+		SupportedActiveMQArtemisVersions = append(SupportedActiveMQArtemisVersions, "0.0.0")
+	}
+}
+
+func defaultImageVersion() string {
+	if IsDevLatestBuild() {
+		return "0.0.0"
+	}
+	return latestVersion
+}
+
+func GetLatestVersion() string {
 	if defaultVersion == "" {
 		defaultVersion = os.Getenv("DEFAULT_BROKER_VERSION")
 		if defaultVersion == "" {
-			defaultVersion = LatestVersion
+			defaultVersion = defaultImageVersion()
 		}
 	}
 	return defaultVersion
 }
 
-func GetDefaultCompactVersion() string {
+func GetLatestCompactVersion() string {
 	if defaultCompactVersion == "" {
 		defaultCompactVersion = os.Getenv("DEFAULT_BROKER_COMPACT_VERSION")
 		if defaultCompactVersion == "" {
-			defaultCompactVersion = CompactLatestVersion
+			defaultCompactVersion = CompactActiveMQArtemisVersion(defaultImageVersion())
 		}
 	}
 	return defaultCompactVersion
 }
 
-func GetDefaultKubeImage() string {
+func defaultImageTag() string {
+	if IsDevLatestBuild() {
+		return "dev.latest"
+	}
+	return "artemis." + GetLatestVersion()
+}
+
+func GetLatestKubeImage() string {
 	if defaultKubeImage == "" {
 		defaultKubeImage = os.Getenv("DEFAULT_BROKER_KUBE_IMAGE")
 		if defaultKubeImage == "" {
-			defaultKubeImage = LatestKubeImage
+			defaultKubeImage = "quay.io/arkmq-org/arkmq-org-broker-kubernetes:" + defaultImageTag()
 		}
 	}
 	return defaultKubeImage
 }
 
-func GetDefaultInitImage() string {
+func GetLatestInitImage() string {
 	if defaultInitImage == "" {
 		defaultInitImage = os.Getenv("DEFAULT_BROKER_INIT_IMAGE")
 		if defaultInitImage == "" {
-			defaultInitImage = LatestInitImage
+			defaultInitImage = "quay.io/arkmq-org/arkmq-org-broker-init:" + defaultImageTag()
 		}
 	}
 	return defaultInitImage
 }
 
-func DefaultImageName(archSpecificRelatedImageEnvVarName string) string {
+func LatestImageName(archSpecificRelatedImageEnvVarName string) string {
 	if strings.Contains(archSpecificRelatedImageEnvVarName, "_INIT_") {
-		return GetDefaultInitImage()
+		return GetLatestInitImage()
 	} else {
-		return GetDefaultKubeImage()
+		return GetLatestKubeImage()
 	}
 }
 

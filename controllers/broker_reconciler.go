@@ -117,7 +117,7 @@ var configCmd = "/opt/amq/bin/launch.sh"
 
 // default ApplyRule for address-settings
 var defApplyRule string = "merge_all"
-var yacfgProfileVersion = version.YacfgProfileVersionFromFullVersion[version.GetDefaultVersion()]
+var yacfgProfileVersion = version.YacfgProfileVersionFromFullVersion[version.GetLatestVersion()]
 
 type BrokerReconcilerImpl struct {
 	requestedResources map[reflect.Type]map[string]rtclient.Object

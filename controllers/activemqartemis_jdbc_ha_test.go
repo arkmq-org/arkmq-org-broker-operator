@@ -200,7 +200,7 @@ var _ = Describe("jdbc fast failover", func() {
 										"initContainers": []interface{}{
 											map[string]interface{}{
 												"name":  "download-jdbc-driver",
-												"image": version.GetDefaultInitImage(),
+												"image": version.GetLatestInitImage(),
 												"command": []interface{}{
 													"sh",
 													"-c",

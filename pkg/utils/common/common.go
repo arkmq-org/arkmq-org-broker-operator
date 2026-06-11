@@ -247,7 +247,8 @@ func ResolveBrokerVersion(versions []semver.Version, desired string) *semver.Ver
 	}
 	if desired == "" {
 		// latest
-		return &versions[len(versions)-1]
+		v := semver.MustParse(version.GetLatestVersion())
+		return &v
 	}
 
 	major, minor, patch := resolveVersionComponents(desired)
@@ -372,7 +373,7 @@ func DetermineImageToUse(customResource *v1beta2.Broker, imageTypeKey string) st
 
 	// Use latest images if archSpecificRelatedImageEnvVarName and genericRelatedImageEnvVarName are not found
 	if !found {
-		imageName = version.DefaultImageName(archSpecificRelatedImageEnvVarName)
+		imageName = version.LatestImageName(archSpecificRelatedImageEnvVarName)
 		log.V(1).Info("DetermineImageToUse - from default", "env", archSpecificRelatedImageEnvVarName, "imageName", imageName)
 	}
 

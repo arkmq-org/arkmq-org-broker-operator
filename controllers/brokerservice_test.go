@@ -148,7 +148,7 @@ var _ = Describe("broker-service-poc", func() {
 				}
 			})
 
-			brokerImage := version.LatestKubeImage
+			brokerImage := version.GetLatestKubeImage()
 			jvmRemoteDebug := false
 			crd := broker.BrokerService{
 				TypeMeta: metav1.TypeMeta{
@@ -657,7 +657,7 @@ var _ = Describe("broker-service-poc", func() {
 				}
 			})
 
-			brokerImage := version.LatestKubeImage
+			brokerImage := version.GetLatestKubeImage()
 			crd := broker.BrokerService{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "BrokerService",

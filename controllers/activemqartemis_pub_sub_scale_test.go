@@ -263,7 +263,7 @@ var _ = Describe("pub sub scale", func() {
 									Containers: []corev1.Container{
 										{
 											Name:    name,
-											Image:   version.GetDefaultKubeImage(),
+											Image:   version.GetLatestKubeImage(),
 											Command: command,
 										},
 									},
