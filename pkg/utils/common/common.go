@@ -246,8 +246,8 @@ func ResolveBrokerVersion(versions []semver.Version, desired string) *semver.Ver
 		return nil
 	}
 	if desired == "" {
-		// latest
-		return &versions[len(versions)-1]
+		v := semver.MustParse(version.GetDefaultVersion())
+		return &v
 	}
 
 	major, minor, patch := resolveVersionComponents(desired)

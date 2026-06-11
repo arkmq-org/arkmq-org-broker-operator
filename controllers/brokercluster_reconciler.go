@@ -3502,6 +3502,10 @@ func (reconciler *BrokerClusterReconcilerImpl) AssertBrokerImageVersion(cr *v1be
 
 	statusError := reconciler.CheckStatus(cr, client, func(brokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError {
 
+		if version.IsDevLatestBuild() {
+			reqLogger.V(1).Info("Skipping broker version alignment check on dev.latest build", "jolokiaVersion", brokerStatus.ServerStatus.Version)
+			return nil
+		}
 		if brokerStatus.ServerStatus.Version != resolvedFullVersion {
 			err := errors.Errorf("broker version non aligned on pod %s-%s, the detected version [%s] doesn't match the spec.version [%s] resolved as [%s]",
 				namer.CrToSS(cr.Name), jk.Ordinal, brokerStatus.ServerStatus.Version, cr.Spec.Version, resolvedFullVersion)
