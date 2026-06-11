@@ -189,8 +189,22 @@ jobs:
           podman login --username=${{ secrets.QUAY_USERNAME }} --password=${{ secrets.QUAY_PASSWORD }} quay.io
           podman manifest push $IMAGE_NAME:dev.latest docker://quay.io/${{ secrets.QUAY_NAMESPACE }}/$IMAGE_NAME:dev.latest
 
+      - name: Resolve dev.latest operand digests
+        if: ${{ github.event_name == 'push' }}
+        id: operand-digests
+        run: |
+          INIT_DIGEST="$(skopeo inspect docker://quay.io/arkmq-org/arkmq-org-broker-init:dev.latest | jq -r '.Digest')"
+          KUBE_DIGEST="$(skopeo inspect docker://quay.io/arkmq-org/arkmq-org-broker-kubernetes:dev.latest | jq -r '.Digest')"
+          echo "init=quay.io/arkmq-org/arkmq-org-broker-init@${INIT_DIGEST}" >> $GITHUB_OUTPUT
+          echo "kube=quay.io/arkmq-org/arkmq-org-broker-kubernetes@${KUBE_DIGEST}" >> $GITHUB_OUTPUT
+          echo "Resolved init: quay.io/arkmq-org/arkmq-org-broker-init@${INIT_DIGEST}"
+          echo "Resolved kube: quay.io/arkmq-org/arkmq-org-broker-kubernetes@${KUBE_DIGEST}"
+
       - name: Push dev-latest helm chart
         if: ${{ github.event_name == 'push' }}
+        env:
+          DEV_INIT_IMAGE: ${{ steps.operand-digests.outputs.init }}
+          DEV_KUBE_IMAGE: ${{ steps.operand-digests.outputs.kube }}
         run: |
           # Create a temporary copy for the dev chart
           cp -r helm-charts/arkmq-org-broker-operator helm-charts/arkmq-org-broker-operator-dev
@@ -199,16 +213,30 @@ jobs:
           yq -i '.appVersion="dev.latest"' helm-charts/arkmq-org-broker-operator-dev/Chart.yaml
           yq -i '.controllerManager.manager.image.tag="dev.latest"' helm-charts/arkmq-org-broker-operator-dev/values.yaml
           yq -i '.controllerManager.manager.image.pullPolicy="Always"' helm-charts/arkmq-org-broker-operator-dev/values.yaml
+          # Add dev.latest operand images as version 0.0.0 (digest-pinned)
+          DEV_INIT_IMAGE="$DEV_INIT_IMAGE" yq -i '.controllerManager.manager.relatedImages.brokerInit000.digest=env(DEV_INIT_IMAGE)' helm-charts/arkmq-org-broker-operator-dev/values.yaml
+          DEV_KUBE_IMAGE="$DEV_KUBE_IMAGE" yq -i '.controllerManager.manager.relatedImages.brokerKubernetes000.digest=env(DEV_KUBE_IMAGE)' helm-charts/arkmq-org-broker-operator-dev/values.yaml
+          sed -i '/- name: OPERATOR_NAME/i\        - name: DEFAULT_BROKER_VERSION\n          value: "0.0.0"\n        - name: DEFAULT_BROKER_COMPACT_VERSION\n          value: "000"\n        - name: DEFAULT_BROKER_KUBE_IMAGE\n          value: {{ quote .Values.controllerManager.manager.relatedImages.brokerKubernetes000.digest }}\n        - name: DEFAULT_BROKER_INIT_IMAGE\n          value: {{ quote .Values.controllerManager.manager.relatedImages.brokerInit000.digest }}\n        - name: RELATED_IMAGE_BROKER_INIT_000\n          value: {{ quote .Values.controllerManager.manager.relatedImages.brokerInit000.digest }}\n        - name: RELATED_IMAGE_BROKER_KUBERNETES_000\n          value: {{ quote .Values.controllerManager.manager.relatedImages.brokerKubernetes000.digest }}' helm-charts/arkmq-org-broker-operator-dev/templates/deployment.yaml
           # Package and push
           helm package helm-charts/arkmq-org-broker-operator-dev/
           helm registry login --username=${{ secrets.QUAY_USERNAME }} --password=${{ secrets.QUAY_PASSWORD }} quay.io
           helm push arkmq-org-broker-operator-0.0.0-dev.latest.tgz oci://quay.io/${{ secrets.QUAY_NAMESPACE }}/helm-charts
 
       - name: Build the bundle image
+        env:
+          DEV_INIT_IMAGE: ${{ steps.operand-digests.outputs.init }}
+          DEV_KUBE_IMAGE: ${{ steps.operand-digests.outputs.kube }}
         run: |
           IMG="${HOSTNAME}:5000/$IMAGE_NAME:dev.latest"
-          IMG="$IMG" yq -i '.metadata.annotations.containerImage=env(IMG)' bundle/manifests/arkmq-org-broker-operator.clusterserviceversion.yaml
-          IMG="$IMG" yq -i '.spec.install.spec.deployments[].spec.template.spec.containers[].image=env(IMG)' bundle/manifests/arkmq-org-broker-operator.clusterserviceversion.yaml
+          CSV=bundle/manifests/arkmq-org-broker-operator.clusterserviceversion.yaml
+          IMG="$IMG" yq -i '.metadata.annotations.containerImage=env(IMG)' "$CSV"
+          IMG="$IMG" yq -i '.spec.install.spec.deployments[].spec.template.spec.containers[].image=env(IMG)' "$CSV"
+          if [ -n "$DEV_INIT_IMAGE" ] && [ -n "$DEV_KUBE_IMAGE" ]; then
+            # Add dev.latest overrides to bundle CSV
+            yq -i '(.spec.install.spec.deployments[].spec.template.spec.containers[].env) += [{"name": "DEFAULT_BROKER_VERSION", "value": "0.0.0"}, {"name": "DEFAULT_BROKER_COMPACT_VERSION", "value": "000"}, {"name": "DEFAULT_BROKER_KUBE_IMAGE", "value": env(DEV_KUBE_IMAGE)}, {"name": "DEFAULT_BROKER_INIT_IMAGE", "value": env(DEV_INIT_IMAGE)}, {"name": "RELATED_IMAGE_BROKER_INIT_000", "value": env(DEV_INIT_IMAGE)}, {"name": "RELATED_IMAGE_BROKER_KUBERNETES_000", "value": env(DEV_KUBE_IMAGE)}]' "$CSV"
+            # Add dev.latest overrides to kustomize overlay
+            yq -i '(.spec.template.spec.containers[].env) += [{"name": "DEFAULT_BROKER_VERSION", "value": "0.0.0"}, {"name": "DEFAULT_BROKER_COMPACT_VERSION", "value": "000"}, {"name": "DEFAULT_BROKER_KUBE_IMAGE", "value": env(DEV_KUBE_IMAGE)}, {"name": "DEFAULT_BROKER_INIT_IMAGE", "value": env(DEV_INIT_IMAGE)}, {"name": "RELATED_IMAGE_BROKER_INIT_000", "value": env(DEV_INIT_IMAGE)}, {"name": "RELATED_IMAGE_BROKER_KUBERNETES_000", "value": env(DEV_KUBE_IMAGE)}]' config/manager/manager_related_images.yaml
+          fi
           podman build --file bundle.Dockerfile --label git-sha=$GITHUB_SHA --tag $IMAGE_NAME-bundle:dev.latest .
 
       - name: Check the bundle image
