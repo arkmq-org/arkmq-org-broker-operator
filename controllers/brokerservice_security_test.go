@@ -698,8 +698,8 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 	assert.NoError(t, err, "control-plane-override secret should be created")
 
 	// Verify Prometheus config exists
-	prometheusYaml, ok := overrideSecret.Data["_prometheus_exporter.yaml"]
-	assert.True(t, ok, "should have _prometheus_exporter.yaml key")
+	prometheusYaml, ok := overrideSecret.Data[PrometheusConfigFileName]
+	assert.True(t, ok, "should have prometheus key")
 	assert.NotEmpty(t, prometheusYaml)
 
 	prometheusConfig := string(prometheusYaml)

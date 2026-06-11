@@ -1049,7 +1049,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 
 	// Generate prometheus exporter yaml with queue-level metrics
 	prometheusConfig := reconciler.generatePrometheusConfig(consumerAddresses)
-	desired.Data["_prometheus_exporter.yaml"] = prometheusConfig
+	desired.Data[PrometheusConfigFileName] = prometheusConfig
 
 	reconciler.TrackDesired(desired)
 	return nil

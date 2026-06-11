@@ -98,6 +98,8 @@ const (
 	javaOptsEnvVarName       = "JAVA_OPTS"
 	jdkJavaOptionsEnvVarName = "JDK_JAVA_OPTIONS"
 
+	PrometheusConfigFileName = "_prometheus_exporter_config"
+
 	ScaleDownConfigTrigger        = "HAPolicyConfiguration.scaleDownConfiguration.enabled=false"
 	ScaleDownConfigTriggerOn      = "HAPolicyConfiguration.scaleDownConfiguration.enabled=true"
 	OrdinalPropertiesSuffix       = "for_ordinal_"
@@ -2386,7 +2388,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		fmt.Fprintf(prometheus_config, "    name: artemis_total_produced_message_count\n")
 		fmt.Fprintf(prometheus_config, "    type: COUNTER\n")
 
-		brokerPropertiesMapData["_prometheus_exporter.yaml"] = prometheus_config.Bytes()
+		brokerPropertiesMapData[PrometheusConfigFileName] = prometheus_config.Bytes()
 
 		// Apply control plane overrides if they exist
 		if err := applyControlPlaneOverrides(customResource, client, brokerPropertiesMapData); err != nil {
@@ -2403,7 +2405,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, fmt.Sprintf("-javaagent:/opt/agents/jolokia.jar=host=$HOSTNAME,config=%s/_jolokia.config", mountPathRoot))
 
 		// install prometheus agent
-		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, fmt.Sprintf("-javaagent:/opt/agents/prometheus.jar=$HOSTNAME:8888:%s/_prometheus_exporter.yaml", mountPathRoot))
+		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, fmt.Sprintf("-javaagent:/opt/agents/prometheus.jar=$HOSTNAME:8888:%s/%s", mountPathRoot, PrometheusConfigFileName))
 
 		// non boot jar isolation classpath
 		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, "-classpath /opt/amq/lib/*:/opt/amq/lib/extra/*")

@@ -939,8 +939,8 @@ func TestBrokerServiceReconcilePrometheusOverrideSecret(t *testing.T) {
 	assert.NoError(t, err, "control-plane-override secret should exist")
 
 	// Verify prometheus config exists in the secret
-	prometheusYaml, ok := overrideSecret.Data["_prometheus_exporter.yaml"]
-	assert.True(t, ok, "should have _prometheus_exporter.yaml key")
+	prometheusYaml, ok := overrideSecret.Data[PrometheusConfigFileName]
+	assert.True(t, ok, "should have prometheus key")
 	assert.NotEmpty(t, prometheusYaml)
 
 	prometheusConfig := string(prometheusYaml)
@@ -1029,8 +1029,8 @@ func TestBrokerServiceReconcilePrometheusOverrideNoApps(t *testing.T) {
 	assert.NoError(t, err, "control-plane-override secret should exist even without apps")
 
 	// Verify prometheus config exists with queue-level metrics
-	prometheusYaml, ok := overrideSecret.Data["_prometheus_exporter.yaml"]
-	assert.True(t, ok, "should have _prometheus_exporter.yaml key")
+	prometheusYaml, ok := overrideSecret.Data[PrometheusConfigFileName]
+	assert.True(t, ok, "should have prometheus key")
 	assert.NotEmpty(t, prometheusYaml)
 
 	prometheusConfig := string(prometheusYaml)

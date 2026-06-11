@@ -768,8 +768,8 @@ var _ = Describe("broker-service-poc", func() {
 				g.Expect(k8sClient.Get(ctx, overrideSecretKey, overrideSecret)).Should(Succeed())
 
 				// Verify the secret contains the prometheus exporter config
-				prometheusYaml, ok := overrideSecret.Data["_prometheus_exporter.yaml"]
-				g.Expect(ok).Should(BeTrue(), "should have _prometheus_exporter.yaml key")
+				prometheusYaml, ok := overrideSecret.Data[PrometheusConfigFileName]
+				g.Expect(ok).Should(BeTrue(), "should have prometheus key")
 
 				prometheusConfig := string(prometheusYaml)
 				if verbose {
