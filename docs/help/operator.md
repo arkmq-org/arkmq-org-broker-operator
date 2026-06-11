@@ -1453,6 +1453,72 @@ spec:
 
 Note: If you are not using Jolokia (`jolokiaAgentEnabled: false`), you can omit the `jolokia-config` volume and its corresponding volume mount.
 
+## Exposing acceptors and the console
+
+When you set `expose: true` on an acceptor or on the broker console, the
+operator creates an external networking resource so the endpoint is reachable
+from outside the cluster. The kind of resource is controlled by `exposeMode`,
+which accepts three values:
+
+| `exposeMode` | Resource created                     | When to use it                                                       |
+|--------------|--------------------------------------|----------------------------------------------------------------------|
+| `route`      | OpenShift `Route`                    | OpenShift clusters (default on OpenShift).                           |
+| `ingress`    | Kubernetes `Ingress` (NGINX-style)   | Plain Kubernetes with an ingress controller (default on Kubernetes). |
+| `gateway`    | Gateway API `HTTPRoute` / `TLSRoute` | Clusters using the Gateway API; requires the gateway-api CRDs.       |
+
+In `gateway` mode the route kind depends on `sslEnabled`: an SSL-enabled
+acceptor (or console) gets a `TLSRoute` for passthrough, a plain acceptor
+gets an `HTTPRoute`. The route is attached to an existing `Gateway` via the
+`gateway.parentRef` block.
+
+```yaml
+apiVersion: broker.arkmq.org/v1beta2
+kind: Broker
+metadata:
+  name: artemis-broker
+spec:
+  ingressDomain: apps.example.com
+  console:
+    expose: true
+    sslEnabled: true
+    sslSecret: console-cert-secret
+    exposeMode: gateway
+    gateway:
+      parentRef:
+        name: shared-gateway
+        namespace: gateway-system
+  acceptors:
+    - name: amqp-ssl
+      protocols: amqp
+      port: 5671
+      sslEnabled: true
+      sslSecret: acceptor-cert-secret
+      expose: true
+      exposeMode: gateway
+      gateway:
+        parentRef:
+          name: shared-gateway
+          namespace: gateway-system
+    - name: amqp-plain
+      protocols: amqp
+      port: 5672
+      expose: true
+      exposeMode: gateway
+      gateway:
+        parentRef:
+          name: shared-gateway
+          namespace: gateway-system
+```
+
+The example produces one `TLSRoute` (for the SSL-enabled acceptor and the
+console) and one `HTTPRoute` (for the plain acceptor), all attached to the
+`shared-gateway` Gateway in the `gateway-system` namespace.
+
+`gateway.parentRef.namespace` is optional. If omitted, the operator assumes
+the Gateway lives in the same namespace as the Broker CR. Hostnames follow
+the same template mechanism as Ingress and Route (see
+[Resolve your cluster domain](hostname_resolution.md)).
+
 ## Configuring Jolokia Access
 
 The operator uses jolokia endpoints to get broker status and also create queue/address resources using the address CRs.

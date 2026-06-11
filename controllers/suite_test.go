@@ -55,9 +55,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
+	crconfig "sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	gatewayv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 
 	brokerv1alpha1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1alpha1"
 	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta1"
@@ -489,8 +491,12 @@ func createControllerManager(disableMetrics bool, watchNamespace string) {
 
 	managerCtx, managerCancel = context.WithCancel(ctx)
 
+	skipNameValidation := true
 	mgrOptions := ctrl.Options{
 		Scheme: scheme.Scheme,
+		Controller: crconfig.Controller{
+			SkipNameValidation: &skipNameValidation,
+		},
 	}
 
 	isLocal, watchList := common.ResolveWatchNamespaceForManager(defaultNamespace, watchNamespace)
@@ -863,6 +869,9 @@ func setUpK8sClient() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = brokerv1beta2.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = gatewayv1alpha2.Install(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:scheme

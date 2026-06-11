@@ -84,7 +84,7 @@ endif
 # Image URL to use all building/pushing image targets
 IMG ?= $(OPERATOR_IMAGE_REPO):$(OPERATOR_VERSION)
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.26.0
+ENVTEST_K8S_VERSION = 1.36.0
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -134,8 +134,8 @@ manifests: controller-gen
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
-	sed -i 's~^LABEL version=.*~LABEL version="$(VERSION)"~g' Dockerfile
-	sed -i 's~\tVersion = ".*"~\tVersion = "$(MANAGER_VERSION)"~' version/version.go
+	sed -i.bak 's~^LABEL version=.*~LABEL version="$(VERSION)"~g' Dockerfile && rm Dockerfile.bak
+	sed -i.bak 's~\tVersion = ".*"~\tVersion = "$(MANAGER_VERSION)"~' version/version.go && rm version/version.go.bak
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -299,7 +299,7 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
-	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.20
+	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.24
 
 .PHONY: bundle
 bundle: manifests operator-sdk kustomize ## Generate bundle manifests and metadata, then validate generated files.
