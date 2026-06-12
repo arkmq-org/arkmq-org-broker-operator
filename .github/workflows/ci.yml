@@ -131,7 +131,7 @@ jobs:
       
       - name: Install OLM
         run: |
-          ./bin/operator-sdk olm install
+          ./bin/operator-sdk olm install --version 0.32.0
           minikube kubectl -- wait pod -l app=catalog-operator --for=condition=Ready --namespace=olm --timeout=2m
           minikube kubectl -- wait pod -l app=olm-operator --for=condition=Ready --namespace=olm --timeout=2m
           minikube kubectl -- wait --for=condition=Established crd/catalogsources.operators.coreos.com --timeout=2m
