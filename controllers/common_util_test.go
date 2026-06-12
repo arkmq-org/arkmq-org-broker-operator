@@ -504,14 +504,24 @@ func RunCommandInPodWithNamespace(podName string, podNamespace string, container
 	var consumerCapturedOut bytes.Buffer
 	var consumerCapturedErr bytes.Buffer
 
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+	execCtx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
+
+	err = exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
 		Stdin:  os.Stdin,
 		Stdout: &consumerCapturedOut,
 		Stderr: &consumerCapturedErr,
 		Tty:    false,
 	})
 	if err != nil {
-		return nil, err
+		errMsg := err.Error()
+		if consumerCapturedErr.Len() > 0 {
+			errMsg += ", stderr: " + consumerCapturedErr.String()
+		}
+		if consumerCapturedOut.Len() > 0 {
+			errMsg += ", stdout: " + consumerCapturedOut.String()
+		}
+		return nil, fmt.Errorf("%s", errMsg)
 	}
 
 	//try get some content if any
@@ -607,7 +617,10 @@ func ExecOnPod(podWithOrdinal string, brokerName string, namespace string, comma
 	var errBuffer bytes.Buffer
 
 	By("executing " + fmt.Sprintf(" command: %v", command))
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	err = exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
 		Stdin:  os.Stdin,
 		Stdout: &outPutbuffer,
 		Stderr: &errBuffer,

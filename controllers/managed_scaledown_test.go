@@ -89,6 +89,7 @@ rootLogger = INFO, STDOUT`
 				brokerCrd.Spec.DeploymentPlan.Size = ptr.To(int32(3))
 				brokerCrd.Spec.DeploymentPlan.PersistenceEnabled = true
 				brokerCrd.Spec.BrokerProperties = []string{
+					"addressesSettings.#.diskFullMessagePolicy=FAIL",
 					"HAPolicyConfiguration=PRIMARY_ONLY",
 					// use the cluster discovery group for scaledown
 					//"HAPolicyConfiguration.scaleDownConfiguration.discoveryGroup=my-discovery-group",
@@ -133,7 +134,7 @@ rootLogger = INFO, STDOUT`
 				By("Sending a message to 1")
 				Eventually(func(g Gomega) {
 
-					sendCmd := []string{"amq-broker/bin/artemis", "producer", "--user", "Jay", "--password", "activemq", "--url", "tcp://" + podWithOrdinal1 + ":61616", "--message-count", "1", "--destination", "queue://DLQ", "--verbose"}
+					sendCmd := []string{"amq-broker/bin/artemis", "producer", "--user", "Jay", "--password", "activemq", "--url", "tcp://" + podWithOrdinal1 + ":61616?useTopologyForLoadBalancing=false", "--message-count", "1", "--destination", "queue://DLQ", "--verbose"}
 					content, err := RunCommandInPod(podWithOrdinal1, brokerName+"-container", sendCmd)
 					g.Expect(err).To(BeNil())
 					g.Expect(*content).Should(ContainSubstring("Produced: 1 messages"))
@@ -143,7 +144,7 @@ rootLogger = INFO, STDOUT`
 				By("Scaling down to ss-0")
 				Eventually(func(g Gomega) {
 
-					getPersistedVersionedCrd(brokerCrd.ObjectMeta.Name, defaultNamespace, createdBrokerCrd)
+					g.Expect(getPersistedVersionedCrd(brokerCrd.ObjectMeta.Name, defaultNamespace, createdBrokerCrd)).Should(BeTrue())
 					createdBrokerCrd.Spec.DeploymentPlan.Size = common.Int32ToPtr(1)
 					g.Expect(k8sClient.Update(ctx, createdBrokerCrd)).Should(Succeed())
 
@@ -151,7 +152,7 @@ rootLogger = INFO, STDOUT`
 
 				By("Checking presence of scale down condition")
 				Eventually(func(g Gomega) {
-					getPersistedVersionedCrd(brokerCrd.ObjectMeta.Name, defaultNamespace, createdBrokerCrd)
+					g.Expect(getPersistedVersionedCrd(brokerCrd.ObjectMeta.Name, defaultNamespace, createdBrokerCrd)).Should(BeTrue())
 
 					// this is blocked by the need for config reload and restart * 2
 					if verbose {
@@ -164,6 +165,13 @@ rootLogger = INFO, STDOUT`
 
 				By("Checking SS replica count scaled down eventually")
 				Eventually(func(g Gomega) {
+
+					g.Expect(getPersistedVersionedCrd(brokerCrd.ObjectMeta.Name, defaultNamespace, createdBrokerCrd)).Should(BeTrue())
+
+					if verbose {
+						fmt.Printf("\nWait for SS count, CR Size %d: STATUS: %v\n", *createdBrokerCrd.Spec.DeploymentPlan.Size, createdBrokerCrd.Status)
+					}
+
 					key := types.NamespacedName{Name: namer.CrToSS(createdBrokerCrd.Name), Namespace: defaultNamespace}
 					sfsFound := &appsv1.StatefulSet{}
 
