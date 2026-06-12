@@ -6,9 +6,9 @@ env:
 
 on:
   push:
-    branches: [ main ]
+    branches: [ 2.x ]
   pull_request:
-    branches: [ main ]
+    branches: [ 2.x ]
     types: [opened, edited, synchronize, reopened]
   schedule:
     - cron:  '0 3 * * *'
