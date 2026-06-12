@@ -14,4 +14,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: quay.io/arkmq-org/activemq-artemis-operator
-  newTag: 2.1.7
+  newTag: 2.2.0

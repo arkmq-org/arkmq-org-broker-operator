@@ -72,4 +72,4 @@ ENTRYPOINT ["${USER_HOME}/bin/entrypoint"]
 LABEL name="arkmq-org/activemq-artemis-operator"
 LABEL description="ArkMQ Broker Operator"
 LABEL maintainer="ArkMQ <info@arkmq.org>"
-LABEL version="2.1.7"
+LABEL version="2.2.0"

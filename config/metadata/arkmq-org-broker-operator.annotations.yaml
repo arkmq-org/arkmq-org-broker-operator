@@ -2,5 +2,5 @@ annotations:
   name: "arkmq-org/activemq-artemis-operator-bundle"
   description: "ArkMQ Broker Operator Bundle"
   maintainer: "ArkMQ <info@arkmq.org>"
-  version: "2.1.7"
+  version: "2.2.0"
   com.redhat.openshift.versions: "v4.12"

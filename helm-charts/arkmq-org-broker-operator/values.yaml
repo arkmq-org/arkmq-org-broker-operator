@@ -16,7 +16,7 @@ controllerManager:
         type: RuntimeDefault
     image:
       repository: quay.io/arkmq-org/activemq-artemis-operator
-      tag: 2.1.7
+      tag: 2.2.0
       pullPolicy: null
     resources:
       limits:
