@@ -141,9 +141,9 @@ resources:
   controller: true
   domain: arkmq.org
   group: broker
-  kind: Broker
+  kind: BrokerCluster
   path: github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2
-  plural: brokers
+  plural: brokerclusters
   version: v1beta2
 - api:
     crdVersion: v1

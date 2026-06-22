@@ -232,7 +232,7 @@ var _ = Describe("broker-service-poc", func() {
 
 			By("checking broker cr status insync - should be in the service if important to user")
 			brokerKey := types.NamespacedName{Name: crd.Name, Namespace: crd.Namespace}
-			brokerCrd := &broker.Broker{}
+			brokerCrd := &broker.BrokerCluster{}
 
 			var appPropsRv = ""
 			Eventually(func(g Gomega) {
@@ -786,7 +786,7 @@ var _ = Describe("broker-service-poc", func() {
 
 			By("verifying broker picks up the override and applies it")
 			brokerKey := types.NamespacedName{Name: crd.Name, Namespace: crd.Namespace}
-			brokerCrd := &broker.Broker{}
+			brokerCrd := &broker.BrokerCluster{}
 
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, brokerKey, brokerCrd)).Should(Succeed())

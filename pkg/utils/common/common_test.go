@@ -54,8 +54,8 @@ var _ = Describe("Common Test", func() {
 
 	It("getDeploymentCondition", func() {
 
-		cr := &v1beta2.Broker{
-			Spec: v1beta2.BrokerSpec{
+		cr := &v1beta2.BrokerCluster{
+			Spec: v1beta2.BrokerClusterSpec{
 				DeploymentPlan: v1beta2.DeploymentPlanType{
 					Size: Int32ToPtr(2),
 				},

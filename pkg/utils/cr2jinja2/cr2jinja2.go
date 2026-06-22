@@ -145,7 +145,7 @@ func MakeBrokerCfgOverrides(customResource interface{}, envVar *string, output *
 					MakeBrokerCfgOverridesForV1beta1(v1beta1Res, envVar, output, &sb, specials)
 					processed = true
 				} else {
-					v1beta2Res, ok := customResource.(*v1beta2.Broker)
+					v1beta2Res, ok := customResource.(*v1beta2.BrokerCluster)
 					if ok {
 						MakeBrokerCfgOverridesForV1beta2(v1beta2Res, envVar, output, &sb, specials)
 						processed = true
@@ -175,7 +175,7 @@ func MakeBrokerCfgOverrides(customResource interface{}, envVar *string, output *
 	return result, specials
 }
 
-func MakeBrokerCfgOverridesForV1beta2(customResource *v1beta2.Broker, envVar *string, output *string, sb *strings.Builder, specials map[string]string) {
+func MakeBrokerCfgOverridesForV1beta2(customResource *v1beta2.BrokerCluster, envVar *string, output *string, sb *strings.Builder, specials map[string]string) {
 	var addressSettings *[]v1beta2.AddressSettingType = &customResource.Spec.AddressSettings.AddressSetting
 
 	processAddressSettingsV1beta2(sb, addressSettings, specials)

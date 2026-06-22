@@ -30,13 +30,13 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.5
-  name: brokers.broker.arkmq.org
+  name: brokerclusters.broker.arkmq.org
 spec:
   group: broker.arkmq.org
   names:
-    kind: Broker
+    kind: BrokerCluster
     listKind: BrokerList
-    plural: brokers
+    plural: brokerclusters
     shortNames:
     - b
     singular: broker

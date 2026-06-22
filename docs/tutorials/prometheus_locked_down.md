@@ -313,7 +313,7 @@ Deploying operator to watch single namespace
 Client Version: 4.18.5
 Kustomize Version: v5.4.2
 Kubernetes Version: v1.33.1
-customresourcedefinition.apiextensions.k8s.io/brokers.broker.arkmq.org created
+customresourcedefinition.apiextensions.k8s.io/brokerclusters.broker.arkmq.org created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisaddresses.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisscaledowns.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemissecurities.broker.amq.io created
@@ -788,7 +788,7 @@ For detailed explanation of broker properties, see the [broker configuration doc
 ```{"stage":"deploy", "runtime":"bash", "label":"deploy broker cr"}
 kubectl apply -f - <<'EOF'
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: artemis-broker
   namespace: locked-down-broker
@@ -830,7 +830,7 @@ broker.broker.arkmq.org/artemis-broker created
 Wait for the broker to be ready.
 
 ```{"stage":"deploy"}
-kubectl wait Broker artemis-broker --for=condition=Ready --namespace=locked-down-broker --timeout=300s
+kubectl wait BrokerCluster artemis-broker --for=condition=Ready --namespace=locked-down-broker --timeout=300s
 ```
 ```shell markdown_runner
 broker.broker.arkmq.org/artemis-broker condition met
@@ -1592,10 +1592,10 @@ queue, and the other will consume them. They are configured to use the
 `messaging-client-cert` to authenticate.
 
 Note that the image version used by the jobs should match the one deployed by
-the operator. We can get it from the `Broker` CR status.
+the operator. We can get it from the `BrokerCluster` CR status.
 
 ```{"stage":"test_setup", "runtime":"bash", "label":"get latest broker version"}
-export BROKER_VERSION=$(kubectl get Broker artemis-broker --namespace=locked-down-broker -o json | jq .status.version.brokerVersion -r)
+export BROKER_VERSION=$(kubectl get BrokerCluster artemis-broker --namespace=locked-down-broker -o json | jq .status.version.brokerVersion -r)
 echo broker version: $BROKER_VERSION
 ```
 ```shell markdown_runner
@@ -1893,7 +1893,7 @@ kubectl top pods -n locked-down-broker
 kubectl get events -n locked-down-broker --sort-by='.lastTimestamp'
 
 # Export configurations for analysis
-kubectl get broker artemis-broker -n locked-down-broker -o yaml
+kubectl get brokercluster artemis-broker -n locked-down-broker -o yaml
 kubectl get prometheus artemis-prometheus -n locked-down-broker -o yaml
 ```
 

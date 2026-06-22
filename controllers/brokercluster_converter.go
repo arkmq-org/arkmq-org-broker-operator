@@ -6,51 +6,51 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ConvertArtemisToBroker converts a v1beta1.ActiveMQArtemis to a v1beta2.Broker
+// ConvertArtemisToBrokerCluster converts a v1beta1.ActiveMQArtemis to a v1beta2.BrokerCluster
 // using static field mapping for compile-time safety.
 // The ActiveMQArtemis GVK is preserved on the converted object so that owner
 // references on child resources (StatefulSets, Services, etc.) correctly
 // point back to the ActiveMQArtemis CR.
-func ConvertArtemisToBroker(artemis *brokerv1beta1.ActiveMQArtemis) (*v1beta2.Broker, error) {
-	broker := &v1beta2.Broker{
+func ConvertArtemisToBrokerCluster(artemis *brokerv1beta1.ActiveMQArtemis) (*v1beta2.BrokerCluster, error) {
+	broker := &v1beta2.BrokerCluster{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: brokerv1beta1.GroupVersion.String(),
 			Kind:       "ActiveMQArtemis",
 		},
 		ObjectMeta: *artemis.ObjectMeta.DeepCopy(),
-		Spec:       convertSpecToBroker(&artemis.Spec),
-		Status:     convertStatusToBroker(&artemis.Status),
+		Spec:       convertSpecToBrokerCluster(&artemis.Spec),
+		Status:     convertStatusToBrokerCluster(&artemis.Status),
 	}
 	return broker, nil
 }
 
-// ConvertBrokerStatusToArtemis copies the reconciled status from a Broker
+// ConvertBrokerClusterStatusToArtemis copies the reconciled status from a BrokerCluster
 // back to the original ActiveMQArtemis CR for persistence.
-func ConvertBrokerStatusToArtemis(broker *v1beta2.Broker, artemis *brokerv1beta1.ActiveMQArtemis) error {
+func ConvertBrokerClusterStatusToArtemis(broker *v1beta2.BrokerCluster, artemis *brokerv1beta1.ActiveMQArtemis) error {
 	artemis.Status = convertStatusToArtemis(&broker.Status)
 	return nil
 }
 
-func convertSpecToBroker(s *brokerv1beta1.ActiveMQArtemisSpec) v1beta2.BrokerSpec {
-	return v1beta2.BrokerSpec{
+func convertSpecToBrokerCluster(s *brokerv1beta1.ActiveMQArtemisSpec) v1beta2.BrokerClusterSpec {
+	return v1beta2.BrokerClusterSpec{
 		AdminUser:         s.AdminUser,
 		AdminPassword:     s.AdminPassword,
-		DeploymentPlan:    convertDeploymentPlanToBroker(&s.DeploymentPlan),
-		Acceptors:         convertAcceptorsToBroker(s.Acceptors),
-		Connectors:        convertConnectorsToBroker(s.Connectors),
-		Console:           convertConsoleToBroker(&s.Console),
+		DeploymentPlan:    convertDeploymentPlanToBrokerCluster(&s.DeploymentPlan),
+		Acceptors:         convertAcceptorsToBrokerCluster(s.Acceptors),
+		Connectors:        convertConnectorsToBrokerCluster(s.Connectors),
+		Console:           convertConsoleToBrokerCluster(&s.Console),
 		Version:           s.Version,
-		Upgrades:          convertUpgradesToBroker(&s.Upgrades),
-		AddressSettings:   convertAddressSettingsToBroker(&s.AddressSettings),
+		Upgrades:          convertUpgradesToBrokerCluster(&s.Upgrades),
+		AddressSettings:   convertAddressSettingsToBrokerCluster(&s.AddressSettings),
 		BrokerProperties:  s.BrokerProperties,
 		Env:               s.Env,
 		IngressDomain:     s.IngressDomain,
-		ResourceTemplates: convertResourceTemplatesToBroker(s.ResourceTemplates),
+		ResourceTemplates: convertResourceTemplatesToBrokerCluster(s.ResourceTemplates),
 		Restricted:        s.Restricted,
 	}
 }
 
-func convertAddressSettingsToBroker(as *brokerv1beta1.AddressSettingsType) v1beta2.AddressSettingsType {
+func convertAddressSettingsToBrokerCluster(as *brokerv1beta1.AddressSettingsType) v1beta2.AddressSettingsType {
 	result := v1beta2.AddressSettingsType{
 		ApplyRule: as.ApplyRule,
 	}
@@ -129,7 +129,7 @@ func convertAddressSettingsToBroker(as *brokerv1beta1.AddressSettingsType) v1bet
 	return result
 }
 
-func convertDeploymentPlanToBroker(d *brokerv1beta1.DeploymentPlanType) v1beta2.DeploymentPlanType {
+func convertDeploymentPlanToBrokerCluster(d *brokerv1beta1.DeploymentPlanType) v1beta2.DeploymentPlanType {
 	return v1beta2.DeploymentPlanType{
 		Image:                     d.Image,
 		InitImage:                 d.InitImage,
@@ -140,13 +140,13 @@ func convertDeploymentPlanToBroker(d *brokerv1beta1.DeploymentPlanType) v1beta2.
 		JournalType:               d.JournalType,
 		MessageMigration:          d.MessageMigration,
 		Resources:                 d.Resources,
-		Storage:                   convertStorageToBroker(&d.Storage),
+		Storage:                   convertStorageToBrokerCluster(&d.Storage),
 		TopologySpreadConstraints: d.TopologySpreadConstraints,
 		JolokiaAgentEnabled:       d.JolokiaAgentEnabled,
 		ManagementRBACEnabled:     d.ManagementRBACEnabled,
-		ExtraMounts:               convertExtraMountsToBroker(&d.ExtraMounts),
+		ExtraMounts:               convertExtraMountsToBrokerCluster(&d.ExtraMounts),
 		Clustered:                 d.Clustered,
-		PodSecurity:               convertPodSecurityToBroker(&d.PodSecurity),
+		PodSecurity:               convertPodSecurityToBrokerCluster(&d.PodSecurity),
 		StartupProbe:              d.StartupProbe,
 		LivenessProbe:             d.LivenessProbe,
 		ReadinessProbe:            d.ReadinessProbe,
@@ -154,7 +154,7 @@ func convertDeploymentPlanToBroker(d *brokerv1beta1.DeploymentPlanType) v1beta2.
 		Tolerations:               d.Tolerations,
 		Labels:                    d.Labels,
 		NodeSelector:              d.NodeSelector,
-		Affinity:                  convertAffinityToBroker(&d.Affinity),
+		Affinity:                  convertAffinityToBrokerCluster(&d.Affinity),
 		PodSecurityContext:        d.PodSecurityContext,
 		Annotations:               d.Annotations,
 		PodDisruptionBudget:       d.PodDisruptionBudget,
@@ -162,11 +162,11 @@ func convertDeploymentPlanToBroker(d *brokerv1beta1.DeploymentPlanType) v1beta2.
 		ContainerSecurityContext:  d.ContainerSecurityContext,
 		ExtraVolumes:              d.ExtraVolumes,
 		ExtraVolumeMounts:         d.ExtraVolumeMounts,
-		ExtraVolumeClaimTemplates: convertVolumeClaimTemplatesToBroker(d.ExtraVolumeClaimTemplates),
+		ExtraVolumeClaimTemplates: convertVolumeClaimTemplatesToBrokerCluster(d.ExtraVolumeClaimTemplates),
 	}
 }
 
-func convertVolumeClaimTemplatesToBroker(templates []brokerv1beta1.VolumeClaimTemplate) []v1beta2.VolumeClaimTemplate {
+func convertVolumeClaimTemplatesToBrokerCluster(templates []brokerv1beta1.VolumeClaimTemplate) []v1beta2.VolumeClaimTemplate {
 	if templates == nil {
 		return nil
 	}
@@ -184,7 +184,7 @@ func convertVolumeClaimTemplatesToBroker(templates []brokerv1beta1.VolumeClaimTe
 	return result
 }
 
-func convertResourceTemplatesToBroker(templates []brokerv1beta1.ResourceTemplate) []v1beta2.ResourceTemplate {
+func convertResourceTemplatesToBrokerCluster(templates []brokerv1beta1.ResourceTemplate) []v1beta2.ResourceTemplate {
 	if templates == nil {
 		return nil
 	}
@@ -206,7 +206,7 @@ func convertResourceTemplatesToBroker(templates []brokerv1beta1.ResourceTemplate
 	return result
 }
 
-func convertAffinityToBroker(a *brokerv1beta1.AffinityConfig) v1beta2.AffinityConfig {
+func convertAffinityToBrokerCluster(a *brokerv1beta1.AffinityConfig) v1beta2.AffinityConfig {
 	return v1beta2.AffinityConfig{
 		NodeAffinity:    a.NodeAffinity,
 		PodAffinity:     a.PodAffinity,
@@ -214,28 +214,28 @@ func convertAffinityToBroker(a *brokerv1beta1.AffinityConfig) v1beta2.AffinityCo
 	}
 }
 
-func convertPodSecurityToBroker(p *brokerv1beta1.PodSecurityType) v1beta2.PodSecurityType {
+func convertPodSecurityToBrokerCluster(p *brokerv1beta1.PodSecurityType) v1beta2.PodSecurityType {
 	return v1beta2.PodSecurityType{
 		ServiceAccountName: p.ServiceAccountName,
 		RunAsUser:          p.RunAsUser,
 	}
 }
 
-func convertExtraMountsToBroker(e *brokerv1beta1.ExtraMountsType) v1beta2.ExtraMountsType {
+func convertExtraMountsToBrokerCluster(e *brokerv1beta1.ExtraMountsType) v1beta2.ExtraMountsType {
 	return v1beta2.ExtraMountsType{
 		ConfigMaps: e.ConfigMaps,
 		Secrets:    e.Secrets,
 	}
 }
 
-func convertStorageToBroker(s *brokerv1beta1.StorageType) v1beta2.StorageType {
+func convertStorageToBrokerCluster(s *brokerv1beta1.StorageType) v1beta2.StorageType {
 	return v1beta2.StorageType{
 		Size:             s.Size,
 		StorageClassName: s.StorageClassName,
 	}
 }
 
-func convertAcceptorsToBroker(acceptors []brokerv1beta1.AcceptorType) []v1beta2.AcceptorType {
+func convertAcceptorsToBrokerCluster(acceptors []brokerv1beta1.AcceptorType) []v1beta2.AcceptorType {
 	if acceptors == nil {
 		return nil
 	}
@@ -273,7 +273,7 @@ func convertAcceptorsToBroker(acceptors []brokerv1beta1.AcceptorType) []v1beta2.
 	return result
 }
 
-func convertConnectorsToBroker(connectors []brokerv1beta1.ConnectorType) []v1beta2.ConnectorType {
+func convertConnectorsToBrokerCluster(connectors []brokerv1beta1.ConnectorType) []v1beta2.ConnectorType {
 	if connectors == nil {
 		return nil
 	}
@@ -305,7 +305,7 @@ func convertConnectorsToBroker(connectors []brokerv1beta1.ConnectorType) []v1bet
 	return result
 }
 
-func convertConsoleToBroker(c *brokerv1beta1.ConsoleType) v1beta2.ConsoleType {
+func convertConsoleToBrokerCluster(c *brokerv1beta1.ConsoleType) v1beta2.ConsoleType {
 	return v1beta2.ConsoleType{
 		Name:          c.Name,
 		Expose:        c.Expose,
@@ -318,26 +318,26 @@ func convertConsoleToBroker(c *brokerv1beta1.ConsoleType) v1beta2.ConsoleType {
 	}
 }
 
-func convertUpgradesToBroker(u *brokerv1beta1.ActiveMQArtemisUpgrades) v1beta2.BrokerUpgrades {
+func convertUpgradesToBrokerCluster(u *brokerv1beta1.ActiveMQArtemisUpgrades) v1beta2.BrokerUpgrades {
 	return v1beta2.BrokerUpgrades{
 		Enabled: u.Enabled,
 		Minor:   u.Minor,
 	}
 }
 
-func convertStatusToBroker(s *brokerv1beta1.ActiveMQArtemisStatus) v1beta2.BrokerStatus {
-	return v1beta2.BrokerStatus{
+func convertStatusToBrokerCluster(s *brokerv1beta1.ActiveMQArtemisStatus) v1beta2.BrokerClusterStatus {
+	return v1beta2.BrokerClusterStatus{
 		Conditions:         s.Conditions,
 		PodStatus:          s.PodStatus,
 		DeploymentPlanSize: s.DeploymentPlanSize,
 		ScaleLabelSelector: s.ScaleLabelSelector,
-		ExternalConfigs:    convertExternalConfigsToBroker(s.ExternalConfigs),
-		Version:            convertVersionStatusToBroker(&s.Version),
-		Upgrade:            convertUpgradeStatusToBroker(&s.Upgrade),
+		ExternalConfigs:    convertExternalConfigsToBrokerCluster(s.ExternalConfigs),
+		Version:            convertVersionStatusToBrokerCluster(&s.Version),
+		Upgrade:            convertUpgradeStatusToBrokerCluster(&s.Upgrade),
 	}
 }
 
-func convertVersionStatusToBroker(v *brokerv1beta1.VersionStatus) v1beta2.VersionStatus {
+func convertVersionStatusToBrokerCluster(v *brokerv1beta1.VersionStatus) v1beta2.VersionStatus {
 	return v1beta2.VersionStatus{
 		BrokerVersion: v.BrokerVersion,
 		Image:         v.Image,
@@ -345,7 +345,7 @@ func convertVersionStatusToBroker(v *brokerv1beta1.VersionStatus) v1beta2.Versio
 	}
 }
 
-func convertUpgradeStatusToBroker(u *brokerv1beta1.UpgradeStatus) v1beta2.UpgradeStatus {
+func convertUpgradeStatusToBrokerCluster(u *brokerv1beta1.UpgradeStatus) v1beta2.UpgradeStatus {
 	return v1beta2.UpgradeStatus{
 		SecurityUpdates: u.SecurityUpdates,
 		MajorUpdates:    u.MajorUpdates,
@@ -354,7 +354,7 @@ func convertUpgradeStatusToBroker(u *brokerv1beta1.UpgradeStatus) v1beta2.Upgrad
 	}
 }
 
-func convertExternalConfigsToBroker(configs []brokerv1beta1.ExternalConfigStatus) []v1beta2.ExternalConfigStatus {
+func convertExternalConfigsToBrokerCluster(configs []brokerv1beta1.ExternalConfigStatus) []v1beta2.ExternalConfigStatus {
 	if configs == nil {
 		return nil
 	}
@@ -370,7 +370,7 @@ func convertExternalConfigsToBroker(configs []brokerv1beta1.ExternalConfigStatus
 
 // --- Reverse converters: Broker status -> Artemis status ---
 
-func convertStatusToArtemis(s *v1beta2.BrokerStatus) brokerv1beta1.ActiveMQArtemisStatus {
+func convertStatusToArtemis(s *v1beta2.BrokerClusterStatus) brokerv1beta1.ActiveMQArtemisStatus {
 	return brokerv1beta1.ActiveMQArtemisStatus{
 		Conditions:         s.Conditions,
 		PodStatus:          s.PodStatus,

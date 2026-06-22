@@ -56,7 +56,7 @@ func TestBrokerServiceDeployed_WhenBrokerNotReady(t *testing.T) {
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc).
-		WithStatusSubresource(svc, &v1beta2.Broker{})).
+		WithStatusSubresource(svc, &v1beta2.BrokerCluster{})).
 		Build()
 
 	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
@@ -101,7 +101,7 @@ func TestBrokerServiceDeployed_AfterPortDiscovery(t *testing.T) {
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc).
-		WithStatusSubresource(svc, &v1beta2.Broker{})).
+		WithStatusSubresource(svc, &v1beta2.BrokerCluster{})).
 		Build()
 
 	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
@@ -112,7 +112,7 @@ func TestBrokerServiceDeployed_AfterPortDiscovery(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 2. Update Broker to Deployed=True
-	brokerCR := &v1beta2.Broker{}
+	brokerCR := &v1beta2.BrokerCluster{}
 	err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
 	assert.NoError(t, err)
 

@@ -461,7 +461,7 @@ var _ = Describe("broker-service status conditions", func() {
 
 			By("capturing initial config resource version")
 			brokerKey := types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}
-			brokerCrd := &broker.Broker{}
+			brokerCrd := &broker.BrokerCluster{}
 			var initialConfigRV string
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, brokerKey, brokerCrd)).Should(Succeed())

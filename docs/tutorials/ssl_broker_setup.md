@@ -142,7 +142,7 @@ The **sslEnabled: true** tells the operator to make this acceptor to use SSL tra
 ```{"stage":"deploy", "runtime":"bash", "label":"deploy the broker"}
 kubectl apply -f - << EOF
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: ex-aao
 spec:
@@ -160,7 +160,7 @@ broker.broker.arkmq.org/ex-aao created
 Wait for the Broker to be ready:
 
 ```{"stage":"deploy"}
-kubectl wait Broker ex-aao --for=condition=Ready --namespace=ssl-broker-project --timeout=240s
+kubectl wait BrokerCluster ex-aao --for=condition=Ready --namespace=ssl-broker-project --timeout=240s
 ```
 ```shell markdown_runner
 broker.broker.arkmq.org/ex-aao condition met

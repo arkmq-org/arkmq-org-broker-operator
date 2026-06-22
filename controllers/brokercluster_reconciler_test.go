@@ -163,7 +163,7 @@ func TestMapComparatorForStatefulSet(t *testing.T) {
 		Comparator: compare.SimpleComparator(),
 	}
 
-	reconciler := &BrokerReconcilerImpl{
+	reconciler := &BrokerClusterReconcilerImpl{
 		log:            ctrl.Log.WithName("test"),
 		customResource: nil,
 	}
@@ -202,7 +202,7 @@ func TestMapComparatorForStatefulSet(t *testing.T) {
 
 func TestComparatorMetaAndSpec(t *testing.T) {
 
-	reconciler := &BrokerReconcilerImpl{
+	reconciler := &BrokerClusterReconcilerImpl{
 		log:            ctrl.Log.WithName("test"),
 		customResource: nil,
 	}
@@ -232,7 +232,7 @@ func TestGetSingleStatefulSetStatus(t *testing.T) {
 	ss.Status.Replicas = 1
 	ss.Status.ReadyReplicas = 1
 
-	cr := &v1beta2.Broker{}
+	cr := &v1beta2.BrokerCluster{}
 	statusRunning := common.GetSingleStatefulSetStatus(ss, cr)
 	if statusRunning.Ready[0] != "joe-0" {
 		t.Errorf("not good!, expect correct 0 ordinal %s", statusRunning.Ready[0])
@@ -266,7 +266,7 @@ func TestGetSingleStatefulSetStatus(t *testing.T) {
 }
 
 func TestGetConfigAppliedConfigMapName(t *testing.T) {
-	cr := v1beta2.Broker{
+	cr := v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "test-ns",
 			Name:      "test",
@@ -451,8 +451,8 @@ func TestExtractErrors(t *testing.T) {
 }
 
 func TestGetJaasConfigExtraMountPath(t *testing.T) {
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ExtraMounts: v1beta2.ExtraMountsType{
 					ConfigMaps: []string{
@@ -470,8 +470,8 @@ func TestGetJaasConfigExtraMountPath(t *testing.T) {
 	assert.Equal(t, path, "/amq/extra/secrets/test-config-jaas-config/login.config")
 	assert.True(t, found)
 
-	cr = &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr = &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ExtraMounts: v1beta2.ExtraMountsType{
 					ConfigMaps: []string{
@@ -492,8 +492,8 @@ func TestGetJaasConfigExtraMountPath(t *testing.T) {
 }
 
 func TestGetJaasConfigExtraMountPathNotPresent(t *testing.T) {
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ExtraMounts: v1beta2.ExtraMountsType{
 					ConfigMaps: []string{
@@ -510,8 +510,8 @@ func TestGetJaasConfigExtraMountPathNotPresent(t *testing.T) {
 
 func TestNewPodTemplateSpecForCR_IncludesDebugArgs(t *testing.T) {
 
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ExtraMounts: v1beta2.ExtraMountsType{
 					ConfigMaps: []string{
@@ -526,7 +526,7 @@ func TestNewPodTemplateSpecForCR_IncludesDebugArgs(t *testing.T) {
 		},
 	}
 
-	reconciler := &BrokerReconcilerImpl{
+	reconciler := &BrokerClusterReconcilerImpl{
 		log:            ctrl.Log.WithName("test"),
 		customResource: cr,
 	}
@@ -545,8 +545,8 @@ func TestNewPodTemplateSpecForCR_IncludesDebugArgs(t *testing.T) {
 func TestProcess_TemplateIncludesLabelsServiceAndSecret(t *testing.T) {
 
 	var kindMatch string = "Secret"
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				Labels: map[string]string{"myPodKey": "myPodValue"},
 			},
@@ -564,8 +564,8 @@ func TestProcess_TemplateIncludesLabelsServiceAndSecret(t *testing.T) {
 				}},
 		},
 	}
-	outer := NewBrokerReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateIncludesLabelsServiceAndSecret"), isOpenshift)
-	reconciler := NewBrokerReconcilerImpl(cr, outer)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateIncludesLabelsServiceAndSecret"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
 
@@ -621,8 +621,8 @@ func TestProcess_TemplateIncludesLabelsSecretRegexp(t *testing.T) {
 	var regexpNameMatch string = ".*-props"
 	var exactNameMatch string = "-props"
 
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			ResourceTemplates: []v1beta2.ResourceTemplate{
 				{
 					Selector: &v1beta2.ResourceSelector{
@@ -641,8 +641,8 @@ func TestProcess_TemplateIncludesLabelsSecretRegexp(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateIncludesLabelsServiceAndSecret"), isOpenshift)
-	reconciler := NewBrokerReconcilerImpl(cr, outer)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateIncludesLabelsServiceAndSecret"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
 
@@ -681,8 +681,8 @@ func TestProcess_TemplateIncludesLabelsSecretRegexp(t *testing.T) {
 
 func TestProcess_TemplateDuplicateKeyReplacesOk(t *testing.T) {
 
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			ResourceTemplates: []v1beta2.ResourceTemplate{
 				{
 					Labels: map[string]string{"mySecretKey": "mySecretValueWillBeReplacedByDuplicate"},
@@ -693,8 +693,8 @@ func TestProcess_TemplateDuplicateKeyReplacesOk(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateDuplicateKeyReplacesOk"), isOpenshift)
-	reconciler := NewBrokerReconcilerImpl(cr, outer)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateDuplicateKeyReplacesOk"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
 
@@ -718,13 +718,13 @@ func TestProcess_TemplateDuplicateKeyReplacesOk(t *testing.T) {
 
 func Test_Respect_existing_JAVA_OPTS_properties_def(t *testing.T) {
 
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
-		Spec:       v1beta2.BrokerSpec{},
+		Spec:       v1beta2.BrokerClusterSpec{},
 	}
 
-	outer := NewBrokerReconciler(&NillCluster{}, ctrl.Log.WithName("Test_Respect_existing_JAVA_OPTS_properties_def"), isOpenshift)
-	reconciler := NewBrokerReconcilerImpl(cr, outer)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_Respect_existing_JAVA_OPTS_properties_def"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
 
@@ -768,9 +768,9 @@ func TestProcess_TemplateKeyValue(t *testing.T) {
 	var kindMatch string = "Service"
 	var matchOrdinalServices string = ".+-[0-9]+-svc"
 	var matchGvForIngress string = "networking.k8s.io/v1"
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
-		Spec: v1beta2.BrokerSpec{
+		Spec: v1beta2.BrokerClusterSpec{
 			ResourceTemplates: []v1beta2.ResourceTemplate{
 				{
 					// match all
@@ -800,8 +800,8 @@ func TestProcess_TemplateKeyValue(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
-	reconciler := NewBrokerReconcilerImpl(cr, outer)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
 
@@ -861,9 +861,9 @@ func TestProcess_TemplateCustomAttributeIngress(t *testing.T) {
 
 	var matchGvForIngress string = "networking.k8s.io/v1"
 	var ingressClassVal = "SomeClass"
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
-		Spec: v1beta2.BrokerSpec{
+		Spec: v1beta2.BrokerClusterSpec{
 			ResourceTemplates: []v1beta2.ResourceTemplate{
 				{
 					// match Ingress
@@ -889,8 +889,8 @@ func TestProcess_TemplateCustomAttributeIngress(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
-	reconciler := NewBrokerReconcilerImpl(cr, outer)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
 
@@ -922,9 +922,9 @@ func TestProcess_TemplateCustomAttributeMisSpellingIngress(t *testing.T) {
 
 	var matchGvForIngress string = "networking.k8s.io/v1"
 	var ingressClassVal = "SomeClass"
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
-		Spec: v1beta2.BrokerSpec{
+		Spec: v1beta2.BrokerClusterSpec{
 			ResourceTemplates: []v1beta2.ResourceTemplate{
 				{
 					// match Ingress
@@ -950,8 +950,8 @@ func TestProcess_TemplateCustomAttributeMisSpellingIngress(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
-	reconciler := NewBrokerReconcilerImpl(cr, outer)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
 	newSS, err := reconciler.ProcessStatefulSet(cr, *namer, nil)
@@ -981,9 +981,9 @@ func testTemplateCustomAttributeContainerSecurityContext(t *testing.T, withCRNam
 		containerName = "$(CR_NAME)-container"
 	}
 
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
-		Spec: v1beta2.BrokerSpec{
+		Spec: v1beta2.BrokerClusterSpec{
 			ResourceTemplates: []v1beta2.ResourceTemplate{
 				{
 					Selector: &v1beta2.ResourceSelector{
@@ -1011,8 +1011,8 @@ func testTemplateCustomAttributeContainerSecurityContext(t *testing.T, withCRNam
 		},
 	}
 
-	outer := NewBrokerReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
-	reconciler := NewBrokerReconcilerImpl(cr, outer)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
 
@@ -1041,9 +1041,9 @@ func TestProcess_TemplateCustomAttributePriorityClassName(t *testing.T) {
 
 	var kindMatchSs string = "StatefulSet"
 
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
-		Spec: v1beta2.BrokerSpec{
+		Spec: v1beta2.BrokerClusterSpec{
 			ResourceTemplates: []v1beta2.ResourceTemplate{
 				{
 					Selector: &v1beta2.ResourceSelector{
@@ -1064,8 +1064,8 @@ func TestProcess_TemplateCustomAttributePriorityClassName(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
-	reconciler := NewBrokerReconcilerImpl(cr, outer)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	namer := MakeNamers(cr)
 
@@ -1090,8 +1090,8 @@ func TestProcess_TemplateCustomAttributePriorityClassName(t *testing.T) {
 
 func TestNewPodTemplateSpecForCR_AppendsDebugArgs(t *testing.T) {
 
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			Env: []v1.EnvVar{
 				{
 					Name:  "DEBUG_ARGS",
@@ -1112,8 +1112,8 @@ func TestNewPodTemplateSpecForCR_AppendsDebugArgs(t *testing.T) {
 		},
 	}
 
-	outer := NewBrokerReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
-	reconciler := NewBrokerReconcilerImpl(cr, outer)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, k8sClient)
 
@@ -1128,8 +1128,8 @@ func TestNewPodTemplateSpecForCR_AppendsDebugArgs(t *testing.T) {
 
 func TestNewPodTemplateSpecForCR_IncludesImagePullSecret(t *testing.T) {
 
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ImagePullSecrets: []v1.LocalObjectReference{
 					{
@@ -1139,8 +1139,8 @@ func TestNewPodTemplateSpecForCR_IncludesImagePullSecret(t *testing.T) {
 			},
 		},
 	}
-	outer := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	reconciler := NewBrokerReconcilerImpl(cr, outer)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, k8sClient)
 	assert.NoError(t, err)
@@ -1161,8 +1161,8 @@ func TestNewPodTemplateSpecForCR_IncludesTopologySpreadConstraints(t *testing.T)
 		MatchLabels: matchLabels,
 	}
 
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				TopologySpreadConstraints: []v1.TopologySpreadConstraint{
 					{
@@ -1175,8 +1175,8 @@ func TestNewPodTemplateSpecForCR_IncludesTopologySpreadConstraints(t *testing.T)
 			},
 		},
 	}
-	outer := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	reconciler := NewBrokerReconcilerImpl(cr, outer)
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 	newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, k8sClient)
 	assert.NoError(t, err)
@@ -1195,15 +1195,15 @@ func TestNewPodTemplateSpecForCR_IncludesTopologySpreadConstraints(t *testing.T)
 func TestNewPodTemplateSpecForCR_IncludesContainerSecurityContext(t *testing.T) {
 	containerSecurityContext := &v1.SecurityContext{RunAsNonRoot: pointer.To(false)}
 
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ContainerSecurityContext: containerSecurityContext,
 			},
 		},
 	}
 
-	reconciler := &BrokerReconcilerImpl{
+	reconciler := &BrokerClusterReconcilerImpl{
 		log:            ctrl.Log.WithName("test"),
 		customResource: cr,
 	}
@@ -1219,8 +1219,8 @@ func TestNewPodTemplateSpecForCR_IncludesContainerSecurityContext(t *testing.T) 
 }
 
 func TestNewPodTemplateSpecForCR_IncludesExtraVolumes(t *testing.T) {
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ExtraVolumes: []v1.Volume{
 					{
@@ -1234,7 +1234,7 @@ func TestNewPodTemplateSpecForCR_IncludesExtraVolumes(t *testing.T) {
 		},
 	}
 
-	reconciler := &BrokerReconcilerImpl{
+	reconciler := &BrokerClusterReconcilerImpl{
 		log:            ctrl.Log.WithName("test"),
 		customResource: cr,
 	}
@@ -1269,8 +1269,8 @@ func TestNewPodTemplateSpecForCR_IncludesExtraVolumes(t *testing.T) {
 }
 
 func TestNewPodTemplateSpecForCR_IncludesExtraVolumesWithCustomMount(t *testing.T) {
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ExtraVolumes: []v1.Volume{
 					{
@@ -1290,7 +1290,7 @@ func TestNewPodTemplateSpecForCR_IncludesExtraVolumesWithCustomMount(t *testing.
 		},
 	}
 
-	reconciler := &BrokerReconcilerImpl{
+	reconciler := &BrokerClusterReconcilerImpl{
 		log:            ctrl.Log.WithName("test"),
 		customResource: cr,
 	}
@@ -1325,8 +1325,8 @@ func TestNewPodTemplateSpecForCR_IncludesExtraVolumesWithCustomMount(t *testing.
 }
 
 func TestNewPodTemplateSpecForCR_IncludesExtraVolumeClaimTemplates(t *testing.T) {
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ExtraVolumeClaimTemplates: []v1beta2.VolumeClaimTemplate{
 					{
@@ -1344,7 +1344,7 @@ func TestNewPodTemplateSpecForCR_IncludesExtraVolumeClaimTemplates(t *testing.T)
 		},
 	}
 
-	reconciler := &BrokerReconcilerImpl{
+	reconciler := &BrokerClusterReconcilerImpl{
 		log:            ctrl.Log.WithName("test"),
 		customResource: cr,
 	}
@@ -1551,7 +1551,7 @@ func TestLoginConfigSyntaxCheck(t *testing.T) {
 
 func TestStatusMarshall(t *testing.T) {
 
-	Status := v1beta2.BrokerStatus{
+	Status := v1beta2.BrokerClusterStatus{
 		Conditions: []metav1.Condition{},
 		PodStatus: olm.DeploymentStatus{
 			Ready:    []string{},
@@ -1571,12 +1571,12 @@ func TestStatusMarshall(t *testing.T) {
 }
 
 func TestGetBrokerHost(t *testing.T) {
-	cr := v1beta2.Broker{
+	cr := v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "test-ns",
 			Name:      "test",
 		},
-		Spec: v1beta2.BrokerSpec{
+		Spec: v1beta2.BrokerClusterSpec{
 			IngressDomain: "my-domain.com",
 		},
 	}
@@ -1595,12 +1595,12 @@ func TestGetBrokerHost(t *testing.T) {
 }
 
 func TestFormatTemplatedStringWithInvalidVariables(t *testing.T) {
-	cr := v1beta2.Broker{
+	cr := v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "test-ns",
 			Name:      "test",
 		},
-		Spec: v1beta2.BrokerSpec{
+		Spec: v1beta2.BrokerClusterSpec{
 			IngressDomain: "my-domain.com",
 		},
 	}
@@ -1610,12 +1610,12 @@ func TestFormatTemplatedStringWithInvalidVariables(t *testing.T) {
 }
 
 func TestFormatTemplatedObject(t *testing.T) {
-	cr := v1beta2.Broker{
+	cr := v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "test-ns",
 			Name:      "test",
 		},
-		Spec: v1beta2.BrokerSpec{
+		Spec: v1beta2.BrokerClusterSpec{
 			IngressDomain: "my-domain.com",
 		},
 	}
@@ -1767,7 +1767,7 @@ func TestDuplicateKeyIn(t *testing.T) {
 }
 
 func TestEnsureOwnerReferenceAPIVersion_NoOwnerReferences(t *testing.T) {
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "broker.amq.io/v1beta1",
 		},
@@ -1790,8 +1790,8 @@ func TestEnsureOwnerReferenceAPIVersion_NoOwnerReferences(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
 
@@ -1800,7 +1800,7 @@ func TestEnsureOwnerReferenceAPIVersion_NoOwnerReferences(t *testing.T) {
 }
 
 func TestEnsureOwnerReferenceAPIVersion_MatchingAPIVersion(t *testing.T) {
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "broker.amq.io/v1beta1",
 		},
@@ -1830,8 +1830,8 @@ func TestEnsureOwnerReferenceAPIVersion_MatchingAPIVersion(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
 
@@ -1840,7 +1840,7 @@ func TestEnsureOwnerReferenceAPIVersion_MatchingAPIVersion(t *testing.T) {
 }
 
 func TestEnsureOwnerReferenceAPIVersion_DifferentAPIVersion(t *testing.T) {
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "broker.amq.io/v1beta1",
 		},
@@ -1870,8 +1870,8 @@ func TestEnsureOwnerReferenceAPIVersion_DifferentAPIVersion(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
 
@@ -1881,7 +1881,7 @@ func TestEnsureOwnerReferenceAPIVersion_DifferentAPIVersion(t *testing.T) {
 }
 
 func TestEnsureOwnerReferenceAPIVersion_MultipleOwnerReferences(t *testing.T) {
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "broker.amq.io/v1beta1",
 		},
@@ -1917,8 +1917,8 @@ func TestEnsureOwnerReferenceAPIVersion_MultipleOwnerReferences(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
 
@@ -1929,7 +1929,7 @@ func TestEnsureOwnerReferenceAPIVersion_MultipleOwnerReferences(t *testing.T) {
 }
 
 func TestEnsureOwnerReferenceAPIVersion_DifferentBrokerName(t *testing.T) {
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "broker.amq.io/v1beta1",
 		},
@@ -1959,8 +1959,8 @@ func TestEnsureOwnerReferenceAPIVersion_DifferentBrokerName(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
 
@@ -1969,7 +1969,7 @@ func TestEnsureOwnerReferenceAPIVersion_DifferentBrokerName(t *testing.T) {
 }
 
 func TestCompareSecret_WithAPIVersionUpdate(t *testing.T) {
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "broker.amq.io/v1beta1",
 		},
@@ -2007,8 +2007,8 @@ func TestCompareSecret_WithAPIVersionUpdate(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.CompareSecret(deployed, requested)
 
@@ -2018,7 +2018,7 @@ func TestCompareSecret_WithAPIVersionUpdate(t *testing.T) {
 }
 
 func TestCompareConfigMap_WithAPIVersionUpdate(t *testing.T) {
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "broker.amq.io/v1beta1",
 		},
@@ -2050,8 +2050,8 @@ func TestCompareConfigMap_WithAPIVersionUpdate(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.CompareConfigMap(deployed, requested)
 
@@ -2061,7 +2061,7 @@ func TestCompareConfigMap_WithAPIVersionUpdate(t *testing.T) {
 }
 
 func TestCompareMetaAndSpec_WithAPIVersionUpdate(t *testing.T) {
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "broker.amq.io/v1beta1",
 		},
@@ -2105,8 +2105,8 @@ func TestCompareMetaAndSpec_WithAPIVersionUpdate(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	result := ri.CompareMetaAndSpec(deployed, requested)
 

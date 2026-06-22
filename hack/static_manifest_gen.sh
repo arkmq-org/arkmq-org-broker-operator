@@ -33,8 +33,8 @@ function writeFile() {
         createFile "$crdsdir/broker_activemqartemisaddress_crd.yaml"
       elif [[ ${resource_name} =~ (activemqartemisscaledowns) ]]; then
         createFile "$crdsdir/broker_activemqartemisscaledown_crd.yaml"
-      elif [[ ${resource_name} =~ (brokers\.) ]]; then
-        createFile "$crdsdir/broker_broker_crd.yaml"
+      elif [[ ${resource_name} =~ (brokerclusters\.) ]]; then
+        createFile "$crdsdir/broker_brokercluster_crd.yaml"
       elif [[ ${resource_name} =~ (brokerservices) ]]; then
         createFile "$crdsdir/broker_brokerservice_crd.yaml"
       elif [[ ${resource_name} =~ (brokerapps) ]]; then

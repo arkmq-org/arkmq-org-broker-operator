@@ -116,8 +116,8 @@ func NewActiveMQArtemisReconciler(cluster cluster.Cluster, logger logr.Logger, i
 	}
 }
 
-func (r *ActiveMQArtemisReconciler) toBrokerParent() *BrokerReconciler {
-	return &BrokerReconciler{
+func (r *ActiveMQArtemisReconciler) toBrokerClusterParent() *BrokerClusterReconciler {
+	return &BrokerClusterReconciler{
 		Client:        r.Client,
 		Scheme:        r.Scheme,
 		log:           r.log,
@@ -167,7 +167,7 @@ func (r *ActiveMQArtemisReconciler) Reconcile(ctx context.Context, request ctrl.
 		return result, err
 	}
 
-	customResource, err := ConvertArtemisToBroker(artemisResource)
+	customResource, err := ConvertArtemisToBrokerCluster(artemisResource)
 	if err != nil {
 		reqLogger.Error(err, "failed to convert ActiveMQArtemis to internal Broker representation")
 		return result, err
@@ -181,7 +181,7 @@ func (r *ActiveMQArtemisReconciler) Reconcile(ctx context.Context, request ctrl.
 	}
 
 	namer := MakeNamers(customResource)
-	reconciler := NewBrokerReconcilerImpl(customResource, r.toBrokerParent())
+	reconciler := NewBrokerClusterReconcilerImpl(customResource, r.toBrokerClusterParent())
 
 	var requeueRequest bool = false
 	var valid bool = false
@@ -190,7 +190,7 @@ func (r *ActiveMQArtemisReconciler) Reconcile(ctx context.Context, request ctrl.
 		if !reconcileBlocked {
 			err = reconciler.Process(customResource, *namer, r.Client, r.Scheme)
 		}
-		if reconciler.ProcessBrokerStatus(customResource, r.Client, r.Scheme) {
+		if reconciler.ProcessBrokerClusterStatus(customResource, r.Client, r.Scheme) {
 			requeueRequest = true
 		}
 	}
@@ -205,7 +205,7 @@ func (r *ActiveMQArtemisReconciler) Reconcile(ctx context.Context, request ctrl.
 		}
 	}
 
-	if convertErr := ConvertBrokerStatusToArtemis(customResource, artemisResource); convertErr != nil {
+	if convertErr := ConvertBrokerClusterStatusToArtemis(customResource, artemisResource); convertErr != nil {
 		reqLogger.Error(convertErr, "failed to convert status back to ActiveMQArtemis")
 		return result, convertErr
 	}

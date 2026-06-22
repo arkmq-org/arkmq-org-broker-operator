@@ -40,16 +40,16 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
-// BrokerReconciler reconciles a Broker object (broker.arkmq.org/v1beta2)
-type BrokerReconciler struct {
+// BrokerClusterReconciler reconciles a BrokerCluster object (broker.arkmq.org/v1beta2)
+type BrokerClusterReconciler struct {
 	rtclient.Client
 	Scheme        *runtime.Scheme
 	log           logr.Logger
 	isOnOpenShift bool
 }
 
-func NewBrokerReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShift bool) *BrokerReconciler {
-	return &BrokerReconciler{
+func NewBrokerClusterReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShift bool) *BrokerClusterReconciler {
+	return &BrokerClusterReconciler{
 		isOnOpenShift: isOpenShift,
 		Client:        cluster.GetClient(),
 		Scheme:        cluster.GetScheme(),
@@ -57,24 +57,24 @@ func NewBrokerReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShif
 	}
 }
 
-//+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokers,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokers/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokers/finalizers,verbs=update
+//+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerclusters,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerclusters/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerclusters/finalizers,verbs=update
 
-func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
-	reqLogger := r.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "Broker")
+func (r *BrokerClusterReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
+	reqLogger := r.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "BrokerCluster")
 
-	customResource := &v1beta2.Broker{}
+	customResource := &v1beta2.BrokerCluster{}
 
 	result := ctrl.Result{}
 
 	err := r.Get(ctx, request.NamespacedName, customResource)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			reqLogger.V(1).Info("Broker Controller Reconcile encountered a IsNotFound, for request NamespacedName " + request.NamespacedName.String())
+			reqLogger.V(1).Info("BrokerCluster Controller Reconcile encountered a IsNotFound, for request NamespacedName " + request.NamespacedName.String())
 			return result, nil
 		}
-		reqLogger.Error(err, "unable to retrieve the Broker")
+		reqLogger.Error(err, "unable to retrieve the BrokerCluster")
 		return result, err
 	}
 
@@ -86,7 +86,7 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 	}
 
 	namer := MakeNamers(customResource)
-	reconciler := NewBrokerReconcilerImpl(customResource, r)
+	reconciler := NewBrokerClusterReconcilerImpl(customResource, r)
 
 	var requeueRequest bool = false
 	var valid bool = false
@@ -95,7 +95,7 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 		if !reconcileBlocked {
 			err = reconciler.Process(customResource, *namer, r.Client, r.Scheme)
 		}
-		if reconciler.ProcessBrokerStatus(customResource, r.Client, r.Scheme) {
+		if reconciler.ProcessBrokerClusterStatus(customResource, r.Client, r.Scheme) {
 			requeueRequest = true
 		}
 	}
@@ -103,7 +103,7 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 	common.UpdateBlockedStatus(customResource, reconcileBlocked)
 	common.ProcessStatus(customResource, r.Client, request.NamespacedName, *namer, err)
 
-	crStatusUpdateErr := r.UpdateBrokerCRStatus(customResource, r.Client, request.NamespacedName)
+	crStatusUpdateErr := r.UpdateBrokerClusterCRStatus(customResource, r.Client, request.NamespacedName)
 	if crStatusUpdateErr != nil {
 		requeueRequest = true
 	}
@@ -124,9 +124,9 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 	return result, err
 }
 
-func (r *BrokerReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *BrokerClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	builder := ctrl.NewControllerManagedBy(mgr).
-		For(&v1beta2.Broker{}).
+		For(&v1beta2.BrokerCluster{}).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Pod{}).
 		Owns(&corev1.Secret{}).
@@ -142,19 +142,19 @@ func (r *BrokerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return builder.Complete(r)
 }
 
-func (r *BrokerReconciler) UpdateBrokerCRStatus(desired *v1beta2.Broker, client rtclient.Client, namespacedName types.NamespacedName) error {
+func (r *BrokerClusterReconciler) UpdateBrokerClusterCRStatus(desired *v1beta2.BrokerCluster, client rtclient.Client, namespacedName types.NamespacedName) error {
 
 	common.SetReadyCondition(&desired.Status.Conditions)
 
-	current := &v1beta2.Broker{}
+	current := &v1beta2.BrokerCluster{}
 
 	err := client.Get(context.TODO(), namespacedName, current)
 	if err != nil {
-		r.log.Error(err, "unable to retrieve current resource", "Broker", namespacedName)
+		r.log.Error(err, "unable to retrieve current resource", "BrokerCluster", namespacedName)
 		return err
 	}
 
-	if !EqualBrokerCRStatus(&desired.Status, &current.Status) {
+	if !EqualBrokerClusterCRStatus(&desired.Status, &current.Status) {
 		r.log.V(1).Info("cr.status update", "Namespace", desired.Namespace, "Name", desired.Name, "Observed status", desired.Status)
 		return resources.UpdateStatus(client, desired)
 	}
@@ -162,12 +162,12 @@ func (r *BrokerReconciler) UpdateBrokerCRStatus(desired *v1beta2.Broker, client 
 	return nil
 }
 
-func EqualBrokerCRStatus(s1, s2 *v1beta2.BrokerStatus) bool {
+func EqualBrokerClusterCRStatus(s1, s2 *v1beta2.BrokerClusterStatus) bool {
 	if s1.DeploymentPlanSize != s2.DeploymentPlanSize ||
 		s1.ScaleLabelSelector != s2.ScaleLabelSelector ||
 		!reflect.DeepEqual(s1.Version, s2.Version) ||
 		len(s2.ExternalConfigs) != len(s1.ExternalConfigs) ||
-		brokerExternalConfigsModified(s2.ExternalConfigs, s1.ExternalConfigs) ||
+		brokerClusterExternalConfigsModified(s2.ExternalConfigs, s1.ExternalConfigs) ||
 		!reflect.DeepEqual(s1.PodStatus, s2.PodStatus) ||
 		len(s1.Conditions) != len(s2.Conditions) ||
 		conditionsModified(s2.Conditions, s1.Conditions) {
@@ -178,7 +178,7 @@ func EqualBrokerCRStatus(s1, s2 *v1beta2.BrokerStatus) bool {
 	return true
 }
 
-func brokerExternalConfigsModified(desiredExternalConfigs []v1beta2.ExternalConfigStatus, currentExternalConfigs []v1beta2.ExternalConfigStatus) bool {
+func brokerClusterExternalConfigsModified(desiredExternalConfigs []v1beta2.ExternalConfigStatus, currentExternalConfigs []v1beta2.ExternalConfigStatus) bool {
 	if len(desiredExternalConfigs) >= 0 {
 		for _, cfg := range desiredExternalConfigs {
 			for _, curCfg := range currentExternalConfigs {

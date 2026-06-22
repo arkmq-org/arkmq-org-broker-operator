@@ -270,28 +270,6 @@ metadata:
         },
         {
           "apiVersion": "broker.arkmq.org/v1beta2",
-          "kind": "Broker",
-          "metadata": {
-            "name": "ex-broker"
-          },
-          "spec": {
-            "deploymentPlan": {
-              "image": "placeholder",
-              "jolokiaAgentEnabled": false,
-              "journalType": "nio",
-              "managementRBACEnabled": true,
-              "messageMigration": false,
-              "persistenceEnabled": false,
-              "requireLogin": false,
-              "size": 2
-            }
-          },
-          "status": {
-            "conditions": []
-          }
-        },
-        {
-          "apiVersion": "broker.arkmq.org/v1beta2",
           "kind": "BrokerApp",
           "metadata": {
             "name": "wq-app"
@@ -310,6 +288,28 @@ metadata:
               "matchLabels": {
                 "forWorkQueue": "true"
               }
+            }
+          },
+          "status": {
+            "conditions": []
+          }
+        },
+        {
+          "apiVersion": "broker.arkmq.org/v1beta2",
+          "kind": "BrokerCluster",
+          "metadata": {
+            "name": "ex-broker"
+          },
+          "spec": {
+            "deploymentPlan": {
+              "image": "placeholder",
+              "jolokiaAgentEnabled": false,
+              "journalType": "nio",
+              "managementRBACEnabled": true,
+              "messageMigration": false,
+              "persistenceEnabled": false,
+              "requireLogin": false,
+              "size": 2
             }
           },
           "status": {
@@ -5654,9 +5654,9 @@ spec:
         - urn:alm:descriptor:io.kubernetes.conditions
       version: v1beta2
     - description: A stateful deployment of one or more brokers
-      displayName: Broker
-      kind: Broker
-      name: brokers.broker.arkmq.org
+      displayName: Broker Cluster
+      kind: BrokerCluster
+      name: brokerclusters.broker.arkmq.org
       resources:
       - kind: ConfigMap
         name: ""
@@ -7119,7 +7119,7 @@ spec:
           - broker.arkmq.org
           resources:
           - brokerapps
-          - brokers
+          - brokerclusters
           - brokerservices
           verbs:
           - create
@@ -7142,13 +7142,13 @@ spec:
         - apiGroups:
           - broker.arkmq.org
           resources:
-          - brokers/finalizers
+          - brokerclusters/finalizers
           verbs:
           - update
         - apiGroups:
           - broker.arkmq.org
           resources:
-          - brokers/status
+          - brokerclusters/status
           - brokerservices/status
           verbs:
           - get

@@ -290,13 +290,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	brokerV1Reconciler := controllers.NewBrokerReconciler(
+	brokerClusterReconciler := controllers.NewBrokerClusterReconciler(
 		mgr,
-		ctrl.Log.WithName("BrokerReconciler"),
+		ctrl.Log.WithName("BrokerClusterReconciler"),
 		isOpenshift)
 
-	if err = brokerV1Reconciler.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Broker")
+	if err = brokerClusterReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "BrokerCluster")
 		os.Exit(1)
 	}
 

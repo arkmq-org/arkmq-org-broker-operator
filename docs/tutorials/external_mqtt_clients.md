@@ -53,7 +53,7 @@ Use the following command to deploy Broker with an mqtt acceptor:
 ```shell script
 $ kubectl apply -f - <<EOF
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: artemis-mqtt-ssl
 spec:

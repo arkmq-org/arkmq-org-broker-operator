@@ -276,17 +276,17 @@ func DeployCustomBroker(targetNamespace string, customFunc func(candidate *broke
 	return &brokerCrd, &createdBrokerCrd
 }
 
-func generateBrokerSpec(namespace string) brokerv1beta2.Broker {
-	return brokerv1beta2.Broker{
+func generateBrokerSpec(namespace string) brokerv1beta2.BrokerCluster {
+	return brokerv1beta2.BrokerCluster{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       "Broker",
+			Kind:       "BrokerCluster",
 			APIVersion: brokerv1beta2.GroupVersion.String(),
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      NextSpecResourceName(),
 			Namespace: namespace,
 		},
-		Spec: brokerv1beta2.BrokerSpec{
+		Spec: brokerv1beta2.BrokerClusterSpec{
 			DeploymentPlan: brokerv1beta2.DeploymentPlanType{
 				ReadinessProbe: &corev1.Probe{InitialDelaySeconds: 1, PeriodSeconds: 3},
 			},
@@ -294,7 +294,7 @@ func generateBrokerSpec(namespace string) brokerv1beta2.Broker {
 	}
 }
 
-func DeployCustomBrokerV1(targetNamespace string, customFunc func(candidate *brokerv1beta2.Broker)) (*brokerv1beta2.Broker, *brokerv1beta2.Broker) {
+func DeployCustomBrokerV1(targetNamespace string, customFunc func(candidate *brokerv1beta2.BrokerCluster)) (*brokerv1beta2.BrokerCluster, *brokerv1beta2.BrokerCluster) {
 	ctx := context.Background()
 	brokerCrd := generateBrokerSpec(targetNamespace)
 
@@ -306,7 +306,7 @@ func DeployCustomBrokerV1(targetNamespace string, customFunc func(candidate *bro
 
 	Expect(k8sClient.Create(ctx, &brokerCrd)).Should(Succeed())
 
-	createdBrokerCrd := brokerv1beta2.Broker{}
+	createdBrokerCrd := brokerv1beta2.BrokerCluster{}
 
 	Eventually(func() bool {
 		return getPersistedVersionedCrd(brokerCrd.Name, targetNamespace, &createdBrokerCrd)

@@ -327,7 +327,7 @@ that shown below. This configuration is the default content of the broker_active
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: ex-aao
 spec:
@@ -434,7 +434,7 @@ Open the CR file that you used for your basic broker deployment.
 For a clustered deployment, ensure that the value of deploymentPlan.size is 2 or greater. For example:
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: ex-aao
 spec:
@@ -633,7 +633,7 @@ It is possible to configure tolerations on the deployed broker image. An example
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -654,7 +654,7 @@ It is possible to configure Affinity for the container pods, An example of this 
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -679,7 +679,7 @@ It is possible to configure Node Selectors for the container pods, An example of
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -697,7 +697,7 @@ It is possible to configure PriorityClassName for the container pods, An example
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -722,7 +722,7 @@ Labels can be added to the pods by defining them like so:
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -741,7 +741,7 @@ Annotations can be added to the pods by defining them like so:
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -762,7 +762,7 @@ In the following example, the annotation "someKey=someValue" is added to all Ser
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -781,7 +781,7 @@ In the following example, the `spec.publishNotReadyAddresses` attribute of the s
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
 spec:
@@ -799,7 +799,7 @@ In the following example, a custom security context is added to the internal bro
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
 spec:
@@ -824,7 +824,7 @@ For example, to have the JDK output what it sees as 'the system', provide a rele
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -919,7 +919,7 @@ stringData:
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: ex-aao
 spec:
@@ -943,7 +943,7 @@ stringData:
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: ex-aao
 spec:
@@ -985,7 +985,7 @@ and add the above secrets to extraMounts in the CR:
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: ex-aao
 spec:
@@ -1015,7 +1015,7 @@ Then you need to give the name of the configmap or secret in the broker custom r
 `for configmap`
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -1030,7 +1030,7 @@ spec:
 `for secret`
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -1143,7 +1143,7 @@ In addition, you need to expose the console, for example
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: artemis-with-metrics
 spec:
@@ -1159,7 +1159,7 @@ JVM memory metrics are enabled by default. Use the `spec.brokerProperties` field
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: artemis-with-metrics
 spec:
@@ -1329,7 +1329,7 @@ For example
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -1355,7 +1355,7 @@ For example
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -1381,7 +1381,7 @@ The Broker custom resource offers a container level SecurityContext option for t
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -1406,7 +1406,7 @@ Here's an example configuration:
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: broker
   namespace: arkmq-org-broker-operator
@@ -1486,7 +1486,7 @@ For example when you have a broker cr named **amq** like this:
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: amq
   namespace: default
@@ -1532,7 +1532,7 @@ You can configure a broker CR to use it:
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: artemis-broker
 spec:
@@ -1558,7 +1558,7 @@ The operator also supports configuration for each of the brokers of a custom res
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: artemis-broker
 spec:
@@ -1685,7 +1685,7 @@ Once you have the certificate and ca bundle ready you can configure the manageme
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: artemis-broker
 spec:
@@ -1706,7 +1706,7 @@ With the certificate ready you can configure an acceptor and/or connector of the
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: artemis-broker
 spec:
@@ -1729,7 +1729,7 @@ You can configure a connector with ssl parameters from a certificate in like man
 
 ```yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: artemis-broker
 spec:
@@ -1782,7 +1782,7 @@ An Apache Artemis Broker instance with a secured internal acceptor and connector
 ```
 kubectl apply -f - <<EOF
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: ex-aao
   namespace: test

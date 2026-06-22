@@ -83,7 +83,7 @@ customresourcedefinition.apiextensions.k8s.io/activemqartemises.broker.amq.io cr
 customresourcedefinition.apiextensions.k8s.io/activemqartemisaddresses.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisscaledowns.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemissecurities.broker.amq.io created
-customresourcedefinition.apiextensions.k8s.io/brokers.broker.arkmq.org created
+customresourcedefinition.apiextensions.k8s.io/brokerclusters.broker.arkmq.org created
 serviceaccount/arkmq-org-broker-controller-manager created
 role.rbac.authorization.k8s.io/arkmq-org-broker-operator-role created
 rolebinding.rbac.authorization.k8s.io/arkmq-org-broker-operator-rolebinding created
@@ -255,7 +255,7 @@ Create the broker CR with Vault Agent Injector annotations. The template constru
 ```{"stage":"agent-injector", "runtime":"bash", "label":"deploy hashicorp broker"}
 kubectl apply -f - << EOF
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: hashicorp-broker
 spec:
@@ -284,7 +284,7 @@ broker.broker.arkmq.org/hashicorp-broker created
 Wait for the broker to be ready:
 
 ```{"stage":"agent-injector", "label":"wait for hashicorp broker"}
-kubectl wait Broker hashicorp-broker --for=condition=Ready --namespace=vault-broker-project --timeout=300s
+kubectl wait BrokerCluster hashicorp-broker --for=condition=Ready --namespace=vault-broker-project --timeout=300s
 ```
 ```shell markdown_runner
 broker.broker.arkmq.org/hashicorp-broker condition met
@@ -413,7 +413,7 @@ Create the broker CR with an environment variable that gets injected from Vault.
 ```{"stage":"banzai", "runtime":"bash", "label":"deploy banzai broker"}
 kubectl apply -f - << EOF
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: banzai-broker
 spec:
@@ -438,7 +438,7 @@ broker.broker.arkmq.org/banzai-broker created
 Wait for the broker to be ready:
 
 ```{"stage":"banzai", "label":"wait for banzai broker"}
-kubectl wait Broker banzai-broker --for=condition=Ready --namespace=vault-broker-project --timeout=300s
+kubectl wait BrokerCluster banzai-broker --for=condition=Ready --namespace=vault-broker-project --timeout=300s
 ```
 ```shell markdown_runner
 broker.broker.arkmq.org/banzai-broker condition met

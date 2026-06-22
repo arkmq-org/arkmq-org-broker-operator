@@ -132,7 +132,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 func (r *BrokerServiceReconciler) getOwned() []client.ObjectList {
 	return []client.ObjectList{
 		&corev1.SecretList{},
-		&broker.BrokerList{},
+		&broker.BrokerClusterList{},
 		&corev1.ServiceList{}}
 }
 
@@ -140,7 +140,7 @@ func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
 	// we want to create/update in this order
 	return []reflect.Type{
 		reflect.TypeOf(corev1.Secret{}),
-		reflect.TypeOf(broker.Broker{}),
+		reflect.TypeOf(broker.BrokerCluster{}),
 		reflect.TypeOf(corev1.Service{})}
 }
 
@@ -173,10 +173,10 @@ func (reconciler *BrokerServiceInstanceReconciler) processSpec() (err error) {
 
 func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 
-	var desired *broker.Broker
-	obj := reconciler.CloneOfDeployed(reflect.TypeOf(broker.Broker{}), reconciler.instance.Name)
+	var desired *broker.BrokerCluster
+	obj := reconciler.CloneOfDeployed(reflect.TypeOf(broker.BrokerCluster{}), reconciler.instance.Name)
 	if obj != nil {
-		desired = obj.(*broker.Broker)
+		desired = obj.(*broker.BrokerCluster)
 	} else {
 		desired = common.GenerateArtemis(reconciler.instance.Name, reconciler.instance.Namespace)
 	}
@@ -354,9 +354,9 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 		}
 		appsProvisionedCondition.Reason = broker.AppsProvisionedConditionNotReadyReason
 	} else {
-		obj := reconciler.CloneOfDeployed(reflect.TypeOf(broker.Broker{}), reconciler.instance.Name)
+		obj := reconciler.CloneOfDeployed(reflect.TypeOf(broker.BrokerCluster{}), reconciler.instance.Name)
 		if obj != nil {
-			deployed := obj.(*broker.Broker)
+			deployed := obj.(*broker.BrokerCluster)
 			brokerDeployed := meta.FindStatusCondition(deployed.Status.Conditions, broker.DeployedConditionType)
 
 			if brokerDeployed != nil {
@@ -598,7 +598,7 @@ func (r *BrokerServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&broker.BrokerService{}).
-		Owns(&broker.Broker{}).
+		Owns(&broker.BrokerCluster{}).
 		Watches(&broker.BrokerApp{}, &appToServiceHandler{}).
 		Complete(r)
 }

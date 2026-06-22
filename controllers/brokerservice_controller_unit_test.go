@@ -343,7 +343,7 @@ func TestReconcileDeployedConditionTransition(t *testing.T) {
 	}
 
 	// Setup fake client with indexer required by controller
-	builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(svc).WithStatusSubresource(svc, &v1beta2.Broker{})
+	builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(svc).WithStatusSubresource(svc, &v1beta2.BrokerCluster{})
 	builder.WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 		app := rawObj.(*v1beta2.BrokerApp)
 		if app.Status.Service != nil {
@@ -376,7 +376,7 @@ func TestReconcileDeployedConditionTransition(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// 2. Update underlying Broker to be Ready
-	brokerCR := &v1beta2.Broker{}
+	brokerCR := &v1beta2.BrokerCluster{}
 	err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
 	assert.NoError(t, err)
 
@@ -492,7 +492,7 @@ func TestBrokerServiceReconcileStatusAppliedApps(t *testing.T) {
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(namespace, oc, svc, app).
-		WithStatusSubresource(svc, &v1beta2.Broker{}).
+		WithStatusSubresource(svc, &v1beta2.BrokerCluster{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
 			if app.Status.Service != nil {
@@ -525,7 +525,7 @@ func TestBrokerServiceReconcileStatusAppliedApps(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("%s-%s", ns, appName), secret.Annotations[common.ProvisionedAppsAnnotation])
 
 	// 3. Update Broker status to simulate broker picking up the config
-	brokerCR := &v1beta2.Broker{}
+	brokerCR := &v1beta2.BrokerCluster{}
 	err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
 	assert.NoError(t, err)
 
@@ -621,7 +621,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(namespace, oc, svc, app1).
-		WithStatusSubresource(svc, &v1beta2.Broker{}).
+		WithStatusSubresource(svc, &v1beta2.BrokerCluster{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
 			if app.Status.Service != nil {
@@ -646,7 +646,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 	secretV1 := secret.ResourceVersion
 
 	// Update Broker Status to point to Secret v1
-	brokerCR := &v1beta2.Broker{}
+	brokerCR := &v1beta2.BrokerCluster{}
 	err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
 	assert.NoError(t, err)
 	brokerCR.Status.Conditions = []metav1.Condition{
@@ -761,7 +761,7 @@ func TestBrokerServiceReconcileAppsProvisionedCondition(t *testing.T) {
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc).
-		WithStatusSubresource(svc, &v1beta2.Broker{}).
+		WithStatusSubresource(svc, &v1beta2.BrokerCluster{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
 			if app.Status.Service != nil {
@@ -797,7 +797,7 @@ func TestBrokerServiceReconcileAppsProvisionedCondition(t *testing.T) {
 	assert.NotEmpty(t, secret.ResourceVersion)
 
 	// 3. Update Broker status to simulate broker picking up the config
-	brokerCR := &v1beta2.Broker{}
+	brokerCR := &v1beta2.BrokerCluster{}
 	err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
 	assert.NoError(t, err)
 
@@ -915,7 +915,7 @@ func TestBrokerServiceReconcilePrometheusOverrideSecret(t *testing.T) {
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(namespace, oc, svc, app).
-		WithStatusSubresource(svc, &v1beta2.Broker{}).
+		WithStatusSubresource(svc, &v1beta2.BrokerCluster{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
 			if app.Status.Service != nil {
@@ -1005,7 +1005,7 @@ func TestBrokerServiceReconcilePrometheusOverrideNoApps(t *testing.T) {
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(namespace, oc, svc).
-		WithStatusSubresource(svc, &v1beta2.Broker{}).
+		WithStatusSubresource(svc, &v1beta2.BrokerCluster{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
 			if app.Status.Service != nil {
@@ -1391,7 +1391,7 @@ func TestBrokerServiceConditionTransitionsOnRecovery(t *testing.T) {
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(svc).
-		WithStatusSubresource(svc, &v1beta2.Broker{})).
+		WithStatusSubresource(svc, &v1beta2.BrokerCluster{})).
 		Build()
 
 	// Create Reconciler
@@ -1417,7 +1417,7 @@ func TestBrokerServiceConditionTransitionsOnRecovery(t *testing.T) {
 	assert.Equal(t, v1beta2.DeployedConditionNotReadyReason, deployedCond.Reason)
 
 	// 2. Update Broker to be ready and create StatefulSet
-	brokerCR := &v1beta2.Broker{}
+	brokerCR := &v1beta2.BrokerCluster{}
 	err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
 	assert.NoError(t, err)
 

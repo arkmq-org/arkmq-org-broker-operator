@@ -320,7 +320,7 @@ func GetClusterDomain() string {
 	return *ClusterDomain
 }
 
-func DetermineCompactVersionToUse(customResource *v1beta2.Broker) (string, error) {
+func DetermineCompactVersionToUse(customResource *v1beta2.BrokerCluster) (string, error) {
 	log := ctrl.Log.WithName("util_common")
 	resolvedFullVersion, err := ResolveBrokerVersionFromCR(customResource)
 	if err != nil {
@@ -332,7 +332,7 @@ func DetermineCompactVersionToUse(customResource *v1beta2.Broker) (string, error
 	return compactVersionToUse, nil
 }
 
-func ResolveBrokerVersionFromCR(cr *v1beta2.Broker) (string, error) {
+func ResolveBrokerVersionFromCR(cr *v1beta2.BrokerCluster) (string, error) {
 
 	if cr.Spec.Version != "" {
 		_, verr := semver.ParseTolerant(cr.Spec.Version)
@@ -348,7 +348,7 @@ func ResolveBrokerVersionFromCR(cr *v1beta2.Broker) (string, error) {
 	return result.String(), nil
 }
 
-func DetermineImageToUse(customResource *v1beta2.Broker, imageTypeKey string) string {
+func DetermineImageToUse(customResource *v1beta2.BrokerCluster, imageTypeKey string) string {
 
 	log := ctrl.Log.WithName("util_common")
 	found := false
@@ -379,12 +379,12 @@ func DetermineImageToUse(customResource *v1beta2.Broker, imageTypeKey string) st
 	return imageName
 }
 
-func SetStatusConditionWithGeneration(cr *v1beta2.Broker, condition metav1.Condition) {
+func SetStatusConditionWithGeneration(cr *v1beta2.BrokerCluster, condition metav1.Condition) {
 	condition.ObservedGeneration = cr.Generation
 	meta.SetStatusCondition(&cr.Status.Conditions, condition)
 }
 
-func ProcessStatus(cr *v1beta2.Broker, client rtclient.Client, namespacedName types.NamespacedName, namer Namers, reconcileError error) {
+func ProcessStatus(cr *v1beta2.BrokerCluster, client rtclient.Client, namespacedName types.NamespacedName, namer Namers, reconcileError error) {
 
 	reqLogger := ctrl.Log.WithName("util_process_status").WithValues("ActiveMQArtemis Name", cr.Name)
 
@@ -401,7 +401,7 @@ func ProcessStatus(cr *v1beta2.Broker, client rtclient.Client, namespacedName ty
 	meta.SetStatusCondition(&cr.Status.Conditions, getDeploymentCondition(cr, client, ValidCondition.Status != metav1.ConditionFalse, reconcileError))
 }
 
-func UpdateBlockedStatus(cr *v1beta2.Broker, blocked bool) {
+func UpdateBlockedStatus(cr *v1beta2.BrokerCluster, blocked bool) {
 	if blocked {
 		SetStatusConditionWithGeneration(cr, metav1.Condition{
 			Type:    v1beta2.ReconcileBlockedType,
@@ -414,7 +414,7 @@ func UpdateBlockedStatus(cr *v1beta2.Broker, blocked bool) {
 	}
 }
 
-func updateVersionStatus(cr *v1beta2.Broker) {
+func updateVersionStatus(cr *v1beta2.BrokerCluster) {
 	cr.Status.Version.Image = ResolveImage(cr, BrokerImageKey)
 	cr.Status.Version.InitImage = ResolveImage(cr, InitImageKey)
 	cr.Status.Version.BrokerVersion, _ = ResolveBrokerVersionFromCR(cr)
@@ -450,7 +450,7 @@ func updateVersionStatus(cr *v1beta2.Broker) {
 	}
 }
 
-func ResolveImage(customResource *v1beta2.Broker, key string) string {
+func ResolveImage(customResource *v1beta2.BrokerCluster, key string) string {
 	var imageName string
 
 	if key == InitImageKey && isLockedDown(customResource.Spec.DeploymentPlan.InitImage) {
@@ -467,7 +467,7 @@ func isLockedDown(imageAttribute string) bool {
 	return imageAttribute != "placeholder" && imageAttribute != ""
 }
 
-func ValidateBrokerImageVersion(customResource *v1beta2.Broker) *metav1.Condition {
+func ValidateBrokerImageVersion(customResource *v1beta2.BrokerCluster) *metav1.Condition {
 	var result *metav1.Condition = nil
 
 	_, err := ResolveBrokerVersionFromCR(customResource)
@@ -512,7 +512,7 @@ func ValidateBrokerImageVersion(customResource *v1beta2.Broker) *metav1.Conditio
 	return result
 }
 
-func updateScaleStatus(cr *v1beta2.Broker, namer Namers) {
+func updateScaleStatus(cr *v1beta2.BrokerCluster, namer Namers) {
 	labels := make([]string, 0, len(namer.LabelBuilder.Labels())+len(cr.Spec.DeploymentPlan.Labels))
 	for k, v := range namer.LabelBuilder.Labels() {
 		labels = append(labels, fmt.Sprintf("%s=%s", k, v))
@@ -524,7 +524,7 @@ func updateScaleStatus(cr *v1beta2.Broker, namer Namers) {
 	cr.Status.ScaleLabelSelector = strings.Join(labels[:], ",")
 }
 
-func updatePodStatus(cr *v1beta2.Broker, client rtclient.Client, namespacedName types.NamespacedName) olm.DeploymentStatus {
+func updatePodStatus(cr *v1beta2.BrokerCluster, client rtclient.Client, namespacedName types.NamespacedName) olm.DeploymentStatus {
 
 	reqLogger := ctrl.Log.WithName("util_update_pod_status").WithValues("ActiveMQArtemis Name", namespacedName.Name)
 	reqLogger.V(1).Info("Getting status for pods")
@@ -559,7 +559,7 @@ func updatePodStatus(cr *v1beta2.Broker, client rtclient.Client, namespacedName 
 	return status
 }
 
-func getValidCondition(cr *v1beta2.Broker) metav1.Condition {
+func getValidCondition(cr *v1beta2.BrokerCluster) metav1.Condition {
 	// add valid true if none exists
 	for _, c := range cr.Status.Conditions {
 		if c.Type == v1beta2.ValidConditionType {
@@ -573,7 +573,7 @@ func getValidCondition(cr *v1beta2.Broker) metav1.Condition {
 	}
 }
 
-func GetSingleStatefulSetStatus(ss *appsv1.StatefulSet, cr *v1beta2.Broker) olm.DeploymentStatus {
+func GetSingleStatefulSetStatus(ss *appsv1.StatefulSet, cr *v1beta2.BrokerCluster) olm.DeploymentStatus {
 	var ready, starting, stopped []string
 	var requestedCount = int32(0)
 	if ss.Spec.Replicas != nil {
@@ -605,7 +605,7 @@ func GetSingleStatefulSetStatus(ss *appsv1.StatefulSet, cr *v1beta2.Broker) olm.
 	}
 }
 
-func getDeploymentCondition(cr *v1beta2.Broker, client rtclient.Client, valid bool, reconcileError error) metav1.Condition {
+func getDeploymentCondition(cr *v1beta2.BrokerCluster, client rtclient.Client, valid bool, reconcileError error) metav1.Condition {
 
 	if !valid {
 		return metav1.Condition{
@@ -690,18 +690,18 @@ func PodStartingStatusDigestMessage(podName string, status corev1.PodStatus) str
 	return buf.String()
 }
 
-func IsRestricted(customResource *v1beta2.Broker) bool {
+func IsRestricted(customResource *v1beta2.BrokerCluster) bool {
 	return customResource.Spec.Restricted != nil && *customResource.Spec.Restricted
 }
 
-func GetDeploymentSize(cr *v1beta2.Broker) int32 {
+func GetDeploymentSize(cr *v1beta2.BrokerCluster) int32 {
 	if cr.Spec.DeploymentPlan.Size == nil || IsRestricted(cr) {
 		return DefaultDeploymentSize
 	}
 	return *cr.Spec.DeploymentPlan.Size
 }
 
-func GetDeployedResources(instance *v1beta2.Broker, client rtclient.Client, onOpenShift bool) (map[reflect.Type][]rtclient.Object, error) {
+func GetDeployedResources(instance *v1beta2.BrokerCluster, client rtclient.Client, onOpenShift bool) (map[reflect.Type][]rtclient.Object, error) {
 	log := ctrl.Log.WithName("util_common")
 	reader := read.New(client).WithNamespace(instance.Namespace).WithOwnerObject(instance)
 	var resourceMap map[reflect.Type][]rtclient.Object
@@ -773,7 +773,7 @@ func DetectOpenshiftWith(config *rest.Config) (bool, error) {
 	return *isOpenshift, nil
 }
 
-func GetOperandCertSecretName(cr *v1beta2.Broker, client rtclient.Client) string {
+func GetOperandCertSecretName(cr *v1beta2.BrokerCluster, client rtclient.Client) string {
 
 	secret, _ := ResolveSecret(cr.Name, cr.Namespace, DefaultOperandCertSecretName, client)
 
@@ -825,7 +825,7 @@ func UnsetOperatorCASecretName() {
 	operatorCASecretName = nil
 }
 
-func GetPrometheusCertSecretName(cr *v1beta2.Broker, client rtclient.Client) string {
+func GetPrometheusCertSecretName(cr *v1beta2.BrokerCluster, client rtclient.Client) string {
 	// Determine the base secret name (from env or default)
 	if prometheusCertSecretName == nil {
 		prometheusCertSecretName = fromEnv("BASE_PROMETHEUS_CERT_SECRET_NAME", DefaultPrometheusCertSecretName)
@@ -1142,8 +1142,8 @@ func HasVolumeMount(container *corev1.Container, mountName string) bool {
 	return false
 }
 
-func GenerateArtemis(name string, namespace string) *v1beta2.Broker {
-	return &v1beta2.Broker{
+func GenerateArtemis(name string, namespace string) *v1beta2.BrokerCluster {
+	return &v1beta2.BrokerCluster{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "ActiveMQArtemis",
 			APIVersion: v1beta2.GroupVersion.Identifier(),
@@ -1152,7 +1152,7 @@ func GenerateArtemis(name string, namespace string) *v1beta2.Broker {
 			Name:      name,
 			Namespace: namespace,
 		},
-		Spec: v1beta2.BrokerSpec{},
+		Spec: v1beta2.BrokerClusterSpec{},
 	}
 }
 

@@ -46,8 +46,8 @@ import (
 
 func TestValidate(t *testing.T) {
 
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			ResourceTemplates: []v1beta2.ResourceTemplate{
 				{
 					// reserved key
@@ -59,8 +59,8 @@ func TestValidate(t *testing.T) {
 
 	namer := MakeNamers(cr)
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	valid, retry := ri.validate(cr, k8sClient, *namer)
 
@@ -76,8 +76,8 @@ func TestValidate(t *testing.T) {
 
 func TestValidateBrokerPropsDuplicate(t *testing.T) {
 
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			BrokerProperties: []string{
 				"min=X",
 				"min=y",
@@ -87,8 +87,8 @@ func TestValidateBrokerPropsDuplicate(t *testing.T) {
 
 	namer := MakeNamers(cr)
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	valid, retry := ri.validate(cr, k8sClient, *namer)
 
@@ -104,8 +104,8 @@ func TestValidateBrokerPropsDuplicate(t *testing.T) {
 
 func TestValidateBrokerPropsDuplicateOnFirstEquals(t *testing.T) {
 
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			BrokerProperties: []string{
 				"nameWith\\=equals_not_matched=X",
 				"nameWith\\=equals_not_matched=Y",
@@ -115,8 +115,8 @@ func TestValidateBrokerPropsDuplicateOnFirstEquals(t *testing.T) {
 
 	namer := MakeNamers(cr)
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	valid, retry := ri.validate(cr, k8sClient, *namer)
 
@@ -132,8 +132,8 @@ func TestValidateBrokerPropsDuplicateOnFirstEquals(t *testing.T) {
 
 func TestValidateBrokerPropsDuplicateOnFirstEqualsCorrect(t *testing.T) {
 
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			BrokerProperties: []string{
 				"nameWith\\=equals_A_not_matched=X",
 				"nameWith\\=equals_B_not_matched=Y",
@@ -143,8 +143,8 @@ func TestValidateBrokerPropsDuplicateOnFirstEqualsCorrect(t *testing.T) {
 
 	namer := MakeNamers(cr)
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	valid, retry := ri.validate(cr, k8sClient, *namer)
 
@@ -157,23 +157,23 @@ func TestValidateBrokerPropsDuplicateOnFirstEqualsCorrect(t *testing.T) {
 func TestStatusPodsCheckCached(t *testing.T) {
 
 	replicas := int32(1)
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      "broker",
 			Namespace: "some-ns",
 		},
-		Spec: v1beta2.BrokerSpec{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				Size: &replicas,
 			},
 		},
-		Status: v1beta2.BrokerStatus{
+		Status: v1beta2.BrokerClusterStatus{
 			DeploymentPlanSize: replicas,
 		},
 	}
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	checkOk := func(brokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError {
 		return nil
@@ -204,13 +204,13 @@ func TestStatusPodsCheckCached(t *testing.T) {
 
 func TestJolokiaStatusCached(t *testing.T) {
 
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: v1.ObjectMeta{Name: "a"},
-		Spec:       v1beta2.BrokerSpec{},
+		Spec:       v1beta2.BrokerClusterSpec{},
 	}
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	checkOk := func(brokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError {
 		return nil
@@ -247,17 +247,17 @@ func TestJolokiaStatusCached(t *testing.T) {
 func TestErrOnNotFoundSecret(t *testing.T) {
 
 	boolTrue = true
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: v1.ObjectMeta{Name: "a"},
-		Spec: v1beta2.BrokerSpec{
+		Spec: v1beta2.BrokerClusterSpec{
 			Restricted: &boolTrue,
 		},
 	}
 
 	namer := MakeNamers(cr)
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	var times = 0
 	interceptorFuncs := interceptor.Funcs{
@@ -279,8 +279,8 @@ func TestErrOnNotFoundSecret(t *testing.T) {
 }
 
 func TestMakeExtraVolumeMounts_NoExtraVolumes(t *testing.T) {
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{},
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{},
 	}
 
 	volumeMounts := MakeExtraVolumeMounts(cr)
@@ -288,8 +288,8 @@ func TestMakeExtraVolumeMounts_NoExtraVolumes(t *testing.T) {
 }
 
 func TestMakeExtraVolumeMounts_WithExtraVolumes(t *testing.T) {
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ExtraVolumes: []corev1.Volume{
 					{
@@ -310,8 +310,8 @@ func TestMakeExtraVolumeMounts_WithExtraVolumes(t *testing.T) {
 }
 
 func TestMakeExtraVolumeMounts_WithExtraVolumesAndMountOverride(t *testing.T) {
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ExtraVolumes: []corev1.Volume{
 					{
@@ -338,8 +338,8 @@ func TestMakeExtraVolumeMounts_WithExtraVolumesAndMountOverride(t *testing.T) {
 }
 
 func TestMakeExtraVolumeMounts_WithExtraVolumeClaimTemplates(t *testing.T) {
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ExtraVolumeClaimTemplates: []v1beta2.VolumeClaimTemplate{
 					{
@@ -364,8 +364,8 @@ func TestMakeExtraVolumeMounts_WithExtraVolumeClaimTemplates(t *testing.T) {
 }
 
 func TestMakeExtraVolumeMounts_WithBothExtraVolumesAndClaims(t *testing.T) {
-	cr := &v1beta2.Broker{
-		Spec: v1beta2.BrokerSpec{
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
 				ExtraVolumes: []corev1.Volume{
 					{
@@ -399,17 +399,17 @@ func TestMakeExtraVolumeMounts_WithBothExtraVolumesAndClaims(t *testing.T) {
 
 func TestValidateRestrictedNeedsSecret(t *testing.T) {
 
-	cr := &v1beta2.Broker{
+	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: v1.ObjectMeta{Name: "a"},
-		Spec: v1beta2.BrokerSpec{
+		Spec: v1beta2.BrokerClusterSpec{
 			Restricted: &boolTrue,
 		},
 	}
 
 	namer := MakeNamers(cr)
 
-	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-	ri := NewBrokerReconcilerImpl(cr, r)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	fakeSecrets := map[string]client.Object{}
 	interceptorFuncs := interceptor.Funcs{

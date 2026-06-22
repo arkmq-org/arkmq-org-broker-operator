@@ -31,9 +31,9 @@ spec:
   customresourcedefinitions:
     owned:
     - description: A stateful deployment of one or more brokers
-      displayName: Broker
-      kind: Broker
-      name: brokers.broker.arkmq.org
+      displayName: Broker Cluster
+      kind: BrokerCluster
+      name: brokerclusters.broker.arkmq.org
       resources:
       - kind: ConfigMap
         name: ""
@@ -6364,9 +6364,9 @@ spec:
         - urn:alm:descriptor:io.kubernetes.conditions
       version: v1beta2
     - description: A stateful deployment of one or more brokers
-      displayName: Broker
-      kind: Broker
-      name: brokers.broker.arkmq.org
+      displayName: Broker Cluster
+      kind: BrokerCluster
+      name: brokerclusters.broker.arkmq.org
       resources:
       - kind: ConfigMap
         name: ""

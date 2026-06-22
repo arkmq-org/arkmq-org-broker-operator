@@ -9338,16 +9338,16 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.5
-  name: brokers.broker.arkmq.org
+  name: brokerclusters.broker.arkmq.org
 spec:
   group: broker.arkmq.org
   names:
-    kind: Broker
-    listKind: BrokerList
-    plural: brokers
+    kind: BrokerCluster
+    listKind: BrokerClusterList
+    plural: brokerclusters
     shortNames:
-    - b
-    singular: broker
+    - bc
+    singular: brokercluster
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -9382,7 +9382,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: BrokerSpec defines the desired state of Broker
+            description: BrokerClusterSpec defines the desired state of BrokerCluster
             properties:
               acceptors:
                 description: Specifies the acceptor configuration
@@ -13885,7 +13885,7 @@ spec:
                 type: string
             type: object
           status:
-            description: BrokerStatus defines the observed state of Broker
+            description: BrokerClusterStatus defines the observed state of BrokerCluster
             properties:
               conditions:
                 description: |-
@@ -14469,7 +14469,7 @@ rules:
   - broker.arkmq.org
   resources:
   - brokerapps
-  - brokers
+  - brokerclusters
   - brokerservices
   verbs:
   - create
@@ -14492,13 +14492,13 @@ rules:
 - apiGroups:
   - broker.arkmq.org
   resources:
-  - brokers/finalizers
+  - brokerclusters/finalizers
   verbs:
   - update
 - apiGroups:
   - broker.arkmq.org
   resources:
-  - brokers/status
+  - brokerclusters/status
   - brokerservices/status
   verbs:
   - get

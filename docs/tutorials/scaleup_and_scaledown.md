@@ -70,7 +70,7 @@ Deploy the operator to the `myproject` namespace:
 ```
 ```shell markdown_runner
 Deploying operator to watch single namespace
-customresourcedefinition.apiextensions.k8s.io/brokers.broker.arkmq.org created
+customresourcedefinition.apiextensions.k8s.io/brokerclusters.broker.arkmq.org created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisaddresses.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisscaledowns.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemissecurities.broker.amq.io created
@@ -111,7 +111,7 @@ Create it using kubectl:
 ```{"stage":"deploy","id":"create_broker","runtime":"bash"}
 kubectl apply -f - -n myproject <<EOF
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: ex-aao
 spec:
@@ -139,7 +139,7 @@ The custom resource tells the operator to deploy one broker pod with **persisten
 Wait for the broker to be ready:
 
 ```{"stage":"deploy","id":"wait_broker"}
-kubectl wait Broker ex-aao --for=condition=Ready --namespace=myproject --timeout=300s
+kubectl wait BrokerCluster ex-aao --for=condition=Ready --namespace=myproject --timeout=300s
 ```
 ```shell markdown_runner
 broker.broker.arkmq.org/ex-aao condition met
@@ -161,7 +161,7 @@ ex-aao-ss-0                                           1/1     Running   0       
 In this step we will scale the broker pods from one to two 
 
 ```{"stage":"scale_up","id":"scale_to_2"}
-kubectl patch broker ex-aao -n myproject --type='json' -p='[{"op": "replace", "path": "/spec/deploymentPlan/size", "value": 2}]'
+kubectl patch brokercluster ex-aao -n myproject --type='json' -p='[{"op": "replace", "path": "/spec/deploymentPlan/size", "value": 2}]'
 ```
 ```shell markdown_runner
 broker.broker.arkmq.org/ex-aao patched
@@ -170,7 +170,7 @@ broker.broker.arkmq.org/ex-aao patched
 Wait for the scale up to complete:
 
 ```{"stage":"scale_up","id":"wait_scale_up"}
-kubectl wait Broker ex-aao --for=condition=Ready --namespace=myproject --timeout=300s
+kubectl wait BrokerCluster ex-aao --for=condition=Ready --namespace=myproject --timeout=300s
 ```
 ```shell markdown_runner
 broker.broker.arkmq.org/ex-aao condition met
@@ -231,7 +231,7 @@ When a broker pod is scaled down, the operator waits for it to forward all messa
 Now scale down the cluster from two pods to one
 
 ```{"stage":"scale_down","id":"scale_to_1"}
-kubectl patch broker ex-aao -n myproject --type='json' -p='[{"op": "replace", "path": "/spec/deploymentPlan/size", "value": 1}]'
+kubectl patch brokercluster ex-aao -n myproject --type='json' -p='[{"op": "replace", "path": "/spec/deploymentPlan/size", "value": 1}]'
 ```
 ```shell markdown_runner
 broker.broker.arkmq.org/ex-aao patched
@@ -240,7 +240,7 @@ broker.broker.arkmq.org/ex-aao patched
 Wait for the scale down and message migration to complete:
 
 ```{"stage":"scale_down","id":"wait_scale_down"}
-kubectl wait Broker ex-aao --for=condition=Ready --namespace=myproject --timeout=300s
+kubectl wait BrokerCluster ex-aao --for=condition=Ready --namespace=myproject --timeout=300s
 ```
 ```shell markdown_runner
 broker.broker.arkmq.org/ex-aao condition met

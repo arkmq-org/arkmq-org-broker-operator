@@ -73,7 +73,7 @@ After the `post-config.sh` script is executed, the broker instance is launched w
 
     ```yaml
     apiVersion: broker.arkmq.org/v1beta2
-    kind: Broker
+    kind: BrokerCluster
     metadata:
         name: ex-aao
         spec:

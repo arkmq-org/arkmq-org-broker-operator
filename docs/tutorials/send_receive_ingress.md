@@ -208,7 +208,7 @@ export CERT_FOLDER=$(pwd)
 ```{"stage":"deploy", "runtime":"bash", "label":"deploy the broker"}
 kubectl apply -f - << EOF
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: send-receive
   namespace: send-receive-project
@@ -233,7 +233,7 @@ broker.broker.arkmq.org/send-receive created
 Wait for the Broker to be ready:
 
 ```{"stage":"deploy"}
-kubectl wait Broker send-receive --for=condition=Ready --namespace=send-receive-project --timeout=240s
+kubectl wait BrokerCluster send-receive --for=condition=Ready --namespace=send-receive-project --timeout=240s
 ```
 ```shell markdown_runner
 broker.broker.arkmq.org/send-receive condition met
@@ -256,7 +256,7 @@ send-receive-sslacceptor-0-svc-ing   nginx   send-receive-sslacceptor-0-svc-ing-
 #### Get the actual broker version
 
 ```{"stage":"test_setup", "runtime":"bash", "label":"get latest broker version"}
-export BROKER_VERSION=$(kubectl get Broker send-receive --namespace=send-receive-project -o json | jq .status.version.brokerVersion -r)
+export BROKER_VERSION=$(kubectl get BrokerCluster send-receive --namespace=send-receive-project -o json | jq .status.version.brokerVersion -r)
 echo broker version: $BROKER_VERSION
 ```
 ```shell markdown_runner

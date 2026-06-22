@@ -64,7 +64,7 @@ var _ = Describe("templates", func() {
 					Namespace: defaultNamespace,
 				}
 
-				createdCrd := &v1beta2.Broker{}
+				createdCrd := &v1beta2.BrokerCluster{}
 				By("Checking status")
 				Eventually(func(g Gomega) {
 					g.Expect(k8sClient.Get(ctx, brokerKey, createdCrd)).Should(Succeed())
@@ -111,7 +111,7 @@ var _ = Describe("templates", func() {
 					Namespace: defaultNamespace,
 				}
 
-				createdCrd := &v1beta2.Broker{}
+				createdCrd := &v1beta2.BrokerCluster{}
 				By("Checking status")
 				Eventually(func(g Gomega) {
 					g.Expect(k8sClient.Get(ctx, brokerKey, createdCrd)).Should(Succeed())
@@ -165,7 +165,7 @@ var _ = Describe("templates", func() {
 					Namespace: defaultNamespace,
 				}
 
-				createdCrd := &v1beta2.Broker{}
+				createdCrd := &v1beta2.BrokerCluster{}
 				By("Checking status - should succeed even with kind field present")
 				Eventually(func(g Gomega) {
 					g.Expect(k8sClient.Get(ctx, brokerKey, createdCrd)).Should(Succeed())

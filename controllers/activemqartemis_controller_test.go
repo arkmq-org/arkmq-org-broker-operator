@@ -1706,7 +1706,7 @@ var _ = Describe("artemis controller", func() {
 	Context("Versions Test", func() {
 		It("default image to use latest", func() {
 			crd := generateArtemisSpec(defaultNamespace)
-			brokerObj, convErr := ConvertArtemisToBroker(&crd)
+			brokerObj, convErr := ConvertArtemisToBrokerCluster(&crd)
 			Expect(convErr).To(BeNil())
 			imageToUse := common.DetermineImageToUse(brokerObj, "KUBERNETES")
 			Expect(imageToUse).To(Equal(version.GetDefaultKubeImage()), "actual", imageToUse)
@@ -3911,11 +3911,11 @@ var _ = Describe("artemis controller", func() {
 			crd.Spec.Console.Expose = true
 			crd.Spec.Console.SSLEnabled = true
 
-			brokerCR, convertErr := ConvertArtemisToBroker(&crd)
+			brokerCR, convertErr := ConvertArtemisToBrokerCluster(&crd)
 			Expect(convertErr).To(BeNil())
 
-			outer := NewBrokerReconciler(k8Manager, ctrl.Log, isOpenshift)
-			reconcilerImpl := NewBrokerReconcilerImpl(brokerCR, outer)
+			outer := NewBrokerClusterReconciler(k8Manager, ctrl.Log, isOpenshift)
+			reconcilerImpl := NewBrokerClusterReconcilerImpl(brokerCR, outer)
 
 			defaultConsoleSecretName := crd.Name + "-console-secret"
 			tlsSecret, err := CreateTlsSecret(defaultConsoleSecretName, defaultNamespace, "password", nil)
@@ -4007,11 +4007,11 @@ var _ = Describe("artemis controller", func() {
 				g.Expect(createdCrd.ResourceVersion).ShouldNot(BeEmpty())
 			}, timeout, interval).Should(Succeed())
 
-			brokerCR, convertErr := ConvertArtemisToBroker(createdCrd)
+			brokerCR, convertErr := ConvertArtemisToBrokerCluster(createdCrd)
 			Expect(convertErr).To(BeNil())
 
-			outer := NewBrokerReconciler(k8Manager, ctrl.Log, isOpenshift)
-			reconcilerImpl := NewBrokerReconcilerImpl(brokerCR, outer)
+			outer := NewBrokerClusterReconciler(k8Manager, ctrl.Log, isOpenshift)
+			reconcilerImpl := NewBrokerClusterReconcilerImpl(brokerCR, outer)
 
 			namers := MakeNamers(brokerCR)
 			defaultConsoleSecretName := createdCrd.Name + "-console-secret"
@@ -4115,11 +4115,11 @@ var _ = Describe("artemis controller", func() {
 
 			}, timeout, interval).Should(Succeed())
 
-			brokerCR, convertErr := ConvertArtemisToBroker(&crd)
+			brokerCR, convertErr := ConvertArtemisToBrokerCluster(&crd)
 			Expect(convertErr).To(BeNil())
 
-			outer := NewBrokerReconciler(k8Manager, ctrl.Log, isOpenshift)
-			reconcilerImpl := NewBrokerReconcilerImpl(brokerCR, outer)
+			outer := NewBrokerClusterReconciler(k8Manager, ctrl.Log, isOpenshift)
+			reconcilerImpl := NewBrokerClusterReconcilerImpl(brokerCR, outer)
 			reconcilerImpl.deployed = make(map[reflect.Type][]client.Object)
 
 			namers := MakeNamers(brokerCR)
@@ -4778,7 +4778,7 @@ var _ = Describe("artemis controller", func() {
 			crd.Spec.DeploymentPlan.Labels["key7"] = "val7"
 			crd.Spec.DeploymentPlan.Labels["key8"] = "val8"
 
-			brokerCR, convertErr := ConvertArtemisToBroker(&crd)
+			brokerCR, convertErr := ConvertArtemisToBrokerCluster(&crd)
 			Expect(convertErr).To(BeNil())
 
 			namers := MakeNamers(brokerCR)
@@ -4796,7 +4796,7 @@ var _ = Describe("artemis controller", func() {
 			Expect(crd1.Status.ScaleLabelSelector).ShouldNot(BeEmpty())
 			Expect(sort.StringsAreSorted(strings.Split(crd1.Status.ScaleLabelSelector, ","))).Should(BeTrue())
 
-			Expect(EqualBrokerCRStatus(&crd0.Status, &crd1.Status)).Should(BeTrue())
+			Expect(EqualBrokerClusterCRStatus(&crd0.Status, &crd1.Status)).Should(BeTrue())
 		})
 	})
 
@@ -5638,7 +5638,7 @@ var _ = Describe("artemis controller", func() {
 			}, timeout, interval).Should(Succeed())
 
 			By("checking deployed resources of valid CR")
-			validBrokerCR, convertErr := ConvertArtemisToBroker(&validCrd)
+			validBrokerCR, convertErr := ConvertArtemisToBrokerCluster(&validCrd)
 			Expect(convertErr).To(BeNil())
 			deployedResources, err = common.GetDeployedResources(validBrokerCR, k8sClient, isOpenshift)
 			Expect(err).ShouldNot(HaveOccurred())
@@ -5655,7 +5655,7 @@ var _ = Describe("artemis controller", func() {
 				g.Expect(deployedCrd.Name).Should(Equal(invalidCrd.ObjectMeta.Name))
 			}, timeout, interval).Should(Succeed())
 
-			invalidBrokerCR, convertErr := ConvertArtemisToBroker(&invalidCrd)
+			invalidBrokerCR, convertErr := ConvertArtemisToBrokerCluster(&invalidCrd)
 			Expect(convertErr).To(BeNil())
 			deployedResources, err = common.GetDeployedResources(invalidBrokerCR, k8sClient, isOpenshift)
 			Expect(err).Should(Succeed())
@@ -5692,7 +5692,7 @@ var _ = Describe("artemis controller", func() {
 			}, timeout, interval).Should(Succeed())
 
 			By("checking deployed resources of updated invalid CR")
-			validBrokerCR, convertErr = ConvertArtemisToBroker(&validCrd)
+			validBrokerCR, convertErr = ConvertArtemisToBrokerCluster(&validCrd)
 			Expect(convertErr).To(BeNil())
 			deployedResources, err = common.GetDeployedResources(validBrokerCR, k8sClient, isOpenshift)
 			Expect(err).ShouldNot(HaveOccurred())
@@ -5736,7 +5736,7 @@ var _ = Describe("artemis controller", func() {
 				g.Expect(k8sClient.Get(ctx, crdKey, deployed)).Should(Succeed())
 				g.Expect(deployed.Name).Should(Equal(crd.Name))
 
-				deployedBrokerCR, convertErr := ConvertArtemisToBroker(deployed)
+				deployedBrokerCR, convertErr := ConvertArtemisToBrokerCluster(deployed)
 				g.Expect(convertErr).To(BeNil())
 				deployedResources, err := common.GetDeployedResources(deployedBrokerCR, k8sClient, true)
 				g.Expect(err).Should(Succeed())

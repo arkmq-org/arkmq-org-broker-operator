@@ -106,7 +106,7 @@ which looks like
 
 ```$yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: my-broker
 ```
@@ -137,7 +137,7 @@ For example if you want to scale up the above deployment to 2 pods, modify the s
 examples/broker/broker_single.yaml
 ```$yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: my-broker
 spec:
@@ -254,7 +254,7 @@ An operand with version >= 2.43.0 is necessary when jgroups discovery (the defau
 
 ```$yaml
 apiVersion: broker.arkmq.org/v1beta1
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: artemis-broker
 spec:
@@ -285,7 +285,7 @@ For example, you can deploy a cluster from our [broker cluster persistence examp
 
 ```$yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: my-broker
 spec:
@@ -366,7 +366,7 @@ Modify the ./examples/broker/broker_cluster_persistence.yaml to scale down to on
 
 ```$yaml
 apiVersion: broker.arkmq.org/v1beta2
-kind: Broker
+kind: BrokerCluster
 metadata:
   name: my-broker
 spec:

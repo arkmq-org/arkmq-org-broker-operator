@@ -27,8 +27,8 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// BrokerSpec defines the desired state of Broker
-type BrokerSpec struct {
+// BrokerClusterSpec defines the desired state of BrokerCluster
+type BrokerClusterSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
@@ -692,8 +692,8 @@ type BrokerUpgrades struct {
 	Minor bool `json:"minor"`
 }
 
-// BrokerStatus defines the observed state of Broker
-type BrokerStatus struct {
+// BrokerClusterStatus defines the observed state of BrokerCluster
+type BrokerClusterStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
@@ -763,7 +763,7 @@ type ExternalConfigStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:subresource:scale:specpath=.spec.deploymentPlan.size,statuspath=.status.deploymentPlanSize,selectorpath=.status.scaleLabelSelector
 //+kubebuilder:storageversion
-//+kubebuilder:resource:path=brokers,shortName=b
+//+kubebuilder:resource:path=brokerclusters,shortName=bc
 //+kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status",description="The state of the resource"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="The age of the resource"
 //+operator-sdk:csv:customresourcedefinitions:resources={{"Service", "v1"}}
@@ -772,29 +772,29 @@ type ExternalConfigStatus struct {
 //+operator-sdk:csv:customresourcedefinitions:resources={{"StatefulSet", "apps/v1"}}
 
 // A stateful deployment of one or more brokers
-// +operator-sdk:csv:customresourcedefinitions:displayName="Broker"
-type Broker struct {
+// +operator-sdk:csv:customresourcedefinitions:displayName="Broker Cluster"
+type BrokerCluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   BrokerSpec   `json:"spec,omitempty"`
-	Status BrokerStatus `json:"status,omitempty"`
+	Spec   BrokerClusterSpec   `json:"spec,omitempty"`
+	Status BrokerClusterStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
-// BrokerList contains a list of Broker
-type BrokerList struct {
+// BrokerClusterList contains a list of BrokerCluster
+type BrokerClusterList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Broker `json:"items"`
+	Items           []BrokerCluster `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&Broker{}, &BrokerList{})
+	SchemeBuilder.Register(&BrokerCluster{}, &BrokerClusterList{})
 }
 
-func (r *Broker) Hub() {
+func (r *BrokerCluster) Hub() {
 }
 
 const (

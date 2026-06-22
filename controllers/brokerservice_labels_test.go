@@ -89,7 +89,7 @@ func TestPodLabels_StandardKubernetesLabels(t *testing.T) {
 	_, err := r.Reconcile(context.TODO(), req)
 	assert.NoError(t, err)
 
-	broker := &v1beta2.Broker{}
+	broker := &v1beta2.BrokerCluster{}
 	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
 	assert.NoError(t, err)
 
@@ -160,7 +160,7 @@ func TestPodLabels_NetworkPolicyMatchingBrokerService(t *testing.T) {
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(service, netpol, nsObj).
-		WithStatusSubresource(service, &v1beta2.Broker{}).
+		WithStatusSubresource(service, &v1beta2.BrokerCluster{}).
 		WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
 			if app.Status.Service != nil {
@@ -205,7 +205,7 @@ func TestPodLabels_NetworkPolicyMatchingBrokerService(t *testing.T) {
 	assert.NoError(t, cl.Create(context.TODO(), ss))
 
 	// Update Broker CR status to mark as Deployed
-	broker := &v1beta2.Broker{}
+	broker := &v1beta2.BrokerCluster{}
 	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
 	assert.NoError(t, err)
 	meta.SetStatusCondition(&broker.Status.Conditions, metav1.Condition{
@@ -276,7 +276,7 @@ func TestPodLabels_NetworkPolicyMatchingComponentLabel(t *testing.T) {
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(service, netpol, nsObj).
-		WithStatusSubresource(service, &v1beta2.Broker{}).
+		WithStatusSubresource(service, &v1beta2.BrokerCluster{}).
 		WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
 			if app.Status.Service != nil {
@@ -321,7 +321,7 @@ func TestPodLabels_NetworkPolicyMatchingComponentLabel(t *testing.T) {
 	assert.NoError(t, cl.Create(context.TODO(), ss))
 
 	// Update Broker CR status to mark as Deployed
-	broker := &v1beta2.Broker{}
+	broker := &v1beta2.BrokerCluster{}
 	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
 	assert.NoError(t, err)
 	meta.SetStatusCondition(&broker.Status.Conditions, metav1.Condition{
