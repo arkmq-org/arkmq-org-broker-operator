@@ -4533,7 +4533,10 @@ spec:
                   type: object
                 type: array
               restricted:
-                description: Restricted deployment, mtls jolokia agent with RBAC
+                description: |-
+                  Deprecated: restricted mode is no longer supported on ActiveMQArtemis/BrokerCluster.
+                  Use the Broker CR instead. Setting this field to true will cause the operator to
+                  reject the CR with Valid=False.
                 type: boolean
               upgrades:
                 description: Specifies the upgrades (deprecated in favour of Version)

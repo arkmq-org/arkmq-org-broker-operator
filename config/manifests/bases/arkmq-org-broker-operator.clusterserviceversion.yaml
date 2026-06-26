@@ -997,9 +997,6 @@ spec:
           all resources
         displayName: Selector
         path: resourceTemplates[0].selector
-      - description: Restricted deployment, mtls jolokia agent with RBAC
-        displayName: Restricted
-        path: restricted
       - description: Specifies the upgrades (deprecated in favour of Version)
         displayName: Upgrades
         path: upgrades
@@ -1082,6 +1079,69 @@ spec:
         x-descriptors:
         - urn:alm:descriptor:org.w3:link
       version: v1
+    - description: A stateful deployment of one or more brokers
+      displayName: Broker
+      kind: Broker
+      name: brokers.broker.arkmq.org
+      resources:
+      - kind: ConfigMap
+        name: ""
+        version: v1
+      - kind: Secret
+        name: ""
+        version: v1
+      - kind: Service
+        name: ""
+        version: v1
+      - kind: StatefulSet
+        name: ""
+        version: apps/v1
+      specDescriptors:
+      - description: Specifies the deployment plan
+        displayName: Deployment Plan
+        path: deploymentPlan
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      - description: Optional list of key=value properties that are applied to the
+          broker configuration bean.
+        displayName: Broker Properties
+        path: brokerProperties
+      - description: Optional list of environment variables to apply to the container(s),
+          not exclusive
+        displayName: Environment Variables
+        path: env
+      - description: Specifies the template for various resources that the operator
+          controls
+        displayName: Resource Templates
+        path: resourceTemplates
+      - description: The desired version of the broker. Can be x, or x.y or x.y.z
+          to configure upgrades
+        displayName: Version
+        path: version
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
+      statusDescriptors:
+      - description: Conditions
+        displayName: Conditions
+        path: conditions
+        x-descriptors:
+        - urn:alm:descriptor:io.kubernetes.conditions
+      - description: The current pods
+        displayName: Pods Status
+        path: podStatus
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:podStatuses
+      - displayName: Deployment Plan Size
+        path: deploymentPlanSize
+      - displayName: Auto scale label selector
+        path: scaleLabelSelector
+      - displayName: External Configurations Status
+        path: externalConfigs
+      - displayName: Version Status
+        path: version
+      - displayName: Upgrade Status
+        path: upgrade
+      version: v1beta2
     - description: Adding and removing addresses using custom resource definitions
       displayName: ActiveMQ Artemis Address
       kind: ActiveMQArtemisAddress
@@ -2505,8 +2565,11 @@ spec:
           all resources
         displayName: Selector
         path: resourceTemplates[0].selector
-      - description: Restricted deployment, mtls jolokia agent with RBAC
-        displayName: Restricted
+      - description: |-
+          Deprecated: restricted mode is no longer supported on ActiveMQArtemis/BrokerCluster.
+          Use the Broker CR instead. Setting this field to true will cause the operator to
+          reject the CR with Valid=False.
+        displayName: Restricted (Deprecated)
         path: restricted
       - description: Specifies the upgrades (deprecated in favour of Version)
         displayName: Upgrades
@@ -7336,8 +7399,11 @@ spec:
           all resources
         displayName: Selector
         path: resourceTemplates[0].selector
-      - description: Restricted deployment, mtls jolokia agent with RBAC
-        displayName: Restricted
+      - description: |-
+          Deprecated: restricted mode is no longer supported on ActiveMQArtemis/BrokerCluster.
+          Use the Broker CR instead. Setting this field to true will cause the operator to
+          reject the CR with Valid=False.
+        displayName: Restricted (Deprecated)
         path: restricted
       - description: Specifies the upgrades (deprecated in favour of Version)
         displayName: Upgrades

@@ -77,7 +77,7 @@ func TestLabelConflicts_NoReservedKeys(t *testing.T) {
 	_, err := r.Reconcile(context.TODO(), req)
 	assert.NoError(t, err)
 
-	broker := &v1beta2.BrokerCluster{}
+	broker := &v1beta2.Broker{}
 	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
 	assert.NoError(t, err)
 
@@ -140,7 +140,7 @@ func TestLabelConflicts_ProperDomainPrefixes(t *testing.T) {
 	_, err := r.Reconcile(context.TODO(), req)
 	assert.NoError(t, err)
 
-	broker := &v1beta2.BrokerCluster{}
+	broker := &v1beta2.Broker{}
 	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
 	assert.NoError(t, err)
 

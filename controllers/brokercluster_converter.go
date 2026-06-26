@@ -46,7 +46,6 @@ func convertSpecToBrokerCluster(s *brokerv1beta1.ActiveMQArtemisSpec) v1beta2.Br
 		Env:               s.Env,
 		IngressDomain:     s.IngressDomain,
 		ResourceTemplates: convertResourceTemplatesToBrokerCluster(s.ResourceTemplates),
-		Restricted:        s.Restricted,
 	}
 }
 

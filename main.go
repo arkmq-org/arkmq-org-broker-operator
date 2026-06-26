@@ -300,6 +300,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	brokerCRReconciler := controllers.NewBrokerReconciler(
+		mgr,
+		ctrl.Log.WithName("BrokerReconciler"),
+		isOpenshift)
+
+	if err = brokerCRReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Broker")
+		os.Exit(1)
+	}
+
 	addressReconciler := controllers.NewActiveMQArtemisAddressReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),

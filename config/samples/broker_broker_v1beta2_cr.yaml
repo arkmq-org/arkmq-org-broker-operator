@@ -1,0 +1,13 @@
+apiVersion: broker.arkmq.org/v1beta2
+kind: Broker
+metadata:
+  name: ex-broker
+spec:
+  deploymentPlan:
+    image: placeholder
+    size: 1
+    persistenceEnabled: false
+    jolokiaAgentEnabled: false
+    managementRBACEnabled: true
+status:
+  conditions: []

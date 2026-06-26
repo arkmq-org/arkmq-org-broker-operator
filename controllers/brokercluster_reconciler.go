@@ -3,8 +3,6 @@ package controllers
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509/pkix"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -294,7 +292,7 @@ func (reconciler *BrokerClusterReconcilerImpl) ProcessStatefulSet(customResource
 	}
 
 	labels := namer.LabelBuilder.Labels()
-	headlessServiceDefinition = svc.NewHeadlessServiceForCR2(client, headlesServiceName, ssNamespacedName.Namespace, serviceports.GetDefaultPorts(common.IsRestricted(customResource)), labels, headlessServiceDefinition)
+	headlessServiceDefinition = svc.NewHeadlessServiceForCR2(client, headlesServiceName, ssNamespacedName.Namespace, serviceports.GetDefaultPorts(false), labels, headlessServiceDefinition)
 	reconciler.trackDesired(headlessServiceDefinition)
 
 	if isClustered(customResource) {
@@ -315,10 +313,6 @@ func (reconciler *BrokerClusterReconcilerImpl) ProcessStatefulSet(customResource
 }
 
 func isClustered(customResource *v1beta2.BrokerCluster) bool {
-	if common.IsRestricted(customResource) {
-		return false
-	}
-
 	if customResource.Spec.DeploymentPlan.Clustered != nil {
 		return *customResource.Spec.DeploymentPlan.Clustered
 	}
@@ -327,9 +321,6 @@ func isClustered(customResource *v1beta2.BrokerCluster) bool {
 
 func (reconciler *BrokerClusterReconcilerImpl) ProcessCredentials(customResource *v1beta2.BrokerCluster, namer common.Namers, client rtclient.Client, scheme *runtime.Scheme, currentStatefulSet *appsv1.StatefulSet) {
 
-	if common.IsRestricted(customResource) {
-		return
-	}
 	reconciler.log.V(1).Info("ProcessCredentials")
 
 	envVars := make(map[string]ValueInfo)
@@ -553,10 +544,6 @@ func (reconciler *BrokerClusterReconcilerImpl) applyPodDisruptionBudget(customRe
 
 func (reconciler *BrokerClusterReconcilerImpl) ProcessAcceptorsAndConnectors(customResource *v1beta2.BrokerCluster, namer common.Namers, client rtclient.Client, scheme *runtime.Scheme, currentStatefulSet *appsv1.StatefulSet) error {
 
-	if common.IsRestricted(customResource) {
-		return nil
-	}
-
 	acceptorEntry, err := reconciler.generateAcceptorsString(customResource, client, currentStatefulSet)
 	if err != nil {
 		return err
@@ -589,7 +576,7 @@ func (reconciler *BrokerClusterReconcilerImpl) ProcessAcceptorsAndConnectors(cus
 func (reconciler *BrokerClusterReconcilerImpl) ProcessConsole(customResource *v1beta2.BrokerCluster, namer common.Namers, client rtclient.Client, scheme *runtime.Scheme, currentStatefulSet *appsv1.StatefulSet) error {
 
 	reconciler.configureConsoleExposure(customResource, namer, client)
-	if !customResource.Spec.Console.SSLEnabled || common.IsRestricted(customResource) {
+	if !customResource.Spec.Console.SSLEnabled {
 		return nil
 	}
 
@@ -1954,9 +1941,6 @@ func (reconciler *BrokerClusterReconcilerImpl) MakeVolumes(customResource *v1bet
 	if customResource.Spec.DeploymentPlan.PersistenceEnabled {
 		basicCRVolume := volumes.MakePersistentVolume(customResource.Name)
 		volumeDefinitions = append(volumeDefinitions, basicCRVolume...)
-	} else if common.IsRestricted(customResource) {
-		emptyDirData := volumes.MakeEmptyDirVolumeFor(customResource.Name)
-		volumeDefinitions = append(volumeDefinitions, emptyDirData)
 	}
 
 	volumeDefinitions = append(volumeDefinitions, customResource.Spec.DeploymentPlan.ExtraVolumes...)
@@ -1999,7 +1983,7 @@ func (reconciler *BrokerClusterReconcilerImpl) MakeVolumes(customResource *v1bet
 		}
 	}
 
-	if !common.IsRestricted(customResource) && customResource.Spec.Console.SSLEnabled {
+	if customResource.Spec.Console.SSLEnabled {
 		reconciler.log.V(1).Info("Make volumes for ssl console exposure on k8s")
 		secretName := namer.SecretsConsoleNameBuilder.Name()
 		addNewVolumes(secretVolumes, &volumeDefinitions, &secretName)
@@ -2065,7 +2049,7 @@ func MakeExtraVolumeMounts(customResource *v1beta2.BrokerCluster) []corev1.Volum
 func (reconciler *BrokerClusterReconcilerImpl) MakeVolumeMounts(customResource *v1beta2.BrokerCluster, namer common.Namers) ([]corev1.VolumeMount, error) {
 
 	volumeMounts := []corev1.VolumeMount{}
-	if customResource.Spec.DeploymentPlan.PersistenceEnabled || common.IsRestricted(customResource) {
+	if customResource.Spec.DeploymentPlan.PersistenceEnabled {
 		persistentCRVlMnt := volumes.MakePersistentVolumeMount(customResource.Name, getDataMountPath(customResource, namer))
 		volumeMounts = append(volumeMounts, persistentCRVlMnt...)
 	}
@@ -2121,9 +2105,6 @@ func (reconciler *BrokerClusterReconcilerImpl) MakeVolumeMounts(customResource *
 }
 
 func getDataMountPath(cr *v1beta2.BrokerCluster, namer common.Namers) string {
-	if common.IsRestricted(cr) {
-		return "/app"
-	}
 	return namer.GLOBAL_DATA_PATH
 }
 func MakeContainerPorts(cr *v1beta2.BrokerCluster) []corev1.ContainerPort {
@@ -2206,240 +2187,6 @@ func (reconciler *BrokerClusterReconcilerImpl) PodTemplateSpecForCR(customResour
 		configMapsToMount = append(configMapsToMount, brokerPropertiesResourceName)
 	}
 
-	additionalSystemPropsForRestricted := []string{}
-	if common.IsRestricted(customResource) {
-
-		mountPathRoot := common.SecretPathBase + getPropertiesResourceNsName(customResource).Name
-		security_properties := NewPropsWithHeader()
-		fmt.Fprintf(security_properties, "login.config.url.1=file:%s/login.config\n", mountPathRoot)
-		fmt.Fprintf(security_properties, "security.provider.13=de.dentrassi.crypto.pem.PemKeyStoreProvider\n")
-		fmt.Fprintf(security_properties, "fips.provider.8=de.dentrassi.crypto.pem.PemKeyStoreProvider\n")
-
-		brokerPropertiesMapData["_security.config"] = security_properties.Bytes()
-
-		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, fmt.Sprintf("-Djava.security.properties=%s/_security.config", mountPathRoot))
-
-		login_config := newBufferWithHeader("//")
-		fmt.Fprintf(login_config, "%s {\n", common.HttpAuthenticatorRealm)
-		fmt.Fprintln(login_config, "  org.apache.activemq.artemis.spi.core.security.jaas.TextFileCertificateLoginModule required")
-		fmt.Fprintln(login_config, "   reload=true")
-		fmt.Fprintln(login_config, "   debug=true")
-		fmt.Fprintf(login_config, "   org.apache.activemq.jaas.textfiledn.user=%s\n", common.GetCertUsersKey(common.HttpAuthenticatorRealm))
-		fmt.Fprintf(login_config, "   org.apache.activemq.jaas.textfiledn.role=%s\n", common.GetCertRolesKey(common.HttpAuthenticatorRealm))
-		fmt.Fprintf(login_config, "   baseDir=\"%v\"\n", mountPathRoot)
-		fmt.Fprintln(login_config, "  ;")
-		fmt.Fprintln(login_config, "};")
-		brokerPropertiesMapData["login.config"] = login_config.Bytes()
-
-		operandCertSecretName := common.GetOperandCertSecretName(customResource, client)
-		operandCertSecret, err := common.GetNamespacedSecret(client, operandCertSecretName, customResource.Namespace)
-		if err != nil {
-			return nil, err
-		}
-
-		operandCertSubject, err := common.ExtractCertSubjectFromSecret(operandCertSecret)
-		if err != nil {
-			return nil, fmt.Errorf("failed to extract operand subject from certificate, %w", err)
-		}
-
-		var caCertSecret *corev1.Secret
-		if caCertSecret, err = common.GetOperatorCASecret(client); err != nil {
-			return nil, fmt.Errorf("failed to get operator ca secret, %w", err)
-		}
-
-		caSecretKey, err := common.GetOperatorCASecretKey(client, caCertSecret)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get operator ca secret key, %w", err)
-		}
-
-		var operatorCert *tls.Certificate
-		if operatorCert, err = common.GetOperatorClientCertificate(client, nil); err != nil {
-			return nil, fmt.Errorf("failed to get operator client cert, %w", err)
-		}
-
-		var operatorCertSubject *pkix.Name
-		if operatorCertSubject, err = common.ExtractCertSubject(operatorCert); err != nil {
-			return nil, fmt.Errorf("failed to extract operator subject from client cert, %w", err)
-		}
-
-		prometheusCertSecretName := common.GetPrometheusCertSecretName(customResource, client)
-		prometheusCertSecret, err := common.GetNamespacedSecret(client, prometheusCertSecretName, customResource.Namespace)
-		var prometheusCertSubject *pkix.Name
-		if err == nil {
-			prometheusCertSubject, err = common.ExtractCertSubjectFromSecret(prometheusCertSecret)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			ctrl.Log.V(1).Info("prometheus secret not found", "err", err)
-		}
-
-		// TODO - make configuable
-		// support <crNname->control-plane-auth-secret, maybe a suffix for the http_server_authenticator realm login.config
-
-		cert_user := NewPropsWithHeader()
-		fmt.Fprintln(cert_user, "hawtio=/CN = hawtio-online\\.hawtio\\.svc.*/")
-		fmt.Fprintf(cert_user, "operator=/.*%s.*/\n", operatorCertSubject.CommonName) // regexp syntax start and with /
-		// can and should use the full DN after https://issues.apache.org/jira/browse/ARTEMIS-5102
-		fmt.Fprintf(cert_user, "probe=/.*%s.*/\n", operandCertSubject.CommonName)
-		if prometheusCertSubject != nil {
-			fmt.Fprintf(cert_user, "prometheus=/.*%s.*/\n", prometheusCertSubject.CommonName)
-		}
-		brokerPropertiesMapData[common.GetCertUsersKey(common.HttpAuthenticatorRealm)] = cert_user.Bytes()
-
-		cert_roles := NewPropsWithHeader()
-		fmt.Fprintln(cert_roles, "status=operator,probe")
-		fmt.Fprintln(cert_roles, "metrics=operator,prometheus")
-		fmt.Fprintln(cert_roles, "hawtio=hawtio")
-		brokerPropertiesMapData[common.GetCertRolesKey(common.HttpAuthenticatorRealm)] = cert_roles.Bytes()
-
-		foundationalProps := NewPropsWithHeader()
-		fmt.Fprintf(foundationalProps, "name=%s\n", environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name))
-		fmt.Fprintln(foundationalProps, "criticalAnalyzer=false")
-		fmt.Fprintln(foundationalProps, "literalMatchMarkers=()")
-
-		// with cert or token, jaas is cheap and a token will be cached while valid
-		// TODO - avoid AMQP SASL login and server login duplication, verify
-		fmt.Fprintln(foundationalProps, "authenticationCacheSize=0")
-
-		fmt.Fprintln(foundationalProps, "messageCounterEnabled=false")
-		fmt.Fprintln(foundationalProps, "journalDirectory=/app/data")
-		fmt.Fprintln(foundationalProps, "bindingsDirectory=/app/data/bindings")
-		fmt.Fprintln(foundationalProps, "largeMessagesDirectory=/app/data/largemessages")
-		fmt.Fprintln(foundationalProps, "pagingDirectory=/app/data/paging")
-
-		brokerPropertiesMapData["aa_restricted.properties"] = foundationalProps.Bytes()
-
-		rbac := NewPropsWithHeader()
-		// operator status check
-		fmt.Fprintln(rbac, "securityRoles.\"mops.broker.getStatus\".status.view=true")
-
-		// jmx_exporter metrics perms
-		fmt.Fprintln(rbac, "securityRoles.\"mops.mbeanserver.queryMBeans\".metrics.view=true")
-		fmt.Fprintln(rbac, "securityRoles.\"mops.broker\".metrics.view=true") // for query remove filter
-		fmt.Fprintln(rbac, "securityRoles.\"mops.broker.getTotalMessageCount\".metrics.view=true")
-		fmt.Fprintln(rbac, "securityRoles.\"mops.broker.getTotalMessagesAcknowledged\".metrics.view=true")
-		fmt.Fprintln(rbac, "securityRoles.\"mops.broker.getTotalMessagesAdded\".metrics.view=true")
-
-		brokerPropertiesMapData["aa_rbac.properties"] = rbac.Bytes()
-
-		secretsToMount = append(secretsToMount, operandCertSecretName)
-		caSecret := common.GetOperatorCASecretName()
-		secretsToMount = append(secretsToMount, caSecret)
-
-		jolokia_config := NewPropsWithHeader()
-		fmt.Fprintln(jolokia_config, "protocol=https")
-		fmt.Fprintln(jolokia_config, "authClass=org.apache.activemq.artemis.spi.core.security.jaas.HttpServerAuthenticator")
-		fmt.Fprintf(jolokia_config, "caCert=%s%s/%s\n", common.SecretPathBase, caSecret, caSecretKey)
-		fmt.Fprintf(jolokia_config, "serverCert=%s%s/tls.crt\n", common.SecretPathBase, operandCertSecretName)
-		fmt.Fprintf(jolokia_config, "serverKey=%s%s/tls.key\n", common.SecretPathBase, operandCertSecretName)
-		fmt.Fprintln(jolokia_config, "port=8778")
-		// https://github.com/jolokia/jolokia/issues/751 at some point host=$(env:HOSTNAME), host= is on the command line below
-		fmt.Fprintln(jolokia_config, "useSslClientAuthentication=true")
-		fmt.Fprintln(jolokia_config, "disabledServices=org.jolokia.service.history.HistoryMBeanRequestInterceptor")
-		fmt.Fprintln(jolokia_config, "disableDetectors=true")
-		fmt.Fprintln(jolokia_config, "debug=false")
-
-		brokerPropertiesMapData["_jolokia.config"] = jolokia_config.Bytes()
-
-		pem_cfg := NewPropsWithHeader()
-
-		fmt.Fprintf(pem_cfg, "alias=alias\n")
-		fmt.Fprintf(pem_cfg, "source.cert=%s%s/tls.crt\n", common.SecretPathBase, operandCertSecretName)
-		fmt.Fprintf(pem_cfg, "source.key=%s%s/tls.key\n", common.SecretPathBase, operandCertSecretName)
-		brokerPropertiesMapData["_cert.pemcfg"] = pem_cfg.Bytes()
-
-		prometheus_config := NewPropsWithHeader() // yaml
-		fmt.Fprintf(prometheus_config, "httpServer:\n")
-		fmt.Fprintf(prometheus_config, "  authentication:\n")
-		fmt.Fprintf(prometheus_config, "    plugin:\n")
-		fmt.Fprintf(prometheus_config, "      class: org.apache.activemq.artemis.spi.core.security.jaas.HttpServerAuthenticator\n")
-		fmt.Fprintf(prometheus_config, "      subjectAttributeName: org.jolokia.jaasSubject\n") // match -DhttpServerAuthenticator.requestSubjectAttribute
-		fmt.Fprintf(prometheus_config, "  ssl:\n")
-		fmt.Fprintf(prometheus_config, "    mutualTLS: true\n")
-		fmt.Fprintf(prometheus_config, "    keyStore:\n")
-		fmt.Fprintf(prometheus_config, "      filename: %s/_cert.pemcfg\n", mountPathRoot)
-		fmt.Fprintf(prometheus_config, "      type: PEMCFG\n")
-		fmt.Fprintf(prometheus_config, "    trustStore:\n")
-		fmt.Fprintf(prometheus_config, "      filename: %s%s/%s\n", common.SecretPathBase, caSecret, caSecretKey)
-		fmt.Fprintf(prometheus_config, "      type: PEMCA\n")
-		fmt.Fprintf(prometheus_config, "    certificate:\n")
-		fmt.Fprintf(prometheus_config, "      alias: alias\n")
-		// the collector/scraper config
-		fmt.Fprintf(prometheus_config, "lowercaseOutputName: true\n")
-		fmt.Fprintf(prometheus_config, "lowercaseOutputLabelNames: true\n")
-		fmt.Fprintf(prometheus_config, "includeObjectNames: [org.apache.activemq.artemis:broker=\"%s\"]\n", environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name))
-		fmt.Fprintf(prometheus_config, "includeObjectNameAttributes:\n")
-		fmt.Fprintf(prometheus_config, "  'org.apache.activemq.artemis:broker=\"%s\"':\n", environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name))
-		fmt.Fprintf(prometheus_config, "    - \"TotalMessageCount\"\n")
-		fmt.Fprintf(prometheus_config, "    - \"TotalMessagesAdded\"\n")
-		fmt.Fprintf(prometheus_config, "    - \"TotalMessagesAcknowledged\"\n")
-		fmt.Fprintf(prometheus_config, "rules:\n")
-		fmt.Fprintf(prometheus_config, "  - pattern: 'org.apache.activemq.artemis<broker=\"%s\"><>TotalMessageCount'\n", environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name))
-		fmt.Fprintf(prometheus_config, "    help: Number of pending messages\n")
-		fmt.Fprintf(prometheus_config, "    name: artemis_total_pending_message_count\n")
-		fmt.Fprintf(prometheus_config, "    type: GAUGE\n")
-		fmt.Fprintf(prometheus_config, "  - pattern: 'org.apache.activemq.artemis<broker=\"%s\"><>TotalMessagesAcknowledged'\n", environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name))
-		fmt.Fprintf(prometheus_config, "    help: Number of messages consumed since start\n")
-		fmt.Fprintf(prometheus_config, "    name: artemis_total_consumed_message_count\n")
-		fmt.Fprintf(prometheus_config, "    type: COUNTER\n")
-		fmt.Fprintf(prometheus_config, "  - pattern: 'org.apache.activemq.artemis<broker=\"%s\"><>TotalMessagesAdded'\n", environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name))
-		fmt.Fprintf(prometheus_config, "    help: Number of messages produced since start\n")
-		fmt.Fprintf(prometheus_config, "    name: artemis_total_produced_message_count\n")
-		fmt.Fprintf(prometheus_config, "    type: COUNTER\n")
-
-		brokerPropertiesMapData[PrometheusConfigFileName] = prometheus_config.Bytes()
-
-		// Apply control plane overrides if they exist
-		if err := applyControlPlaneOverrides(customResource, client, brokerPropertiesMapData); err != nil {
-			return nil, err
-		}
-
-		// adapt jolokia and prometheus authentication
-		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, "-DhttpServerAuthenticator.requestSubjectAttribute=org.jolokia.jaasSubject")
-
-		// install mbean server guard
-		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, "-Dlog4j2.disableJmx=true -Djavax.management.builder.initial=org.apache.activemq.artemis.core.server.management.ArtemisRbacMBeanServerBuilder")
-
-		// install jolokia agent
-		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, fmt.Sprintf("-javaagent:/opt/agents/jolokia.jar=host=$HOSTNAME,config=%s/_jolokia.config", mountPathRoot))
-
-		// install prometheus agent
-		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, fmt.Sprintf("-javaagent:/opt/agents/prometheus.jar=$HOSTNAME:8888:%s/%s", mountPathRoot, PrometheusConfigFileName))
-
-		// non boot jar isolation classpath
-		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, "-classpath /opt/amq/lib/*:/opt/amq/lib/extra/*")
-
-		// temp volume
-		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, "-Djava.io.tmpdir=/app/tmp")
-
-		// jvm options
-		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:AutoBoxCacheMax=20000 -XX:+PrintClassHistogram -XX:+UseG1GC -XX:+UseStringDeduplication -Djava.net.preferIPv4Stack=true")
-
-		if customResource.Spec.DeploymentPlan.LivenessProbe == nil {
-			container.LivenessProbe = &corev1.Probe{
-				ProbeHandler: corev1.ProbeHandler{
-					Exec: &corev1.ExecAction{
-						Command: []string{
-							"/bin/bash",
-							"-c",
-							// use curl with mtls as the broker-cert to pull the status to find start state using dns
-							fmt.Sprintf(`export STATEFUL_SET_ORDINAL=${HOSTNAME##*-};curl --cacert %s%s/%s --cert %s%s/tls.crt --key %s%s/tls.key  https://%s:8778/jolokia/read/org.apache.activemq.artemis:broker=%%22%s%%22/Status | grep -w -P "(START|STOPP)(ED|ING)"`, common.SecretPathBase, caSecret, caSecretKey, common.SecretPathBase, operandCertSecretName, common.SecretPathBase, operandCertSecretName, common.OrdinalStringFQDNS(customResource.Name, customResource.Namespace, "$STATEFUL_SET_ORDINAL"), environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name)),
-						},
-					},
-				},
-				InitialDelaySeconds:           1,
-				TimeoutSeconds:                5,
-				PeriodSeconds:                 5,
-				SuccessThreshold:              1,
-				FailureThreshold:              2,
-				TerminationGracePeriodSeconds: &terminationGracePeriodSeconds,
-			}
-		} else {
-			// use the value from the CR
-			container.LivenessProbe = reconciler.configureLivenessProbe(container, customResource.Spec.DeploymentPlan.LivenessProbe)
-		}
-	}
 	extraVolumes, extraVolumeMounts, err := reconciler.createExtraConfigmapsAndSecretsVolumeMounts(configMapsToMount, secretsToMount, brokerPropertiesResourceName, brokerPropertiesMapData, client)
 	if err != nil {
 		return nil, fmt.Errorf("failed to createExtraConfigmapsAndSecretsVolumeMounts, %w", err)
@@ -2457,9 +2204,7 @@ func (reconciler *BrokerClusterReconcilerImpl) PodTemplateSpecForCR(customResour
 	}
 
 	container.StartupProbe = reconciler.configureStartupProbe(container, customResource.Spec.DeploymentPlan.StartupProbe)
-	if !common.IsRestricted(customResource) {
-		container.LivenessProbe = reconciler.configureLivenessProbe(container, customResource.Spec.DeploymentPlan.LivenessProbe)
-	}
+	container.LivenessProbe = reconciler.configureLivenessProbe(container, customResource.Spec.DeploymentPlan.LivenessProbe)
 	container.ReadinessProbe = reconciler.configureReadinessProbe(container, customResource.Spec.DeploymentPlan.ReadinessProbe)
 
 	if len(customResource.Spec.DeploymentPlan.NodeSelector) > 0 {
@@ -2518,27 +2263,18 @@ func (reconciler *BrokerClusterReconcilerImpl) PodTemplateSpecForCR(customResour
 			Value: fmt.Sprintf("-Dlog4j2.configurationFile=%v", loggingConfigPath),
 		}
 		environments.CreateOrAppend(podSpec.Containers, &loggerOpts)
-	} else if common.IsRestricted(customResource) {
-		// modify log4j2 default of ERROR
-		loggerOpts := corev1.EnvVar{
-			Name:  getLoginConfigEnvVarName(customResource),
-			Value: "-Dlog4j2.level=INFO",
-		}
-		environments.CreateOrAppend(podSpec.Containers, &loggerOpts)
 	}
 
 	// add TopologySpreadConstraints config
 	podSpec.TopologySpreadConstraints = customResource.Spec.DeploymentPlan.TopologySpreadConstraints
 
-	if !common.IsRestricted(customResource) {
-		//add empty-dir volume and volumeMounts to main container
-		volumeForCfg := volumes.MakeEmptyDirVolumeFor(cfgVolumeName)
-		podSpec.Volumes = append(podSpec.Volumes, volumeForCfg)
+	//add empty-dir volume and volumeMounts to main container
+	volumeForCfg := volumes.MakeEmptyDirVolumeFor(cfgVolumeName)
+	podSpec.Volumes = append(podSpec.Volumes, volumeForCfg)
 
-		volumeMountForCfg := volumes.MakeRwVolumeMountForCfg(cfgVolumeName, brokerConfigRoot)
-		podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, volumeMountForCfg)
+	volumeMountForCfg := volumes.MakeRwVolumeMountForCfg(cfgVolumeName, brokerConfigRoot)
+	podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, volumeMountForCfg)
 
-	}
 	reqLogger.V(2).Info("Creating init container for broker configuration")
 	initContainer := containers.MakeInitContainer(podSpec, customResource.Name, common.ResolveImage(customResource, common.InitImageKey), MakeEnvVarArrayForCR(customResource, namer))
 	initContainer.Resources = customResource.Spec.DeploymentPlan.Resources
@@ -2637,7 +2373,7 @@ func (reconciler *BrokerClusterReconcilerImpl) PodTemplateSpecForCR(customResour
 	volumeMountForCfgRoot := volumes.MakeRwVolumeMountForCfg(cfgVolumeName, brokerConfigRoot)
 	podSpec.InitContainers[0].VolumeMounts = append(podSpec.InitContainers[0].VolumeMounts, volumeMountForCfgRoot)
 
-	volumeMountForCfg := volumes.MakeRwVolumeMountForCfg("tool-dir", initCfgRootDir)
+	volumeMountForCfg = volumes.MakeRwVolumeMountForCfg("tool-dir", initCfgRootDir)
 	podSpec.InitContainers[0].VolumeMounts = append(podSpec.InitContainers[0].VolumeMounts, volumeMountForCfg)
 
 	//add empty-dir volume
@@ -2744,17 +2480,6 @@ func (reconciler *BrokerClusterReconcilerImpl) PodTemplateSpecForCR(customResour
 
 	pts.Spec = *podSpec
 
-	if common.IsRestricted(customResource) {
-		pts.Spec.InitContainers = nil
-
-		reEvalJdkOpts := generateReEvalOrdinaEnvReplacement(customResource.Spec.Env)
-
-		pts.Spec.Containers[0].Command = []string{
-			"/bin/bash", "-c",
-			fmt.Sprintf("export STATEFUL_SET_ORDINAL=${HOSTNAME##*-}; %s exec java %s $JAVA_ARGS_APPEND org.apache.activemq.artemis.core.server.embedded.Main", reEvalJdkOpts, strings.Join(additionalSystemPropsForRestricted, " ")),
-		}
-	}
-
 	reqLogger.V(2).Info("Final Init spec", "Detail", podSpec.InitContainers)
 
 	return pts, nil
@@ -2780,21 +2505,11 @@ func supportsOrdinalReplacement(envVar corev1.EnvVar) bool {
 }
 
 func getJaasConfigEnvVarName(customResource *v1beta2.BrokerCluster) string {
-	if !common.IsRestricted(customResource) {
-		// legacy
-		return debugArgsEnvVarName
-	}
-
-	return jdkJavaOptionsEnvVarName
+	return debugArgsEnvVarName
 }
 
 func getLoginConfigEnvVarName(customResource *v1beta2.BrokerCluster) string {
-	if !common.IsRestricted(customResource) {
-		// legacy
-		return javaArgsAppendEnvVarName
-	}
-
-	return jdkJavaOptionsEnvVarName
+	return javaArgsAppendEnvVarName
 }
 
 func NewPropsWithHeader() *bytes.Buffer {
@@ -2903,7 +2618,7 @@ func (reconciler *BrokerClusterReconcilerImpl) configureLivenessProbe(container 
 			reconciler.log.V(1).Info("Using user provided Liveness Probe Handler" + probeFromCr.ProbeHandler.String())
 			livenessProbe.ProbeHandler = probeFromCr.ProbeHandler
 		}
-	} else if !common.IsRestricted(reconciler.customResource) {
+	} else {
 
 		reconciler.log.V(1).Info("Creating Default Liveness Probe")
 
@@ -2960,9 +2675,6 @@ func (reconciler *BrokerClusterReconcilerImpl) configureReadinessProbe(container
 		} else {
 			readinessProbe.ProbeHandler = probeFromCr.ProbeHandler
 		}
-	} else if common.IsRestricted(reconciler.customResource) {
-		// liveness probe is sufficient
-		readinessProbe = nil
 	} else {
 		reconciler.log.V(1).Info("creating default readiness Probe")
 		readinessProbe.InitialDelaySeconds = defaultLivenessProbeInitialDelay
@@ -3206,7 +2918,7 @@ func (reconciler *BrokerClusterReconcilerImpl) configureContianerSecurityContext
 		container.SecurityContext = containerSecurityContext
 	} else {
 		reconciler.log.V(2).Info("Incoming Container SecurityContext is nil, creating with default values")
-		readOnlyRootFilesystem := common.IsRestricted(reconciler.customResource)
+		readOnlyRootFilesystem := false
 		runAsNonRoot := true
 		allowPrivilegeEscalation := false
 		capabilities := corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}
@@ -3246,7 +2958,7 @@ func (reconciler *BrokerClusterReconcilerImpl) configPodSecurity(podSpec *corev1
 		reconciler.log.V(2).Info("Pod serviceAccountName specified", "existing", podSpec.ServiceAccountName, "new", *podSecurity.ServiceAccountName)
 		podSpec.ServiceAccountName = *podSecurity.ServiceAccountName
 	} else {
-		autoMount := !common.IsRestricted(reconciler.customResource)
+		autoMount := true
 		podSpec.AutomountServiceAccountToken = &autoMount
 	}
 	if podSecurity.RunAsUser != nil {
@@ -3876,20 +3588,16 @@ func (reconciler *BrokerClusterReconcilerImpl) GetAndCacheBrokerStatus(jk *jolok
 
 func (reconciler *BrokerClusterReconcilerImpl) resolveJolokiaEndpoints(cr *v1beta2.BrokerCluster, client rtclient.Client) {
 	if reconciler.jolokiaEndpoints == nil {
-		if common.IsRestricted(cr) {
-			reconciler.jolokiaEndpoints = jolokia_client.GetMinimalJolokiaAgents(cr, client)
-		} else {
-			resource := types.NamespacedName{
-				Name:      cr.Name,
-				Namespace: cr.Namespace,
-			}
-			reconciler.jolokiaEndpoints = jolokia_client.GetBrokers(resource, []ss.StatefulSetInfo{
-				{
-					NamespacedName: types.NamespacedName{Name: namer.CrToSS(cr.Name), Namespace: cr.Namespace},
-					Replicas:       cr.Status.DeploymentPlanSize, // this means we wait till the pod status is good before trying the jolokia endpoint
-					Labels:         nil,
-				}}, client)
+		resource := types.NamespacedName{
+			Name:      cr.Name,
+			Namespace: cr.Namespace,
 		}
+		reconciler.jolokiaEndpoints = jolokia_client.GetBrokers(resource, []ss.StatefulSetInfo{
+			{
+				NamespacedName: types.NamespacedName{Name: namer.CrToSS(cr.Name), Namespace: cr.Namespace},
+				Replicas:       cr.Status.DeploymentPlanSize,
+				Labels:         nil,
+			}}, client)
 	}
 }
 
@@ -4147,6 +3855,18 @@ func marshallApplyErrors(applyErrors []applyError) string {
 }
 
 func (r *BrokerClusterReconcilerImpl) validate(customResource *v1beta2.BrokerCluster, client rtclient.Client, namer common.Namers) (bool, retry bool) {
+
+	if common.IsRestricted(customResource) {
+		ctrl.Log.Error(nil, "DEPRECATED: spec.restricted is no longer supported on ActiveMQArtemis/BrokerCluster. Use the Broker CR for restricted deployments. This CR will not be reconciled.", "CR", customResource.Name, "Namespace", customResource.Namespace)
+		common.SetStatusConditionWithGeneration(customResource, metav1.Condition{
+			Type:    v1beta2.ValidConditionType,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1beta2.ValidConditionInvalidVersionReason,
+			Message: "spec.restricted is deprecated and no longer supported. Use the Broker CR for restricted deployments.",
+		})
+		return false, false
+	}
+
 	validationCondition := metav1.Condition{
 		Type:   v1beta2.ValidConditionType,
 		Status: metav1.ConditionTrue,
@@ -4221,12 +3941,6 @@ func (r *BrokerClusterReconcilerImpl) validate(customResource *v1beta2.BrokerClu
 		}
 	}
 
-	if validationCondition.Status != metav1.ConditionFalse {
-		condition, retry = r.validateRestrictedRequiredSecrets(client)
-		if condition != nil {
-			validationCondition = *condition
-		}
-	}
 	common.SetStatusConditionWithGeneration(customResource, validationCondition)
 
 	return validationCondition.Status != metav1.ConditionFalse, retry
@@ -4393,38 +4107,6 @@ func (r *BrokerClusterReconcilerImpl) validateEnvVars(customResource *v1beta2.Br
 			Reason:  v1beta2.ValidConditionInvalidInternalVarUsage,
 			Message: fmt.Sprintf("Don't use valueFrom on env vars that the operator can mutate: %v. Instead use a different var and refernece it in its value field.", invalidVars),
 		}, false
-	}
-	return nil, false
-}
-
-func (r *BrokerClusterReconcilerImpl) validateRestrictedRequiredSecrets(client rtclient.Client) (*metav1.Condition, bool) {
-	if common.IsRestricted(r.customResource) {
-		retry := true
-		if _, err := common.GetOperatorClientCertSecret(client); err != nil {
-			return &metav1.Condition{
-				Type:    v1beta2.ValidConditionType,
-				Status:  metav1.ConditionFalse,
-				Reason:  v1beta2.ValidConditionMissingResourcesReason,
-				Message: fmt.Sprintf(".Spec.Restricted is true but operator failed to locate necessary operator client certificate secret, %v", err),
-			}, retry
-		}
-		if _, err := common.GetOperatorCASecret(client); err != nil {
-			return &metav1.Condition{
-				Type:    v1beta2.ValidConditionType,
-				Status:  metav1.ConditionFalse,
-				Reason:  v1beta2.ValidConditionMissingResourcesReason,
-				Message: fmt.Sprintf(".Spec.Restricted is true but operator failed to locate necessary operator ca secret, %v", err),
-			}, retry
-		}
-		operandCertSecretName := common.GetOperandCertSecretName(r.customResource, client)
-		if _, err := common.GetNamespacedSecret(client, operandCertSecretName, r.customResource.Namespace); err != nil {
-			return &metav1.Condition{
-				Type:    v1beta2.ValidConditionType,
-				Status:  metav1.ConditionFalse,
-				Reason:  v1beta2.ValidConditionMissingResourcesReason,
-				Message: fmt.Sprintf(".Spec.Restricted is true but operator failed to locate necessary operand cert secret, %v", err),
-			}, retry
-		}
 	}
 	return nil, false
 }

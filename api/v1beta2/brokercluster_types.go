@@ -72,8 +72,10 @@ type BrokerClusterSpec struct {
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Resource Templates"
 	ResourceTemplates []ResourceTemplate `json:"resourceTemplates,omitempty"`
 
-	// Restricted deployment, mtls jolokia agent with RBAC
-	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Restricted"
+	// Deprecated: restricted mode is no longer supported on ActiveMQArtemis/BrokerCluster.
+	// Use the Broker CR instead. Setting this field to true will cause the operator to
+	// reject the CR with Valid=False.
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Restricted (Deprecated)"
 	Restricted *bool `json:"restricted,omitempty"`
 }
 

@@ -695,7 +695,7 @@ func IsRestricted(customResource *v1beta2.BrokerCluster) bool {
 }
 
 func GetDeploymentSize(cr *v1beta2.BrokerCluster) int32 {
-	if cr.Spec.DeploymentPlan.Size == nil || IsRestricted(cr) {
+	if cr.Spec.DeploymentPlan.Size == nil {
 		return DefaultDeploymentSize
 	}
 	return *cr.Spec.DeploymentPlan.Size
@@ -773,7 +773,7 @@ func DetectOpenshiftWith(config *rest.Config) (bool, error) {
 	return *isOpenshift, nil
 }
 
-func GetOperandCertSecretName(cr *v1beta2.BrokerCluster, client rtclient.Client) string {
+func GetOperandCertSecretName(cr *v1beta2.Broker, client rtclient.Client) string {
 
 	secret, _ := ResolveSecret(cr.Name, cr.Namespace, DefaultOperandCertSecretName, client)
 
@@ -825,7 +825,7 @@ func UnsetOperatorCASecretName() {
 	operatorCASecretName = nil
 }
 
-func GetPrometheusCertSecretName(cr *v1beta2.BrokerCluster, client rtclient.Client) string {
+func GetPrometheusCertSecretName(cr *v1beta2.Broker, client rtclient.Client) string {
 	// Determine the base secret name (from env or default)
 	if prometheusCertSecretName == nil {
 		prometheusCertSecretName = fromEnv("BASE_PROMETHEUS_CERT_SECRET_NAME", DefaultPrometheusCertSecretName)
@@ -1153,6 +1153,20 @@ func GenerateArtemis(name string, namespace string) *v1beta2.BrokerCluster {
 			Namespace: namespace,
 		},
 		Spec: v1beta2.BrokerClusterSpec{},
+	}
+}
+
+func GenerateBroker(name string, namespace string) *v1beta2.Broker {
+	return &v1beta2.Broker{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Broker",
+			APIVersion: v1beta2.GroupVersion.Identifier(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: v1beta2.BrokerSpec{},
 	}
 }
 

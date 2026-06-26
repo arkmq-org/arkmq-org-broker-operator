@@ -82,6 +82,16 @@ func GetMinimalJolokiaAgents(cr *v1beta2.BrokerCluster, client rtclient.Client) 
 	return artemisArray
 }
 
+func GetMinimalJolokiaAgentsForBroker(cr *v1beta2.Broker, client rtclient.Client) []*JkInfo {
+	ordinalFqdn := common.OrdinalFQDNS(cr.Name, cr.Namespace, 0)
+	artemis := mgmt.GetArtemisAgentForRestricted(client, environments.ResolveBrokerNameFromEnvs(cr.Spec.Env, cr.Name), ordinalFqdn)
+	return []*JkInfo{{
+		Artemis: artemis,
+		IP:      ordinalFqdn,
+		Ordinal: "0",
+	}}
+}
+
 // Get brokers Using DNS names in the namespace
 func GetBrokersFromDNS(crName string, namespace string, size int32, client rtclient.Client) []*JkInfo {
 	reqLogger := ctrl.Log.WithName("jolokia").WithValues("Request.Namespace", namespace, "Request.Name", crName)

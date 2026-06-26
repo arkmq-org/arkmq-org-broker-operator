@@ -1,6 +1,6 @@
 ---
 title: "Scraping metrics from a locked-down broker"
-description: "Steps to configure a broker in a restricted environment and access prometheus metrics from within the cluster using mTLS"
+description: "Steps to configure a locked-down Broker and access prometheus metrics from within the cluster using mTLS"
 draft: false
 images: ["prometheus_locked_down_dashboard.png"]
 menu:
@@ -18,9 +18,8 @@ using mutual TLS (mTLS).
 other using certificates, providing stronger security than regular TLS where
 only the server is authenticated.
 
-**What is a "locked-down" broker?** A broker configured with `spec.restricted:
-true` that disables anonymous access and requires certificate-based
-authentication for all connections.
+**What is a "locked-down" broker?** A `Broker` CR that disables anonymous
+access and requires certificate-based authentication for all connections.
 
 This tutorial covers setting up a complete secure monitoring pipeline:
 installing monitoring tools and certificate management, creating a PKI (Public
@@ -33,9 +32,9 @@ performance and health while ensuring all communications are encrypted and
 authenticated. This prevents unauthorized access to sensitive messaging data and
 metrics.
 
-A locked-down broker (`spec.restricted=true`) enhances security by disabling
-anonymous access, enabling client certificate authentication, and relying on
-`cert-manager` for certificate lifecycle management.
+A locked-down `Broker` CR enhances security by disabling anonymous access,
+enabling client certificate authentication, and relying on `cert-manager` for
+certificate lifecycle management.
 
 This tutorial results in a fully secured Apache Artemis
 broker with comprehensive monitoring, where all communication uses mutual TLS
@@ -157,7 +156,7 @@ The locked-down broker uses certificate-based authentication. This tutorial uses
   * You can configure any CN values you need for your application clients
 
   **Control Plane Realm (HTTP/Jolokia metrics endpoint):**
-  * Created and configured automatically by the operator in restricted mode
+  * Created and configured automatically by the operator for Broker CRs
   * The operator reads the actual CN values from the certificate secrets and
     configures access accordingly
   * In this tutorial we use:
@@ -773,13 +772,10 @@ EOF
 secret/artemis-broker-jaas-config-bp created
 ```
 
-Now, deploy the `Broker` custom resource with `spec.restricted: true`,
-along with the configuration for the acceptor.
+Now, deploy the `Broker` custom resource along with the configuration for the
+acceptor.
 
 **Key Configuration Elements:**
-
-* `restricted: true`: Enables certificate-based authentication mode and automatic
-  control plane authentication
 * `brokerProperties`: Configure messaging queues, security roles, and network acceptors
 * `extraMounts.secrets`: Mount certificate and configuration files into the broker pod
 
@@ -788,12 +784,11 @@ For detailed explanation of broker properties, see the [broker configuration doc
 ```{"stage":"deploy", "runtime":"bash", "label":"deploy broker cr"}
 kubectl apply -f - <<'EOF'
 apiVersion: broker.arkmq.org/v1beta2
-kind: BrokerCluster
+kind: Broker
 metadata:
   name: artemis-broker
   namespace: locked-down-broker
 spec:
-  restricted: true
   brokerProperties:
     - "messageCounterSamplePeriod=500"
     # Create a queue for messaging
@@ -830,7 +825,7 @@ broker.broker.arkmq.org/artemis-broker created
 Wait for the broker to be ready.
 
 ```{"stage":"deploy"}
-kubectl wait BrokerCluster artemis-broker --for=condition=Ready --namespace=locked-down-broker --timeout=300s
+kubectl wait Broker artemis-broker --for=condition=Ready --namespace=locked-down-broker --timeout=300s
 ```
 ```shell markdown_runner
 broker.broker.arkmq.org/artemis-broker condition met
@@ -1595,7 +1590,7 @@ Note that the image version used by the jobs should match the one deployed by
 the operator. We can get it from the `BrokerCluster` CR status.
 
 ```{"stage":"test_setup", "runtime":"bash", "label":"get latest broker version"}
-export BROKER_VERSION=$(kubectl get BrokerCluster artemis-broker --namespace=locked-down-broker -o json | jq .status.version.brokerVersion -r)
+export BROKER_VERSION=$(kubectl get Broker artemis-broker --namespace=locked-down-broker -o json | jq .status.version.brokerVersion -r)
 echo broker version: $BROKER_VERSION
 ```
 ```shell markdown_runner
@@ -1893,7 +1888,7 @@ kubectl top pods -n locked-down-broker
 kubectl get events -n locked-down-broker --sort-by='.lastTimestamp'
 
 # Export configurations for analysis
-kubectl get brokercluster artemis-broker -n locked-down-broker -o yaml
+kubectl get broker artemis-broker -n locked-down-broker -o yaml
 kubectl get prometheus artemis-prometheus -n locked-down-broker -o yaml
 ```
 
@@ -1927,7 +1922,7 @@ You now understand how to:
 **Key Security Concepts:**
 
 * Certificate-based role assignment (CN determines broker permissions)
-* Locked-down brokers (`spec.restricted: true`) disable anonymous access
+* Locked-down `Broker` CRs disable anonymous access
 * ServiceMonitor resources enable secure metrics collection
 * Separate certificates for different components (operator, Prometheus, clients)
 

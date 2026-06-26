@@ -132,7 +132,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 func (r *BrokerServiceReconciler) getOwned() []client.ObjectList {
 	return []client.ObjectList{
 		&corev1.SecretList{},
-		&broker.BrokerClusterList{},
+		&broker.BrokerList{},
 		&corev1.ServiceList{}}
 }
 
@@ -140,7 +140,7 @@ func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
 	// we want to create/update in this order
 	return []reflect.Type{
 		reflect.TypeOf(corev1.Secret{}),
-		reflect.TypeOf(broker.BrokerCluster{}),
+		reflect.TypeOf(broker.Broker{}),
 		reflect.TypeOf(corev1.Service{})}
 }
 
@@ -173,16 +173,14 @@ func (reconciler *BrokerServiceInstanceReconciler) processSpec() (err error) {
 
 func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 
-	var desired *broker.BrokerCluster
-	obj := reconciler.CloneOfDeployed(reflect.TypeOf(broker.BrokerCluster{}), reconciler.instance.Name)
+	var desired *broker.Broker
+	obj := reconciler.CloneOfDeployed(reflect.TypeOf(broker.Broker{}), reconciler.instance.Name)
 	if obj != nil {
-		desired = obj.(*broker.BrokerCluster)
+		desired = obj.(*broker.Broker)
 	} else {
-		desired = common.GenerateArtemis(reconciler.instance.Name, reconciler.instance.Namespace)
+		desired = common.GenerateBroker(reconciler.instance.Name, reconciler.instance.Namespace)
 	}
-	desired.Spec.Restricted = common.NewTrue()
 	desired.Spec.DeploymentPlan.PersistenceEnabled = false
-	desired.Spec.DeploymentPlan.Clustered = common.NewFalse()
 	desired.Spec.DeploymentPlan.Labels = map[string]string{
 		// Standard Kubernetes labels
 		common.LabelAppKubernetesInstance:  reconciler.instance.Name,
@@ -354,9 +352,9 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 		}
 		appsProvisionedCondition.Reason = broker.AppsProvisionedConditionNotReadyReason
 	} else {
-		obj := reconciler.CloneOfDeployed(reflect.TypeOf(broker.BrokerCluster{}), reconciler.instance.Name)
+		obj := reconciler.CloneOfDeployed(reflect.TypeOf(broker.Broker{}), reconciler.instance.Name)
 		if obj != nil {
-			deployed := obj.(*broker.BrokerCluster)
+			deployed := obj.(*broker.Broker)
 			brokerDeployed := meta.FindStatusCondition(deployed.Status.Conditions, broker.DeployedConditionType)
 
 			if brokerDeployed != nil {
@@ -598,7 +596,7 @@ func (r *BrokerServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&broker.BrokerService{}).
-		Owns(&broker.BrokerCluster{}).
+		Owns(&broker.Broker{}).
 		Watches(&broker.BrokerApp{}, &appToServiceHandler{}).
 		Complete(r)
 }

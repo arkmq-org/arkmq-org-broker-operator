@@ -541,6 +541,12 @@ func createControllerManager(disableMetrics bool, watchNamespace string) {
 		ctrl.Log.Error(err, "unable to create controller", "controller", "BrokerClusterReconciler")
 	}
 
+	brokerCRReconciler := NewBrokerReconciler(k8Manager, ctrl.Log, isOpenshift)
+
+	if err = brokerCRReconciler.SetupWithManager(k8Manager); err != nil {
+		ctrl.Log.Error(err, "unable to create controller", "controller", "BrokerReconciler")
+	}
+
 	securityReconciler = &ActiveMQArtemisSecurityReconciler{
 		Client:           k8Manager.GetClient(),
 		Scheme:           k8Manager.GetScheme(),
@@ -956,6 +962,7 @@ func uninstallCRDs() {
 		"activemqartemisaddresses.broker.amq.io",
 		"activemqartemisscaledowns.broker.amq.io",
 		"activemqartemissecurities.broker.amq.io",
+		"brokers.broker.arkmq.org",
 		"brokerclusters.broker.arkmq.org",
 		"brokerapps.broker.arkmq.org",
 		"brokerservices.broker.arkmq.org",

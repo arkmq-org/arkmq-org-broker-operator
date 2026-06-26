@@ -38,7 +38,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
+	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
@@ -121,10 +121,10 @@ var _ = Describe("minimal", func() {
 			ctx := context.Background()
 
 			// empty CRD, name is used for cert subject to match the headless service
-			crd := brokerv1beta1.ActiveMQArtemis{
+			crd := v1beta2.Broker{
 				TypeMeta: metav1.TypeMeta{
-					Kind:       "ActiveMQArtemis",
-					APIVersion: brokerv1beta1.GroupVersion.Identifier(),
+					Kind:       "Broker",
+					APIVersion: v1beta2.GroupVersion.Identifier(),
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      NextSpecResourceName(),
@@ -155,8 +155,6 @@ var _ = Describe("minimal", func() {
 				}
 			})
 
-			crd.Spec.Restricted = common.NewTrue()
-
 			// how the jdk command line can be configured or modified
 			crd.Spec.Env = []corev1.EnvVar{
 				{Name: "JDK_JAVA_OPTIONS", Value: "-Djavax.net.debug=ssl -Djava.security.debug=logincontext"},
@@ -170,7 +168,7 @@ var _ = Describe("minimal", func() {
 			Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
 
 			brokerKey := types.NamespacedName{Name: crd.Name, Namespace: crd.Namespace}
-			createdCrd := &brokerv1beta1.ActiveMQArtemis{}
+			createdCrd := &v1beta2.Broker{}
 
 			By("Checking ready, operator can access broker status via jmx")
 			Eventually(func(g Gomega) {
@@ -179,8 +177,8 @@ var _ = Describe("minimal", func() {
 				if verbose {
 					fmt.Printf("STATUS: %v\n\n", createdCrd.Status.Conditions)
 				}
-				g.Expect(meta.IsStatusConditionTrue(createdCrd.Status.Conditions, brokerv1beta1.ReadyConditionType)).Should(BeTrue())
-				g.Expect(meta.IsStatusConditionTrue(createdCrd.Status.Conditions, brokerv1beta1.ConfigAppliedConditionType)).Should(BeTrue())
+				g.Expect(meta.IsStatusConditionTrue(createdCrd.Status.Conditions, v1beta2.ReadyConditionType)).Should(BeTrue())
+				g.Expect(meta.IsStatusConditionTrue(createdCrd.Status.Conditions, v1beta2.ConfigAppliedConditionType)).Should(BeTrue())
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
@@ -282,10 +280,10 @@ var _ = Describe("minimal", func() {
 
 			ctx := context.Background()
 
-			crd := brokerv1beta1.ActiveMQArtemis{
+			crd := v1beta2.Broker{
 				TypeMeta: metav1.TypeMeta{
-					Kind:       "ActiveMQArtemis",
-					APIVersion: brokerv1beta1.GroupVersion.Identifier(),
+					Kind:       "Broker",
+					APIVersion: v1beta2.GroupVersion.Identifier(),
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      NextSpecResourceName(),
@@ -344,7 +342,6 @@ hawtio=hawtio
 				k8sClient.Delete(ctx, &overrideSecret)
 			})
 
-			crd.Spec.Restricted = common.NewTrue()
 			crd.Spec.BrokerProperties = []string{
 				"messageCounterSamplePeriod=500",
 			}
@@ -353,7 +350,7 @@ hawtio=hawtio
 			Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
 
 			brokerKey := types.NamespacedName{Name: crd.Name, Namespace: crd.Namespace}
-			createdCrd := &brokerv1beta1.ActiveMQArtemis{}
+			createdCrd := &v1beta2.Broker{}
 
 			By("Checking ready, operator can access broker status via jmx")
 			Eventually(func(g Gomega) {
@@ -362,8 +359,8 @@ hawtio=hawtio
 				if verbose {
 					fmt.Printf("STATUS: %v\n\n", createdCrd.Status.Conditions)
 				}
-				g.Expect(meta.IsStatusConditionTrue(createdCrd.Status.Conditions, brokerv1beta1.ReadyConditionType)).Should(BeTrue())
-				g.Expect(meta.IsStatusConditionTrue(createdCrd.Status.Conditions, brokerv1beta1.ConfigAppliedConditionType)).Should(BeTrue())
+				g.Expect(meta.IsStatusConditionTrue(createdCrd.Status.Conditions, v1beta2.ReadyConditionType)).Should(BeTrue())
+				g.Expect(meta.IsStatusConditionTrue(createdCrd.Status.Conditions, v1beta2.ConfigAppliedConditionType)).Should(BeTrue())
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 

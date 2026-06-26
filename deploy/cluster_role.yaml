@@ -97,6 +97,7 @@ rules:
   resources:
   - brokerapps
   - brokerclusters
+  - brokers
   - brokerservices
   verbs:
   - create
@@ -120,12 +121,14 @@ rules:
   - broker.arkmq.org
   resources:
   - brokerclusters/finalizers
+  - brokers/finalizers
   verbs:
   - update
 - apiGroups:
   - broker.arkmq.org
   resources:
   - brokerclusters/status
+  - brokers/status
   - brokerservices/status
   verbs:
   - get

@@ -271,7 +271,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			By("verifying both apps are in service's ProvisionedApps status")
 			brokerKey := types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}
-			brokerCrd := &broker.BrokerCluster{}
+			brokerCrd := &broker.Broker{}
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, brokerKey, brokerCrd)).Should(Succeed())
 				g.Expect(meta.IsStatusConditionTrue(brokerCrd.Status.Conditions, broker.ConfigAppliedConditionType)).Should(BeTrue())
