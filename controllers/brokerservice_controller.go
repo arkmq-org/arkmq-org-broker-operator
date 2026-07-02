@@ -104,14 +104,28 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 		}
 	}
 
+	reqLogger.V(2).Info("Reconciler Processed...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation, "error", err)
+
 	statusErr, retry := processor.processStatus(err)
-	if err == nil {
-		err = statusErr
+	if err != nil {
+		// Handle reconcile error based on type
+		if _, ok := err.(*ValidationError); ok {
+			// Validation error - don't retry (wait for spec change)
+			return ctrl.Result{}, nil
+		}
+
+		// exponential backoff retry
+		return ctrl.Result{}, err
 	}
-	if err == nil && retry {
+	if statusErr != nil {
+		return ctrl.Result{}, fmt.Errorf("Failed to update status: error %v", statusErr)
+	}
+	if retry {
 		return ctrl.Result{RequeueAfter: common.GetReconcileResyncPeriod()}, nil
 	}
-	return ctrl.Result{}, err
+
+	// Success
+	return ctrl.Result{}, nil
 }
 
 // instance specifics for a reconciler loop
@@ -132,29 +146,19 @@ func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
 
 func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
 	// Validate resource name
-	if err := ValidateResourceNameAndSetCondition(reconciler.instance.Name, &reconciler.status.Conditions); err != nil {
+	if err := ValidateResourceName(reconciler.instance.Name); err != nil {
 		return err
 	}
 
 	// Validate CEL expression if provided
 	if reconciler.instance.Spec.AppSelectorExpression != "" {
 		if err := appselector.ValidateExpression(reconciler.instance.Spec.AppSelectorExpression); err != nil {
-			meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-				Type:    broker.ValidConditionType,
-				Status:  metav1.ConditionFalse,
-				Reason:  broker.ValidConditionSpecSelectorError,
-				Message: fmt.Sprintf("invalid appSelectorExpression: %v", err),
-			})
-			return err
+			return NewValidationError(
+				broker.ValidConditionSpecSelectorError,
+				"invalid appSelectorExpression: %v", err)
 		}
 	}
 
-	// All validations passed - set Valid=True
-	meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-		Type:   broker.ValidConditionType,
-		Status: metav1.ConditionTrue,
-		Reason: broker.ValidConditionSuccessReason,
-	})
 	return nil
 }
 
@@ -300,7 +304,25 @@ func certSecretName(cr *broker.BrokerService) string {
 	return fmt.Sprintf("%s-%s", cr.Name, common.DefaultOperandCertSecretName)
 }
 
+func (reconciler *BrokerServiceInstanceReconciler) setValidCondition(err error) {
+	condition := metav1.Condition{
+		Type:   broker.ValidConditionType,
+		Status: metav1.ConditionTrue,
+		Reason: broker.ValidConditionSuccessReason,
+	}
+
+	if validErr, ok := err.(*ValidationError); ok {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = validErr.ConditionReason()
+		condition.Message = validErr.Error()
+	}
+
+	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
+}
+
 func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError error) (err error, retry bool) {
+	// Set Valid condition (always updated)
+	reconciler.setValidCondition(reconcilerError)
 
 	var deployedCondition metav1.Condition = metav1.Condition{
 		Type:   broker.DeployedConditionType,
@@ -315,11 +337,15 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 	}
 
 	if reconcilerError != nil {
-		// Check if error is a ConditionError with a specific reason
-		if condErr, ok := AsConditionError(reconcilerError); ok {
+		// Check if error is a TransientError with a specific reason
+		if transErr, ok := reconcilerError.(*TransientError); ok {
 			deployedCondition.Status = metav1.ConditionFalse
-			deployedCondition.Reason = condErr.Reason
-			deployedCondition.Message = condErr.Message
+			deployedCondition.Reason = transErr.ConditionReason()
+			deployedCondition.Message = transErr.Error()
+		} else if validErr, ok := reconcilerError.(*ValidationError); ok {
+			deployedCondition.Status = metav1.ConditionFalse
+			deployedCondition.Reason = validErr.ConditionReason()
+			deployedCondition.Message = validErr.Error()
 		} else {
 			// Generic error (API errors, update errors, etc.)
 			deployedCondition.Status = metav1.ConditionUnknown
@@ -415,10 +441,6 @@ func getBindingValue(service *broker.BrokerServiceBindingStatus) string {
 func (reconciler *BrokerServiceInstanceReconciler) appMatchesSelector(app *broker.BrokerApp) bool {
 	matches, err := appselector.Matches(app, reconciler.instance, reconciler.Client)
 	if err != nil {
-		reconciler.log.Error(err, "Failed to evaluate appSelectorExpression, excluding app",
-			"app", appName(app),
-			"service", serviceName(reconciler.instance),
-			"expression", reconciler.instance.Spec.AppSelectorExpression)
 		return false
 	}
 	return matches
@@ -428,18 +450,18 @@ func (reconciler *BrokerServiceInstanceReconciler) appMatchesSelector(app *broke
 // to be provisioned by this service.
 // Returns (valid, reason):
 //   - (true, "") if app should be provisioned
-//   - (false, reason) if app fails validation and should be skipped
+//   - (false, reason) if app fails validation and should be rejected
 func (reconciler *BrokerServiceInstanceReconciler) validateAppForProvisioning(app *broker.BrokerApp, serviceKey string) (bool, string) {
 	// App's label selector matches service labels
 	if app.Spec.ServiceSelector != nil {
 		selector, err := metav1.LabelSelectorAsSelector(app.Spec.ServiceSelector)
 		if err != nil {
-			reconciler.log.Error(err, "Skipping app with invalid label selector",
+			reconciler.log.Error(err, "Rejecting app with invalid label selector",
 				"app", appName(app))
 			return false, "invalid label selector"
 		}
 		if !selector.Matches(labels.Set(reconciler.instance.Labels)) {
-			reconciler.log.Info("Skipping app that does not match service labels (status.serviceBinding manually set?)",
+			reconciler.log.Info("Rejecting app that does not match service labels (status.serviceBinding manually set?)",
 				"app", appName(app),
 				"service", serviceName(reconciler.instance),
 				"appSelector", app.Spec.ServiceSelector,
@@ -450,7 +472,7 @@ func (reconciler *BrokerServiceInstanceReconciler) validateAppForProvisioning(ap
 
 	// App matches CEL selector expression
 	if !reconciler.appMatchesSelector(app) {
-		reconciler.log.Info("Skipping app that does not match appSelectorExpression (status.serviceBinding manually set?)",
+		reconciler.log.Info("Rejecting app that does not match appSelectorExpression (status.serviceBinding manually set?)",
 			"app", appName(app),
 			"service", serviceName(reconciler.instance),
 			"expression", reconciler.instance.Spec.AppSelectorExpression)
@@ -582,31 +604,60 @@ func (r *BrokerServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 type AddressConfig struct {
-	senderRoles   map[string]string
-	consumerRoles map[string]string
+	senderRoles     map[string]string
+	consumerRoles   map[string]string
+	subscriberRoles map[string]string
+
+	// isOwned indicates this app should generate addressConfigurations for this address.
+	// True when appNamespace/appName are empty (local reference).
+	// False when appNamespace/appName are set (cross-app reference - owner generates config).
+	isOwned bool
+
+	isMulticast bool
 }
 
 type AddressTracker struct {
-	names map[string]AddressConfig
+	names map[string]*AddressConfig
 }
 
 func newAddressTracker() *AddressTracker {
-	return &AddressTracker{names: map[string]AddressConfig{}}
+	return &AddressTracker{names: map[string]*AddressConfig{}}
 }
 
-func (t *AddressTracker) newAddressConfig() AddressConfig {
-	return AddressConfig{senderRoles: map[string]string{}, consumerRoles: map[string]string{}}
+func (t *AddressTracker) newAddressConfig() *AddressConfig {
+	return &AddressConfig{senderRoles: map[string]string{}, consumerRoles: map[string]string{},
+		subscriberRoles: map[string]string{}, isOwned: false, isMulticast: false}
 }
 
-func (t *AddressTracker) track(address *broker.AppAddressType) *AddressConfig {
-
-	var present bool
-	var entry AddressConfig
-	if entry, present = t.names[address.Address]; !present {
+func (t *AddressTracker) track(address *broker.AddressRef) *AddressConfig {
+	entry, present := t.names[address.Address]
+	if !present {
 		entry = t.newAddressConfig()
 		t.names[address.Address] = entry
 	}
-	return &entry
+
+	// If AppNamespace and AppName are empty, this app owns the address
+	if address.AppNamespace == "" && address.AppName == "" {
+		entry.isOwned = true
+	}
+
+	return entry
+}
+
+func (t *AddressTracker) trackAddressType(addrType *broker.AddressType) *AddressConfig {
+	localAddr := &broker.AddressRef{
+		Address: addrType.Address,
+		// AppNamespace and AppName empty = owned/local address
+	}
+	addressConfig := t.track(localAddr)
+	if isMulticastAddress(addrType.PubSub, addrType.Subscriptions) {
+		addressConfig.isMulticast = true
+		for _, subName := range addrType.Subscriptions {
+			fqqnEntry := t.track(&broker.AddressRef{Address: addrType.Address + FQQNSeparator + subName})
+			fqqnEntry.isMulticast = true
+		}
+	}
+	return addressConfig
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *corev1.Secret, app *broker.BrokerApp) (err error) {
@@ -614,60 +665,156 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 
 	role := AppIdentity(app)
 
+	// First, track addresses declared in spec.addresses (private, owned by this app)
+	// This ensures addressConfigurations are generated even if the app has no capabilities
+	for _, addrType := range app.Spec.Addresses {
+		addressTracker.trackAddressType(&addrType)
+	}
+
+	// Also track addresses declared in spec.sharedAddresses (public, owned by this app)
+	for _, addrType := range app.Spec.SharedAddresses {
+		addressTracker.trackAddressType(&addrType)
+	}
+
+	// Then, process capabilities to find inline addresses and capture roles
 	for _, capability := range app.Spec.Capabilities {
 
 		var entry *AddressConfig
 
-		for _, address := range capability.ProducerOf {
-			entry = addressTracker.track(&address)
+		// Process ProducerOf
+		for _, addressRef := range capability.ProducerOf {
+			entry = addressTracker.track(&addressRef)
 			entry.senderRoles[role] = role
+
+			// Handle pub/sub declaration (can be explicit via pubSub:true or inferred from subscriptions)
+			if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
+				// pubSub=true (explicit) or has subscriptions means "this is a MULTICAST address"
+				// Validation already ensures subscriptions is empty (no queue names allowed for producers)
+				entry.isMulticast = true
+			}
 		}
 
-		for _, address := range capability.ConsumerOf {
-			entry = addressTracker.track(&address)
-			entry.consumerRoles[role] = role
-		}
+		// Process ConsumerOf
+		for _, addressRef := range capability.ConsumerOf {
+			entry = addressTracker.track(&addressRef)
 
-		for _, address := range capability.SubscriberOf {
-			entry = addressTracker.track(&address)
-			entry.consumerRoles[role] = role
+			if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
+				// ANYCAST - direct queue consumption (no pubSub, no subscriptions)
+				entry.consumerRoles[role] = role
+
+				// Validate idempotency: check if address was already marked as MULTICAST
+				if entry.isOwned && entry.isMulticast {
+					return fmt.Errorf(
+						"address '%s' is referenced with both pubSub and non pubSub semantics. "+
+							"This creates a conflict. Use consistent semantics for the same address",
+						addressRef.Address)
+				}
+			} else {
+				// MULTICAST - multicast queue-based consumption (pubSub=true or has subscriptions)
+				// Validation already ensures len > 0 (empty subscriptions not allowed for consumers)
+
+				// Validate idempotency: check if address was already used with ANYCAST
+				if entry.isOwned && len(entry.consumerRoles) > 0 && !entry.isMulticast {
+					return fmt.Errorf(
+						"address '%s' is referenced with both pubSub and non pubSub semantics. "+
+							"This creates a conflict. Use consistent semantics for the same address",
+						addressRef.Address)
+				}
+
+				entry.isMulticast = true
+
+				// Generate FQQN for each multicast queue
+				for _, queueName := range addressRef.Subscriptions {
+					fqqn := addressRef.Address + FQQNSeparator + queueName
+					queueEntry := addressTracker.track(&broker.AddressRef{
+						Address:      fqqn,
+						AppNamespace: addressRef.AppNamespace,
+						AppName:      addressRef.AppName,
+					})
+					queueEntry.subscriberRoles[role] = role
+					queueEntry.isMulticast = true
+				}
+			}
 		}
 	}
 
 	props := map[string]string{} // need to dedup
+
+	// Track all queue names for metrics generation
+	queueNamesForMetrics := make(map[string]bool)
+
 	for addressName, addr := range addressTracker.names {
-		fqqn := strings.SplitN(addressName, "::", 2)
-		if len(fqqn) > 1 {
-			address := escapeForProperties(fqqn[0])
-			queueName := escapeForProperties(fqqn[1])
-			props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=ANYCAST,MULTICAST\n", address)] = ""
-			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".routingType=MULTICAST\n", address, queueName)] = ""
-			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".address=%s\n", address, queueName, address)] = ""
+		escapedAddressName := escapeForProperties(addressName)
+
+		var address, queueName string
+		fqqn := strings.SplitN(addressName, FQQNSeparator, 2)
+		isFQQN := len(fqqn) > 1
+		if isFQQN {
+			address = escapeForProperties(fqqn[0])
+			queueName = escapeForProperties(fqqn[1])
 		} else {
-			props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=ANYCAST,MULTICAST\n", addressName)] = ""
-			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".routingType=ANYCAST\n", addressName, addressName)] = ""
+			address = escapedAddressName
+			queueName = escapedAddressName
 		}
 
-		// use fqqn as is for RBAC
-		addressName = escapeForProperties(addressName)
+		// Only generate routingTypes for addresses owned by this app
+		// (not cross-app references where AppNamespace/AppName are set)
+		if addr.isOwned {
+			if addr.isMulticast {
+				props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=MULTICAST\n", address)] = ""
+			} else {
+				props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=ANYCAST\n", address)] = ""
+			}
+		}
 
+		// Generate ANYCAST queue configs for all non-multicast addresses
+		// (both owned and referenced with consumer capability)
+		if !addr.isMulticast {
+			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".routingType=ANYCAST\n", address, queueName)] = ""
+			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".address=%s\n", address, queueName, address)] = ""
+			queueNamesForMetrics[queueName] = true
+		}
+
+		// Generate MULTICAST queue configs for FQQN (subscription) addresses
+		if isFQQN {
+			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".routingType=MULTICAST\n", address, queueName)] = ""
+			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".address=%s\n", address, queueName, address)] = ""
+			queueNamesForMetrics[queueName] = true
+		}
+
+		// Always generate RBAC roles (for both owned and referenced addresses)
+		// use fqqn/escapedAddressName as is for RBAC
 		for _, role := range addr.senderRoles {
-			props[fmt.Sprintf("securityRoles.\"%s\".\"%s\".send=true\n", addressName, producerRole(role))] = ""
+			props[fmt.Sprintf("securityRoles.\"%s\".\"%s\".send=true\n", escapedAddressName, producerRole(role))] = ""
 
 		}
 		for _, role := range addr.consumerRoles {
-			props[fmt.Sprintf("securityRoles.\"%s\".\"%s\".consume=true\n", addressName, consumerRole(role))] = ""
+			props[fmt.Sprintf("securityRoles.\"%s\".\"%s\".consume=true\n", escapedAddressName, consumerRole(role))] = ""
 		}
 
-		// metrics
+		// 2026-05-12T17:17:22.906184695Z Thread-0 (activemq-brokerservice-mqtt119a) INFO AMQ601264: User test-mqtt-app(test-mqtt-app-consumer,test-mqtt-app-producer)@10.244.12.28:45426 gets security check failure, reason = AMQ229213:
+		// User: test-mqtt-app does not have permission='CONSUME' for queue my-client.mytopic.* on address mytopic.*
+		// securityRoles."(mytopic.*\:\:my-client.mytopic.*)"."test-mqtt-app-consumer".consume=true
+
+		for _, role := range addr.subscriberRoles {
+			// but security store does not support literal match markers!
+			// https://issues.apache.org/jira/browse/ARTEMIS-6057
+			//			props[fmt.Sprintf("securityRoles.\"(%s)\".\"%s\".consume=true\n", escapedAddressName, consumerRole(role))] = ""
+			props[fmt.Sprintf("securityRoles.\"%s\".\"%s\".consume=true\n", escapedAddressName, consumerRole(role))] = ""
+		}
+	}
+
+	// Generate metrics roles for all queues
+	for queueName := range queueNamesForMetrics {
 		for _, rbacRole := range []string{"metrics", metricsRole(AppIdentity(app))} {
 			// mbean server query
-			props[fmt.Sprintf("securityRoles.\"mops.queue.%s\".\"%s\".view=true\n", addressName, rbacRole)] = ""
+			props[fmt.Sprintf("securityRoles.\"mops.queue.%s\".\"%s\".view=true\n", queueName, rbacRole)] = ""
 
 			// attributes
-			props[fmt.Sprintf("securityRoles.\"mops.queue.%s.getMessageCount\".\"%s\".view=true\n", addressName, rbacRole)] = ""
-			props[fmt.Sprintf("securityRoles.\"mops.queue.%s.getConsumerCount\".\"%s\".view=true\n", addressName, rbacRole)] = ""
-			props[fmt.Sprintf("securityRoles.\"mops.queue.%s.getDeliveringCount\".\"%s\".view=true\n", addressName, rbacRole)] = ""
+			props[fmt.Sprintf("securityRoles.\"mops.queue.%s.getMessageCount\".\"%s\".view=true\n", queueName, rbacRole)] = ""
+			props[fmt.Sprintf("securityRoles.\"mops.queue.%s.getConsumerCount\".\"%s\".view=true\n", queueName, rbacRole)] = ""
+			props[fmt.Sprintf("securityRoles.\"mops.queue.%s.getDeliveringCount\".\"%s\".view=true\n", queueName, rbacRole)] = ""
+			props[fmt.Sprintf("securityRoles.\"mops.queue.%s.getPersistentSize\".\"%s\".view=true\n", queueName, rbacRole)] = ""
 		}
 	}
 
@@ -726,7 +873,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 	dedupMap := map[string]string{}
 	for _, capability := range app.Spec.Capabilities {
 
-		if len(capability.ConsumerOf) > 0 || len(capability.SubscriberOf) > 0 {
+		if len(capability.ConsumerOf) > 0 {
 			dedupMap[fmt.Sprintf("%s=%s\n", consumerRole(namespacedName), namespacedName)] = ""
 		}
 		if len(capability.ProducerOf) > 0 {
@@ -867,8 +1014,17 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 	consumerAddresses := make(map[string]bool)
 	for _, app := range validApps {
 		for _, capability := range app.Spec.Capabilities {
-			for _, address := range capability.ConsumerOf {
-				consumerAddresses[address.Address] = true
+			for _, addressRef := range capability.ConsumerOf {
+				if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
+					// ANYCAST - direct queue address
+					consumerAddresses[addressRef.Address] = true
+				} else {
+					// MULTICAST - generate FQQN for each multicast queue
+					for _, queueName := range addressRef.Subscriptions {
+						fqqn := addressRef.Address + FQQNSeparator + queueName
+						consumerAddresses[fqqn] = true
+					}
+				}
 			}
 		}
 	}
@@ -957,6 +1113,7 @@ func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(cons
 			fmt.Fprintf(buf, "    - MessageCount\n")
 			fmt.Fprintf(buf, "    - ConsumerCount\n")
 			fmt.Fprintf(buf, "    - DeliveringCount\n")
+			fmt.Fprintf(buf, "    - PersistentSize\n")
 		}
 	}
 

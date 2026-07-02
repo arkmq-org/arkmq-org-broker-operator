@@ -3,11 +3,9 @@ kind: BrokerApp
 metadata:
   name: wq-app
 spec:
-  capabilities: [
-    producerOf: [
-      address: APP.JOBS
-    ]
-  ]
+  capabilities:
+    - producerOf:
+        - address: APP.JOBS
   selector:
     matchLabels:
       forWorkQueue: 'true'

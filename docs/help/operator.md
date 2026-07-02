@@ -601,7 +601,7 @@ spec:
 #### The Readiness Probe
 
 As with the Liveness Probe the Readiness probe has a default probe if not configured. Unlike the Readiness probe this is 
-a script that is shipped in the Kubernetes Image, this can be found [here](https://github.com/arkmq-org/arkmq-org-broker-kubernetes-image/blob/main/modules/activemq-artemis-launch/added/readinessProbe.sh)
+a script that is shipped in the Kubernetes Image, this can be found [here](https://github.com/arkmq-org/arkmq-org-broker-kubernetes-image/blob/main/modules/arkmq-org-broker-launch/added/readinessProbe.sh)
 
 The script will try to establish a tcp connection to each port configured in the broker.xml.  
 
@@ -1101,7 +1101,7 @@ stringData:
     # Certificate DN to user mapping
     hawtio=/CN = hawtio-online\.hawtio\.svc.*/
     operator=/.\*arkmq-org-broker-operator.\*/
-    probe=/.*activemq-artemis-operand.*/
+    probe=/.*arkmq-org-broker-operand.*/
     new-user=/.*new-user.*/
   _cert-roles: |
     # Role assignments for certificate-authenticated users
@@ -1112,8 +1112,8 @@ stringData:
 
 ## operator PKI
 In order for the operator to be able to use mtls to connect to the broker operand it needs a client certificate and a trust bundle listing the trusted CAs. The user needs to provide these two secrets in the operator namespace; cert manager can be used to create and populate both. If CRs use the restricted flag, these secrets are a prerequisit.
-The default operator cert secret name is `activemq-artemis-manager-cert` and the default operator trust bundle secret name is `activemq-artemis-manager-ca`. 
-If either of these secrets need to be named differently, an enviroment variable can provide the alternative name using key ACTIVEMQ_ARTEMIS_MANAGER_CERT_SECRET_NAME or ACTIVEMQ_ARTEMIS_MANAGER_CA_SECRET_NAME.
+The default operator cert secret name is `arkmq-org-broker-manager-cert` and the default operator trust bundle secret name is `arkmq-org-broker-manager-ca`.
+If either of these secrets need to be named differently, an enviroment variable can provide the alternative name using key ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME or ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME.
 
 In restricted mode, the operator automatically configures control plane authentication for common services. For Prometheus metrics scraping, the operator reads the certificate from a prometheus cert secret and configures the broker to grant metrics access to that certificate's Common Name (CN). The operator first checks for a CR-specific secret `[cr-name]-[base-name]` (allowing per-CR isolation), then falls back to the shared `[base-name]` secret. The base name defaults to `prometheus-cert` but can be overridden using the BASE_PROMETHEUS_CERT_SECRET_NAME environment variable (e.g., if set to `custom-prometheus`, it checks `my-broker-custom-prometheus` then `custom-prometheus`).
 

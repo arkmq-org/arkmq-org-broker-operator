@@ -152,7 +152,7 @@ var _ = Describe("broker name", func() {
 				By("installing operator cert in operator namespace")
 				InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
 					candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-					candidate.Spec.CommonName = "activemq-artemis-operator"
+					candidate.Spec.CommonName = "arkmq-org-broker-operator"
 					candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
 						Name: caIssuer.Name,
 						Kind: "ClusterIssuer",
@@ -187,7 +187,7 @@ var _ = Describe("broker name", func() {
 				By("installing restricted mtls broker cert for: " + crd.Name)
 				InstallCert(operandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
 					candidate.Spec.SecretName = operandCertName
-					candidate.Spec.CommonName = "activemq-artemis-operand"
+					candidate.Spec.CommonName = "arkmq-org-broker-operand"
 					candidate.Spec.DNSNames = []string{common.OrdinalFQDNS(crd.Name, defaultNamespace, 0)}
 					candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
 						Name: caIssuer.Name,
@@ -253,7 +253,7 @@ var _ = Describe("broker name", func() {
 				By("installing restricted mtls broker cert for: " + crd.Name)
 				InstallCert(operandCertName, brokerNamespace, func(candidate *cmv1.Certificate) {
 					candidate.Spec.SecretName = operandCertName
-					candidate.Spec.CommonName = "activemq-artemis-operand"
+					candidate.Spec.CommonName = "arkmq-org-broker-operand"
 					candidate.Spec.DNSNames = []string{common.OrdinalFQDNS(crd.Name, brokerNamespace, 0)}
 					candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
 						Name: caIssuer.Name,

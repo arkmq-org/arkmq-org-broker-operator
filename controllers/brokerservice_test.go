@@ -85,7 +85,7 @@ var _ = Describe("broker-service-poc", func() {
 			By("installing operator cert")
 			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
 				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-				candidate.Spec.CommonName = "activemq-artemis-operator"
+				candidate.Spec.CommonName = "arkmq-org-broker-operator"
 				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
 					Name: caIssuer.Name,
 					Kind: "ClusterIssuer",
@@ -115,7 +115,7 @@ var _ = Describe("broker-service-poc", func() {
 
 	Context("round trip simple", func() {
 
-		It("non persistent", func() {
+		It("non persistent", Label("verySlow"), func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -274,16 +274,17 @@ var _ = Describe("broker-service-poc", func() {
 
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "APP.JOBS"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "APP.JOBS"}},
+							ProducerOf: []broker.AddressRef{{Address: "APP.JOBS"}},
+							ConsumerOf: []broker.AddressRef{{Address: "APP.JOBS"}},
 						},
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "APP.COMMANDS"}},
-							SubscriberOf: []broker.AppAddressType{
-
-								// jms consumer queue of the form <address>::<connection client id>.<subscription name>
-								{Address: `APP.COMMANDS::client-1.sub-1`},
-								{Address: `APP.COMMANDS::client-2.sub-2`},
+							ProducerOf: []broker.AddressRef{{Address: "APP.COMMANDS"}},
+							ConsumerOf: []broker.AddressRef{
+								{
+									Address: "APP.COMMANDS",
+									// jms consumer queue of the form <address>::<connection client id>.<subscription name>
+									Subscriptions: []string{"client-1.sub-1", "client-2.sub-2"},
+								},
 							},
 						},
 					},
@@ -549,7 +550,7 @@ var _ = Describe("broker-service-poc", func() {
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, appKey, createdApp)).Should(Succeed())
 				createdApp.Spec.Capabilities = append(createdApp.Spec.Capabilities, broker.AppCapabilityType{
-					ProducerOf: []broker.AppAddressType{
+					ProducerOf: []broker.AddressRef{
 						{
 							Address: "brian",
 						},
@@ -714,11 +715,11 @@ var _ = Describe("broker-service-poc", func() {
 
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ConsumerOf: []broker.AppAddressType{
+							ConsumerOf: []broker.AddressRef{
 								{Address: "METRICS.QUEUE.ONE"},
 								{Address: "METRICS.QUEUE.TWO"},
 							},
-							ProducerOf: []broker.AppAddressType{
+							ProducerOf: []broker.AddressRef{
 								{Address: "METRICS.QUEUE.ONE"},
 								{Address: "METRICS.QUEUE.TWO"},
 							},

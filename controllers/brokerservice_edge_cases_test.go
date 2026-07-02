@@ -76,7 +76,7 @@ var _ = Describe("broker-service edge cases and concurrent operations", func() {
 			By("installing operator cert")
 			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
 				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-				candidate.Spec.CommonName = "activemq-artemis-operator"
+				candidate.Spec.CommonName = "arkmq-org-broker-operator"
 				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
 					Name: caIssuer.Name,
 					Kind: "ClusterIssuer",
@@ -187,8 +187,8 @@ var _ = Describe("broker-service edge cases and concurrent operations", func() {
 						},
 						Capabilities: []broker.AppCapabilityType{
 							{
-								ProducerOf: []broker.AppAddressType{{Address: fmt.Sprintf("RAPID.Q%d", i)}},
-								ConsumerOf: []broker.AppAddressType{{Address: fmt.Sprintf("RAPID.Q%d", i)}},
+								ProducerOf: []broker.AddressRef{{Address: fmt.Sprintf("RAPID.Q%d", i)}},
+								ConsumerOf: []broker.AddressRef{{Address: fmt.Sprintf("RAPID.Q%d", i)}},
 							},
 						},
 					},
@@ -334,7 +334,7 @@ var _ = Describe("broker-service edge cases and concurrent operations", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "SPECIAL.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "SPECIAL.QUEUE"}},
 						},
 					},
 				},
@@ -473,7 +473,7 @@ var _ = Describe("broker-service edge cases and concurrent operations", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "ORPHAN.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "ORPHAN.QUEUE"}},
 						},
 					},
 				},

@@ -147,7 +147,7 @@ func (j *Jolokia) Read(_path string) (*ResponseData, error) {
 		if err != nil {
 			break
 		}
-		req.Header.Set("User-Agent", "activemq-artemis-management")
+		req.Header.Set("User-Agent", "arkmq-org-broker-management")
 		res, err := jolokiaClient.Do(req)
 
 		if err != nil {
@@ -202,7 +202,7 @@ func (j *Jolokia) ExecWithClient(jolokiaClient *http.Client, _path string, _post
 			break
 		}
 
-		req.Header.Set("User-Agent", "activemq-artemis-management")
+		req.Header.Set("User-Agent", "arkmq-org-broker-management")
 		req.Header.Set("Content-Type", "application/json")
 		res, err := jolokiaClient.Do(req)
 

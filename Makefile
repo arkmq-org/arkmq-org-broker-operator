@@ -161,7 +161,6 @@ test-mk-do-fast test-mk-do-fast-v: TEST_ARGS += -test.timeout=30m -ginkgo.label-
 test-mk-do-fast test-mk-do-fast-v: TEST_VARS = DEPLOY_OPERATOR=true USE_EXISTING_CLUSTER=true
 
 test-v test-mk-v test-mk-do-v test-mk-do-fast-v: TEST_ARGS += -v
-test-v test-mk-v test-mk-do-v test-mk-do-fast-v: TEST_VARS += TEST_VERBOSE=true
 test-v test-mk test-mk-v test-mk-do test-mk-do-v test-mk-do-fast test-mk-do-fast-v: TEST_ARGS += -ginkgo.poll-progress-after=150s -ginkgo.fail-fast -coverprofile cover-mk.out
 
 test test-v: manifests generate fmt vet envtest

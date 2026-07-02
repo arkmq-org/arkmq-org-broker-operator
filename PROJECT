@@ -8,7 +8,7 @@ layout:
 plugins:
   manifests.sdk.operatorframework.io/v2: {}
   scorecard.sdk.operatorframework.io/v2: {}
-projectName: activemq-artemis-operator
+projectName: arkmq-org-broker-operator
 repo: github.com/arkmq-org/arkmq-org-broker-operator
 resources:
 - api:

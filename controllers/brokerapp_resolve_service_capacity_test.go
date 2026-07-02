@@ -15,102 +15,103 @@ limitations under the License.
 package controllers
 
 import (
-	"testing"
-
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
-	"github.com/stretchr/testify/assert"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func TestResolveBrokerService_MultipleServices_OneNotDeployed(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = broker.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
+var _ = Describe("BrokerApp service resolution with capacity constraints", func() {
+	Context("when multiple services are available", func() {
+		It("should skip services that are not yet deployed", func() {
+			scheme := runtime.NewScheme()
+			_ = broker.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
 
-	app := &broker.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-app",
-			Namespace: "test",
-		},
-		Spec: broker.BrokerAppSpec{
-			ServiceSelector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"env": "dev"},
-			},
-		},
-	}
-
-	// Service 1: Not deployed yet
-	service1 := &broker.BrokerService{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "service1",
-			Namespace: "test",
-			Labels:    map[string]string{"env": "dev"},
-		},
-		Status: broker.BrokerServiceStatus{
-			Conditions: []metav1.Condition{
-				{
-					Type:   broker.DeployedConditionType,
-					Status: metav1.ConditionFalse,
-					Reason: broker.DeployedConditionNotReadyReason,
+			app := &broker.BrokerApp{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-app",
+					Namespace: "test",
 				},
-			},
-		},
-	}
-
-	// Service 2: ready with capacity
-	service2 := &broker.BrokerService{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "service2",
-			Namespace: "test",
-			Labels:    map[string]string{"env": "dev"},
-		},
-		Status: broker.BrokerServiceStatus{
-			Conditions: []metav1.Condition{
-				{
-					Type:   broker.DeployedConditionType,
-					Status: metav1.ConditionTrue,
-					Reason: broker.ReadyConditionReason,
+				Spec: broker.BrokerAppSpec{
+					ServiceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"env": "dev"},
+					},
 				},
-			},
-		},
-	}
+			}
 
-	ns := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test",
-		},
-	}
-
-	fakeClient := setupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithRuntimeObjects(app, service1, service2, ns)).
-		Build()
-
-	reconciler := &BrokerAppInstanceReconciler{
-		BrokerAppReconciler: &BrokerAppReconciler{
-			ReconcilerLoop: &ReconcilerLoop{
-				KubeBits: &KubeBits{
-					Client: fakeClient,
-					Scheme: scheme,
+			// Service 1: Not deployed yet
+			service1 := &broker.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "service1",
+					Namespace: "test",
+					Labels:    map[string]string{"env": "dev"},
 				},
-			},
-		},
-		instance: app,
-		status:   app.Status.DeepCopy(),
-	}
+				Status: broker.BrokerServiceStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   broker.DeployedConditionType,
+							Status: metav1.ConditionFalse,
+							Reason: broker.DeployedConditionNotReadyReason,
+						},
+					},
+				},
+			}
 
-	// Call resolveBrokerService
-	err := reconciler.resolveBrokerService()
+			// Service 2: ready with capacity
+			service2 := &broker.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "service2",
+					Namespace: "test",
+					Labels:    map[string]string{"env": "dev"},
+				},
+				Status: broker.BrokerServiceStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   broker.DeployedConditionType,
+							Status: metav1.ConditionTrue,
+							Reason: broker.ReadyConditionReason,
+						},
+					},
+				},
+			}
 
-	// Should NOT error - should skip not-deployed service1 and select deployed service2
-	assert.NoError(t, err, "should skip not-deployed service and select deployed one")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+				},
+			}
 
-	// Should have selected service2 (the deployed one)
-	assert.NotNil(t, reconciler.service, "should have selected a service")
-	if reconciler.service != nil {
-		assert.Equal(t, "service2", reconciler.service.Name, "should select deployed service")
-	}
-}
+			fakeClient := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(app, service1, service2, ns)).
+				Build()
+
+			reconciler := &BrokerAppInstanceReconciler{
+				BrokerAppReconciler: &BrokerAppReconciler{
+					ReconcilerLoop: &ReconcilerLoop{
+						KubeBits: &KubeBits{
+							Client: fakeClient,
+							Scheme: scheme,
+						},
+					},
+				},
+				instance: app,
+				status:   app.Status.DeepCopy(),
+			}
+
+			// Call resolveBrokerService
+			err := reconciler.resolveBrokerService()
+
+			// Should NOT error - should skip not-deployed service1 and select deployed service2
+			Expect(err).NotTo(HaveOccurred(), "should skip not-deployed service and select deployed one")
+
+			// Should have selected service2 (the deployed one)
+			Expect(reconciler.service).NotTo(BeNil(), "should have selected a service")
+			Expect(reconciler.service.Name).To(Equal("service2"), "should select deployed service")
+		})
+	})
+})

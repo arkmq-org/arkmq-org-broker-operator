@@ -809,7 +809,6 @@ const (
 	DeployedConditionMatchedServiceNotFoundReason = "MatchedServiceNotFound"
 	DeployedConditionProvisioningPendingReason    = "ProvisioningPending"
 	DeployedConditionProvisionedReason            = "Provisioned"
-	DeployedConditionDoesNotMatchReason           = "AppSelectorNoMatch"
 	DeployedConditionSelectorEvaluationError      = "AppSelectorEvaluationError"
 	DeployedConditionPortPoolExhaustedReason      = "PortPoolExhausted"
 

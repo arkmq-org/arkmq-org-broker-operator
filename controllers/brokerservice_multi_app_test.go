@@ -81,7 +81,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			By("installing operator cert")
 			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
 				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-				candidate.Spec.CommonName = "activemq-artemis-operator"
+				candidate.Spec.CommonName = "arkmq-org-broker-operator"
 				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
 					Name: caIssuer.Name,
 					Kind: "ClusterIssuer",
@@ -188,8 +188,8 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "APP1.QUEUE"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "APP1.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "APP1.QUEUE"}},
+							ConsumerOf: []broker.AddressRef{{Address: "APP1.QUEUE"}},
 						},
 					},
 				},
@@ -226,9 +226,12 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "APP2.TOPIC"}},
-							SubscriberOf: []broker.AppAddressType{
-								{Address: "APP2.TOPIC::client-a.sub-a"},
+							ProducerOf: []broker.AddressRef{{Address: "APP2.TOPIC"}},
+							ConsumerOf: []broker.AddressRef{
+								{
+									Address:       "APP2.TOPIC",
+									Subscriptions: []string{"client-a.sub-a"},
+								},
 							},
 						},
 					},
@@ -441,8 +444,8 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "MOBILE.TASKS"}},
-							ConsumerOf: []broker.AppAddressType{{Address: "MOBILE.TASKS"}},
+							ProducerOf: []broker.AddressRef{{Address: "MOBILE.TASKS"}},
+							ConsumerOf: []broker.AddressRef{{Address: "MOBILE.TASKS"}},
 						},
 					},
 				},
@@ -536,7 +539,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 	Context("cross-namespace app provisioning", func() {
 
-		It("should provision apps from multiple namespaces on same service", func() {
+		It("should provision apps from multiple namespaces on same service with sharing", Label("verySlow"), func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -640,11 +643,18 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 							corev1.ResourceMemory: resource.MustParse("512Mi"),
 						},
 					},
+					SharedAddresses: []broker.AddressType{{Address: "shared.address", PubSub: &[]bool{true}[0]}},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							SubscriberOf: []broker.AppAddressType{
-								{Address: "app1.address::queue1"},
-								{Address: "shared.address::app1-client.app1-shared-queue"},
+							ConsumerOf: []broker.AddressRef{
+								{
+									Address:       "app1.address",
+									Subscriptions: []string{"queue1"},
+								},
+								{
+									Address:       "shared.address",
+									Subscriptions: []string{"app1-client.app1-shared-queue"},
+								},
 							},
 						},
 					},
@@ -658,6 +668,11 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			By("waiting for app1 to be ready")
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, app1Key, createdApp1)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("App1 Status: %v\n", createdApp1.Status)
+				}
+
 				g.Expect(meta.IsStatusConditionTrue(createdApp1.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
 
 				// Verify port was assigned
@@ -702,9 +717,17 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							SubscriberOf: []broker.AppAddressType{
-								{Address: "app2.address::queue2"},
-								{Address: "shared.address::app2-client.app2-shared-queue"},
+							ConsumerOf: []broker.AddressRef{
+								{
+									Address:       "app2.address",
+									Subscriptions: []string{"queue2"},
+								},
+								{
+									Address:       "shared.address",
+									Subscriptions: []string{"app2-client.app2-shared-queue"},
+									AppNamespace:  defaultNamespace,
+									AppName:       app1Name,
+								},
 							},
 						},
 					},
@@ -718,6 +741,11 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			By("waiting for app2 to be ready")
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, app2Key, createdApp2)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("App2 Status: %v\n", createdApp2.Status)
+				}
+
 				g.Expect(meta.IsStatusConditionTrue(createdApp2.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
 
 				// Verify port was assigned
@@ -784,8 +812,11 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							SubscriberOf: []broker.AppAddressType{
-								{Address: "app3.address::queue3"},
+							ConsumerOf: []broker.AddressRef{
+								{
+									Address:       "app3.address",
+									Subscriptions: []string{"queue3"},
+								},
 							},
 						},
 					},
@@ -829,9 +860,12 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				createdApp3.Spec.Resources.Requests[corev1.ResourceMemory] = resource.MustParse("256Mi")
 				createdApp3.Spec.Capabilities = []broker.AppCapabilityType{
 					{
-						ProducerOf: []broker.AppAddressType{{Address: "shared.address"}},
-						SubscriberOf: []broker.AppAddressType{
-							{Address: "app3.address::queue3"},
+						ProducerOf: []broker.AddressRef{{Address: "shared.address", AppNamespace: defaultNamespace, AppName: app1Name, PubSub: &[]bool{true}[0]}},
+						ConsumerOf: []broker.AddressRef{
+							{
+								Address:       "app3.address",
+								Subscriptions: []string{"queue3"},
+							},
 						},
 					},
 				}
@@ -841,6 +875,11 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			By("verifying app3 becomes ready after modification")
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, app3Key, createdApp3)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("App3 Status: %v\n", createdApp3.Status)
+				}
+
 				g.Expect(meta.IsStatusConditionTrue(createdApp3.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
 
 				// Verify port was assigned
@@ -1106,7 +1145,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "TEST.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "TEST.QUEUE"}},
 						},
 					},
 				},
@@ -1234,7 +1273,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "APP1.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "APP1.QUEUE"}},
 						},
 					},
 				},
@@ -1288,7 +1327,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AppAddressType{{Address: "APP2.QUEUE"}},
+							ProducerOf: []broker.AddressRef{{Address: "APP2.QUEUE"}},
 						},
 					},
 				},

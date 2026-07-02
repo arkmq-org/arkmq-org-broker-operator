@@ -87,8 +87,8 @@ customresourcedefinition.apiextensions.k8s.io/brokers.broker.arkmq.org created
 serviceaccount/arkmq-org-broker-controller-manager created
 role.rbac.authorization.k8s.io/arkmq-org-broker-operator-role created
 rolebinding.rbac.authorization.k8s.io/arkmq-org-broker-operator-rolebinding created
-role.rbac.authorization.k8s.io/activemq-artemis-leader-election-role created
-rolebinding.rbac.authorization.k8s.io/activemq-artemis-leader-election-rolebinding created
+role.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-role created
+rolebinding.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-rolebinding created
 deployment.apps/arkmq-org-broker-controller-manager created
 ```
 

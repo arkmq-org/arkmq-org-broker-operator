@@ -66,18 +66,23 @@ const (
 	defaultRetryInterval = 3 * time.Second
 
 	// https://cert-manager.io/docs/trust/trust-manager/#preparing-for-production
-	DefaultOperatorCertSecretName   = "activemq-artemis-manager-cert"
-	DefaultOperatorCASecretName     = "activemq-artemis-manager-ca"
+	// New naming convention (preferred)
+	DefaultOperatorCertSecretName   = "arkmq-org-broker-manager-cert"
+	DefaultOperatorCASecretName     = "arkmq-org-broker-manager-ca"
 	DefaultOperandCertSecretName    = "broker-cert"     // or can be prefixed with `cr.Name-`
 	DefaultPrometheusCertSecretName = "prometheus-cert" // or can be prefixed with `cr.Name-`
 	AppCertSecretSuffix             = "-app-cert"
 	CertUsersKeySuffix              = "cert-users"
 	CertRolesKeySuffix              = "cert-roles"
-	JaasRealm                       = "activemq"
-	HttpAuthenticatorRealm          = "http_server_authenticator"
-	AppServiceBindingField          = "status.serviceBinding"
-	ProvisionedAppsAnnotation       = "arkmq.org/provisioned-apps"
-	BlockReconcileAnnotation        = "arkmq.org/block-reconcile"
+
+	// Legacy naming convention (deprecated, for backward compatibility)
+	LegacyOperatorCertSecretName = "activemq-artemis-manager-cert"
+	LegacyOperatorCASecretName   = "activemq-artemis-manager-ca"
+	JaasRealm                    = "activemq"
+	HttpAuthenticatorRealm       = "http_server_authenticator"
+	AppServiceBindingField       = "status.serviceBinding"
+	ProvisionedAppsAnnotation    = "arkmq.org/provisioned-apps"
+	BlockReconcileAnnotation     = "arkmq.org/block-reconcile"
 
 	// BrokerService and BrokerApp controller constants
 	BrokerPropsSuffix = "-bp"
@@ -780,7 +785,15 @@ func GetOperandCertSecretName(cr *v1beta2.Broker, client rtclient.Client) string
 
 func GetOperatorCertSecretName() string {
 	if operatorCertSecretName == nil {
-		operatorCertSecretName = fromEnv("ACTIVEMQ_ARTEMIS_MANAGER_CERT_SECRET_NAME", DefaultOperatorCertSecretName)
+		if name, found := os.LookupEnv("ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME"); found {
+			operatorCertSecretName = &name
+		} else if name, found := os.LookupEnv("ACTIVEMQ_ARTEMIS_MANAGER_CERT_SECRET_NAME"); found {
+			// Legacy env var support (deprecated)
+			operatorCertSecretName = &name
+		} else {
+			defaultName := DefaultOperatorCertSecretName
+			operatorCertSecretName = &defaultName
+		}
 	}
 	return *operatorCertSecretName
 }
@@ -791,7 +804,15 @@ func SetOperatorCertSecretName(name string) {
 
 func GetOperatorCASecretName() string {
 	if operatorCASecretName == nil {
-		operatorCASecretName = fromEnv("ACTIVEMQ_ARTEMIS_MANAGER_CA_SECRET_NAME", DefaultOperatorCASecretName)
+		if name, found := os.LookupEnv("ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME"); found {
+			operatorCASecretName = &name
+		} else if name, found := os.LookupEnv("ACTIVEMQ_ARTEMIS_MANAGER_CA_SECRET_NAME"); found {
+			// Legacy env var support (deprecated)
+			operatorCASecretName = &name
+		} else {
+			defaultName := DefaultOperatorCASecretName
+			operatorCASecretName = &defaultName
+		}
 	}
 	return *operatorCASecretName
 }
@@ -935,12 +956,62 @@ func UnsetOperatorNameSpace() {
 	operatorNameSpaceFromEnv = nil
 }
 
+func legacyOperatorCertSecretNameIfApplicable() string {
+	if _, found := os.LookupEnv("ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME"); found {
+		return ""
+	}
+	if _, found := os.LookupEnv("ACTIVEMQ_ARTEMIS_MANAGER_CERT_SECRET_NAME"); found {
+		return ""
+	}
+	return LegacyOperatorCertSecretName
+}
+
+func legacyOperatorCASecretNameIfApplicable() string {
+	if _, found := os.LookupEnv("ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME"); found {
+		return ""
+	}
+	if _, found := os.LookupEnv("ACTIVEMQ_ARTEMIS_MANAGER_CA_SECRET_NAME"); found {
+		return ""
+	}
+	return LegacyOperatorCASecretName
+}
+
 func GetOperatorCASecret(client rtclient.Client) (*corev1.Secret, error) {
-	return GetOperatorSecret(client, GetOperatorCASecretName())
+	return GetOperatorSecretWithFallback(client, GetOperatorCASecretName(), legacyOperatorCASecretNameIfApplicable())
 }
 
 func GetOperatorClientCertSecret(client rtclient.Client) (*corev1.Secret, error) {
-	return GetOperatorSecret(client, GetOperatorCertSecretName())
+	return GetOperatorSecretWithFallback(client, GetOperatorCertSecretName(), legacyOperatorCertSecretNameIfApplicable())
+}
+
+// GetOperatorSecretWithFallback tries to get a secret with the preferred name first,
+// then falls back to the legacy name when legacyName is non-empty and the preferred secret is not found.
+func GetOperatorSecretWithFallback(client rtclient.Client, preferredName string, legacyName string) (*corev1.Secret, error) {
+	var operatorNamespace string
+	var err error
+	operatorNamespace, err = GetOperatorNamespaceFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get secret, failed to get operator namespace, %w", err)
+	}
+
+	// Try preferred (new) name first
+	secret, err := GetNamespacedSecret(client, preferredName, operatorNamespace)
+	if err == nil {
+		ctrl.Log.V(1).Info("Using preferred secret name", "secret", preferredName)
+		return secret, nil
+	}
+
+	if legacyName != "" && legacyName != preferredName {
+		ctrl.Log.V(1).Info("Preferred secret not found, trying legacy name", "preferred", preferredName, "legacy", legacyName)
+		legacySecret, legacyErr := GetNamespacedSecret(client, legacyName, operatorNamespace)
+		if legacyErr == nil {
+			ctrl.Log.Info("Using legacy secret name (deprecated)", "secret", legacyName, "preferred", preferredName)
+			return legacySecret, nil
+		}
+		return nil, fmt.Errorf("failed to get secret %s (or legacy %s), %w", preferredName, legacyName, err)
+	}
+
+	return nil, fmt.Errorf("failed to get secret %s, %w", preferredName, err)
 }
 
 func GetOperatorSecret(client rtclient.Client, secretName string) (*corev1.Secret, error) {

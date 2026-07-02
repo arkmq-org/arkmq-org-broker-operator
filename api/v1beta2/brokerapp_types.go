@@ -31,6 +31,17 @@ type BrokerAppSpec struct {
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="ServiceSelector"
 	ServiceSelector *metav1.LabelSelector `json:"selector,omitempty"`
 
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Addresses"
+	// Addresses with a lifecycle tied to this app, independent from addressRefs.
+	// These are private addresses that cannot be referenced by other apps.
+	Addresses []AddressType `json:"addresses,omitempty"`
+
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Shared Addresses"
+	// SharedAddresses with a lifecycle tied to this app, independent from addressRefs.
+	// These are public addresses that can be referenced by other apps
+	// via appNamespace/appName in their capabilities addressRefs.
+	SharedAddresses []AddressType `json:"sharedAddresses,omitempty"`
+
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Messaging Capabilities"
 	Capabilities []AppCapabilityType `json:"capabilities,omitempty"`
 
@@ -38,18 +49,48 @@ type BrokerAppSpec struct {
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
-type AppAddressType struct {
+// AddressType defines a messaging address
+type AddressType struct {
+	// Address is the address identifier (unique within a broker service)
 	Address string `json:"address"`
-	// Shared *bool `json:"shared,omitempty"`
-	// Filter string `json:"filter,omitempty"`
+
+	// PubSub declares publish/subscribe (pubSub) semantics.
+	// PubSub is necessary when an address needs to be declared pubSub without declaring Subscriptions.
+	// +optional
+	PubSub *bool `json:"pubSub,omitempty"`
+
+	// Subscriptions declares subscription queue names for an address.
+	// Typical values will be of the form <client id>.<subscription nname>
+	// +optional
+	Subscriptions []string `json:"subscriptions,omitempty"`
+}
+
+// AddressRef references an address for use in capabilities
+type AddressRef struct {
+	// Address is the address identifier (required)
+	Address string `json:"address"`
+
+	// AppNamespace of owning app - for cross-app references  (optional)
+	AppNamespace string `json:"appNamespace,omitempty"`
+
+	// AppName of owning app - for cross-app references  (optional)
+	AppName string `json:"appName,omitempty"`
+
+	// PubSub declares publish/subscribe (pubSub) semantics.
+	// Used with ProducerOf, to declare pubSub semantics.
+	// +optional
+	PubSub *bool `json:"pubSub,omitempty"`
+
+	// Subscriptions declares subscription queue names for an address.
+	// Typical values will be of the form <client id>.<subscription nname>
+	// +optional
+	Subscriptions []string `json:"subscriptions,omitempty"`
 }
 
 type AppCapabilityType struct {
-	ProducerOf []AppAddressType `json:"producerOf,omitempty"`
+	ProducerOf []AddressRef `json:"producerOf,omitempty"`
 
-	ConsumerOf []AppAddressType `json:"consumerOf,omitempty"`
-
-	SubscriberOf []AppAddressType `json:"subscriberOf,omitempty"`
+	ConsumerOf []AddressRef `json:"consumerOf,omitempty"`
 }
 
 // BrokerServiceBindingStatus captures the binding details between a BrokerApp and its provisioned BrokerService
@@ -73,6 +114,11 @@ func (s *BrokerServiceBindingStatus) Key() string {
 }
 
 type BrokerAppStatus struct {
+
+	// ObservedGeneration is the most recent generation observed for this BrokerApp.
+	// It corresponds to the BrokerApp's generation, which is updated on mutation by the API Server.
+	//+optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// Current state of the resource
 	// Conditions represent the latest available observations of an object's state

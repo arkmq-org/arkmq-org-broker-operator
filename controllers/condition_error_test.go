@@ -16,141 +16,116 @@ package controllers
 
 import (
 	"errors"
-	"fmt"
-	"testing"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/api/v1beta2"
-	"github.com/stretchr/testify/assert"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func TestNewConditionError(t *testing.T) {
-	t.Run("creates error with reason and message", func(t *testing.T) {
-		reason := broker.DeployedConditionNoMatchingServiceReason
+var _ = Describe("Condition Error", func() {
+	Context("when creating a new error", func() {
+		It("should create a new error with the given reason and message", func() {
+			reason := broker.ValidConditionInvalidResourceName
+			message := "invalid resource name"
+			err := NewValidationError(reason, "%s", message)
+			Expect(err).To(HaveOccurred())
+			Expect(err.ConditionReason()).To(Equal(reason))
+			Expect(err.Error()).To(Equal(message))
+		})
 
-		err := NewConditionError(reason, "no matching services available")
-
-		assert.NotNil(t, err)
-		assert.Equal(t, reason, err.Reason)
-		assert.Equal(t, "no matching services available", err.Message)
-		assert.Equal(t, "no matching services available", err.Error())
+		It("should support formatted message", func() {
+			reason := broker.ValidConditionAddressTypeError
+			err := NewValidationError(reason, "address '%s' has invalid type", "my-address")
+			Expect(err).To(HaveOccurred())
+			Expect(err.ConditionReason()).To(Equal(reason))
+			Expect(err.Error()).To(Equal("address 'my-address' has invalid type"))
+		})
 	})
+})
 
-	t.Run("supports formatted message", func(t *testing.T) {
-		reason := broker.DeployedConditionNoServiceCapacityReason
+var _ = Describe("TransientError", func() {
+	Context("when creating a new TransientError", func() {
+		It("should create a new error with the given reason and message", func() {
+			reason := broker.ValidConditionInvalidResourceName
+			message := "invalid resource name"
+			err := NewTransientError(reason, "%s", message)
+			Expect(err).To(HaveOccurred())
+			Expect(err.ConditionReason()).To(Equal(reason))
+			Expect(err.Error()).To(Equal(message))
+		})
 
-		err := NewConditionError(reason, "no service with capacity: required %s, available %s", "1Gi", "512Mi")
-
-		assert.NotNil(t, err)
-		assert.Equal(t, reason, err.Reason)
-		assert.Equal(t, "no service with capacity: required 1Gi, available 512Mi", err.Message)
+		It("should support formatted message", func() {
+			reason := broker.ValidConditionAddressTypeError
+			err := NewTransientError(reason, "address '%s' has invalid type", "my-address")
+			Expect(err).To(HaveOccurred())
+			Expect(err.ConditionReason()).To(Equal(reason))
+			Expect(err.Error()).To(Equal("address 'my-address' has invalid type"))
+		})
 	})
-}
+})
 
-func TestAsConditionError(t *testing.T) {
-	t.Run("returns ConditionError when error is ConditionError", func(t *testing.T) {
-		original := NewConditionError(broker.DeployedConditionNoMatchingServiceReason, "test message")
+var _ = Describe("TransientError with cause", func() {
+	Context("when creating a TransientError that wraps another error", func() {
+		It("should wrap underlying error", func() {
+			cause := errors.New("API server unavailable")
+			reason := broker.DeployedConditionCrudKindErrorReason
 
-		result, ok := AsConditionError(original)
+			err := NewTransientErrorWithCause(reason, "failed to create resource", cause)
 
-		assert.True(t, ok)
-		assert.NotNil(t, result)
-		assert.Equal(t, original.Reason, result.Reason)
-		assert.Equal(t, original.Message, result.Message)
+			Expect(err).To(HaveOccurred())
+			Expect(err.ConditionReason()).To(Equal(reason))
+			Expect(err.Error()).To(ContainSubstring("failed to create resource"))
+			Expect(err.Error()).To(ContainSubstring("API server unavailable"))
+			Expect(errors.Unwrap(err)).To(Equal(cause))
+		})
+		It("should work without cause", func() {
+			reason := broker.DeployedConditionNoMatchingServiceReason
+
+			err := NewTransientError(reason, "no matching services")
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.ConditionReason()).To(Equal(reason))
+			Expect(err.Error()).To(Equal("no matching services"))
+			Expect(errors.Unwrap(err)).To(BeNil())
+		})
 	})
+})
 
-	t.Run("returns nil and false for non-ConditionError", func(t *testing.T) {
-		normalError := errors.New("regular error")
+var _ = Describe("ValidateResourceName", func() {
+	Context("when validating a resource name", func() {
+		It("should return a ValidationError for an invalid resource name", func() {
+			invalidName := "invalid/name"
 
-		result, ok := AsConditionError(normalError)
+			err := ValidateResourceName(invalidName)
 
-		assert.False(t, ok)
-		assert.Nil(t, result)
+			Expect(err).To(HaveOccurred())
+
+		})
 	})
-
-	t.Run("returns nil and false for nil error", func(t *testing.T) {
-		result, ok := AsConditionError(nil)
-
-		assert.False(t, ok)
-		assert.Nil(t, result)
+	It("should return nil for a valid resource name", func() {
+		validName := "valid-name"
+		err := ValidateResourceName(validName)
+		Expect(err).To(BeNil())
 	})
+})
 
-	t.Run("returns nil and false for wrapped error", func(t *testing.T) {
-		wrappedError := fmt.Errorf("wrapped: %w", errors.New("inner error"))
-
-		result, ok := AsConditionError(wrappedError)
-
-		assert.False(t, ok)
-		assert.Nil(t, result)
+var _ = Describe("error type checking", func() {
+	Context("when checking error types", func() {
+		It("should correctly identify ValidationError", func() {
+			var err error = NewValidationError(broker.ValidConditionInvalidResourceName, "invalid resource name")
+			_, ok := err.(*ValidationError)
+			Expect(ok).To(BeTrue())
+		})
+		It("should correctly identify TransientError", func() {
+			var err error = NewTransientError(broker.DeployedConditionNoMatchingServiceReason, "no matching services")
+			_, ok := err.(*TransientError)
+			Expect(ok).To(BeTrue())
+		})
+		It("should implement error interface", func() {
+			err := NewValidationError(broker.ValidConditionInvalidResourceName, "invalid resource name")
+			var _ error = err
+			Expect(err.Error()).To(Equal("invalid resource name"))
+		})
 	})
-}
+})
 
-func TestValidateResourceNameAndSetCondition(t *testing.T) {
-	t.Run("sets Valid=False for invalid resource name", func(t *testing.T) {
-		conditions := []metav1.Condition{}
-		invalidName := "invalid/name"
-
-		err := ValidateResourceNameAndSetCondition(invalidName, &conditions)
-
-		assert.Error(t, err)
-		assert.Len(t, conditions, 1)
-
-		validCond := meta.FindStatusCondition(conditions, broker.ValidConditionType)
-		assert.NotNil(t, validCond)
-		assert.Equal(t, metav1.ConditionFalse, validCond.Status)
-		assert.Equal(t, broker.ValidConditionInvalidResourceName, validCond.Reason)
-		assert.Contains(t, validCond.Message, "invalid")
-	})
-
-	t.Run("does not set condition for valid resource name", func(t *testing.T) {
-		conditions := []metav1.Condition{}
-		validName := "valid-name-123"
-
-		err := ValidateResourceNameAndSetCondition(validName, &conditions)
-
-		assert.NoError(t, err)
-		assert.Len(t, conditions, 0)
-	})
-
-	t.Run("updates existing condition", func(t *testing.T) {
-		conditions := []metav1.Condition{
-			{
-				Type:   broker.ValidConditionType,
-				Status: metav1.ConditionTrue,
-				Reason: broker.ValidConditionSuccessReason,
-			},
-		}
-		invalidName := "invalid/name"
-
-		err := ValidateResourceNameAndSetCondition(invalidName, &conditions)
-
-		assert.Error(t, err)
-		assert.Len(t, conditions, 1)
-
-		validCond := meta.FindStatusCondition(conditions, broker.ValidConditionType)
-		assert.NotNil(t, validCond)
-		assert.Equal(t, metav1.ConditionFalse, validCond.Status)
-		assert.Equal(t, broker.ValidConditionInvalidResourceName, validCond.Reason)
-	})
-
-	t.Run("validates common invalid patterns", func(t *testing.T) {
-		invalidNames := []string{
-			"name/with/slashes",
-			"name/../with-parent-ref",
-			".starts-with-dot",
-		}
-
-		for _, name := range invalidNames {
-			t.Run(name, func(t *testing.T) {
-				conditions := []metav1.Condition{}
-				err := ValidateResourceNameAndSetCondition(name, &conditions)
-				assert.Error(t, err, "expected error for name: %s", name)
-
-				validCond := meta.FindStatusCondition(conditions, broker.ValidConditionType)
-				assert.NotNil(t, validCond)
-				assert.Equal(t, metav1.ConditionFalse, validCond.Status)
-			})
-		}
-	})
-}

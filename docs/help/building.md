@@ -42,9 +42,9 @@ git checkout main
 ```$xslt
 make
 ```
-or
+or if you have modified the CRD types in ./api
 ```$xslt
-make build
+make generate build && make generate-deploy && make bundle && make helm-charts
 ```
 
 ## Building the operator image

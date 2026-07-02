@@ -34,11 +34,11 @@ There are multiple methods of installing the operator: [from releases](#install-
 ### Install the operator from releases
 In order to install the operator from the latest release is by running the following command:
 ```shell
-kubectl apply -f https://github.com/arkmq-org/arkmq-org-broker-operator/releases/latest/download/arkmq-org-broker-operator.yaml
+kubectl apply --server-side -f https://github.com/arkmq-org/arkmq-org-broker-operator/releases/latest/download/arkmq-org-broker-operator.yaml
 ```
 You can also install a specific operator version, i.e. to install the version `2.0.5`
 ```shell
-kubectl apply -f https://github.com/arkmq-org/arkmq-org-broker-operator/releases/download/v2.0.5/activemq-artemis-operator.yaml
+kubectl apply --server-side -f https://github.com/arkmq-org/arkmq-org-broker-operator/releases/download/v2.0.5/arkmq-org-broker-operator.yaml
 ```
 
 ### Install the operator from helm charts
@@ -413,7 +413,7 @@ configuration information as files to be used in the artemis configuration. One 
 redefine the log4j file used by artemis to log information. [Here](https://artemis.apache.org/components/artemis/documentation/latest/logging.html#logging) you can find details about artemis logging configuration.
 
 To use a custom logging you will need a log4j configuration file. The default log4j configuration file can be used as
-an initial example and can be downloaded from [here](https://raw.githubusercontent.com/arkmq-org/arkmq-org-broker-kubernetes-image/main/modules/activemq-artemis-launch/added/log4j2.properties)
+an initial example and can be downloaded from [here](https://raw.githubusercontent.com/arkmq-org/arkmq-org-broker-kubernetes-image/main/modules/arkmq-org-broker-launch/added/log4j2.properties)
 
 Assuming you already have the operator deployed, in our example we are going to modify the default logging file and enable the audit logging. You will need to modify the log4j2.properties file and change the lines as below:
 
