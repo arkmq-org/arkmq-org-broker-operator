@@ -147,8 +147,6 @@ vet: ## Run go vet against code.
 
 .PHONY: lint
 lint: ## Run golangci-lint against code.
-	which golangci-lint
-	golangci-lint version
 	golangci-lint run ./...
 ## Run tests.
 test test-v: TEST_VARS = KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" RECONCILE_RESYNC_PERIOD=5s
