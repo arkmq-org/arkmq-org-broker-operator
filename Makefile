@@ -145,6 +145,11 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet -composites=false ./...
 
+.PHONY: lint
+lint: ## Run golangci-lint against code.
+	which golangci-lint
+	golangci-lint version
+	golangci-lint run ./...
 ## Run tests.
 test test-v: TEST_VARS = KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" RECONCILE_RESYNC_PERIOD=5s
 
@@ -275,6 +280,7 @@ $(LOCALBIN):
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
+GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v3.8.7

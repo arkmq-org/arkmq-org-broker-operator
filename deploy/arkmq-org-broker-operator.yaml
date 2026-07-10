@@ -19005,7 +19005,7 @@ spec:
           value: ''
         - name: ENABLE_WEBHOOKS
           value: "false"
-        image: quay.io/arkmq-org/arkmq-org-broker-operator:2.1.5
+        image: quay.io/rmurtagh/operator:0.1
         livenessProbe:
           httpGet:
             path: /healthz

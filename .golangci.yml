@@ -1,0 +1,70 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - ineffassign
+    - staticcheck
+    - unused
+
+  settings:
+    govet:
+      # Preserve existing `go vet -composites=false` behaviour.
+      disable:
+        - composites
+
+  exclusions:
+    generated: strict
+
+    paths:
+      - vendor
+      - bin
+      - bundle
+
+    rules:
+      # Pure style: explicit type can be inferred from RHS.
+      # This appears as ST1023 in the current Fedora golangci-lint build.
+      - linters:
+          - staticcheck
+        text: "ST1023"
+
+      # Same/similar type-inference quickfix seen in other staticcheck builds.
+      - linters:
+          - staticcheck
+        text: "QF1011"
+
+      # Style-only error string capitalization.
+      - linters:
+          - staticcheck
+        text: "ST1005"
+
+      # Duplicate import aliases. Low-value style cleanup for initial rollout.
+      - linters:
+          - staticcheck
+        text: "ST1019"
+
+      # Optional quickfix/style suggestions; low value during initial adoption.
+      - linters:
+          - staticcheck
+        text: "QF1008"
+
+      - linters:
+          - staticcheck
+        text: "QF1004"
+
+      - linters:
+          - staticcheck
+        text: "QF1012"
+
+      # Common cleanup pattern in tests.
+      - path: ".*_test\\.go"
+        linters:
+          - errcheck
+        text: "Error return value of `.+\\.Close` is not checked"
+
+      # Common setup/teardown pattern in tests.
+      - path: ".*_test\\.go"
+        linters:
+          - errcheck
+        text: "Error return value of `os\\.(Setenv|Unsetenv)` is not checked"

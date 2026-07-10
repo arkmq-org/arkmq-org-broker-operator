@@ -2,3 +2,6 @@ apiVersion: broker.arkmq.org/v1beta2
 kind: BrokerCluster
 metadata:
   name: my-broker
+spec:
+  deploymentPlan:
+    size: 2
