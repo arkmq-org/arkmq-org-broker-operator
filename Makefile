@@ -275,6 +275,7 @@ $(LOCALBIN):
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
+GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v3.8.7
@@ -289,6 +290,24 @@ $(KUSTOMIZE): $(LOCALBIN)
 		rm -rf $(LOCALBIN)/kustomize; \
 	fi
 	test -s $(LOCALBIN)/kustomize || { curl -Ss $(KUSTOMIZE_INSTALL_SCRIPT) | bash -s -- $(subst v,,$(KUSTOMIZE_VERSION)) $(LOCALBIN); }
+
+LINT_VERSION ?= v2.11.3
+LINT_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh"
+
+.PHONY: lint lint-install
+
+lint-install: $(GOLANGCI_LINT) # Download golangci-lint locally if necessary
+$(GOLANGCI_LINT): $(LOCALBIN)
+	@if test -x $(LOCALBIN)/golangci-lint && ! $(LOCALBIN)/golangci-lint version | grep -q $(LINT_VERSION); then \
+		echo "$(LOCALBIN)/golangci-lint version is not expected $(LINT_VERSION). Removing it before installing."; \
+        rm -f $(LOCALBIN)/golangci-lint; \
+	fi
+	echo "curl -Ss ${LINT_INSTALL_SCRIPT} | bash -s -- $(subst v,,$(LINT_VERSION)) $(LOCALBIN);"
+	test -s $(LOCALBIN)/golangci-lint || { curl -Ss ${LINT_INSTALL_SCRIPT} | bash -s -- v$(subst v,,$(LINT_VERSION)) $(LOCALBIN); }	
+	
+
+lint: lint-install
+	$(LOCALBIN)/golangci-lint run ./...
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary. If wrong version is installed, it will be overwritten.

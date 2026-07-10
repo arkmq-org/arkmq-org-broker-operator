@@ -82,3 +82,14 @@ make OPERATOR_IMAGE_REPO=<your repo> OPERATOR_VERSION=<tag> docker-push
 ```
 
 Now follow the [quickstart](../getting-started/quick-start.md) to deploy the operator.
+
+## 3. Add .vscode/settings.json
+
+```$xslt
+{
+  "go.lintTool": "golangci-lint",
+  "go.lintFlags": ["--fast"]
+}
+```
+
+This ensures Cursor and VS Code users see the same findings as CI. Required for golangci-lint with ratchet mechanism to enforce lint quality over time.
