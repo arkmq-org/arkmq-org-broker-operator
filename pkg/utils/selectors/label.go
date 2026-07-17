@@ -3,19 +3,22 @@ package selectors
 const (
 	LabelAppKey      = "application"
 	LabelResourceKey = "ActiveMQArtemis"
+	LabelBrokerKey   = "Broker"
 )
 
 type LabelerInterface interface {
 	Labels() map[string]string
 	Base(baseName string) *LabelerData
 	Suffix(labelSuffix string) *LabelerData
+	ResourceKey(key string) *LabelerData
 	Generate()
 }
 
 type LabelerData struct {
-	baseName string
-	suffix   string
-	labels   map[string]string
+	baseName    string
+	suffix      string
+	resourceKey string
+	labels      map[string]string
 }
 
 func (l *LabelerData) Labels() map[string]string {
@@ -32,10 +35,21 @@ func (l *LabelerData) Suffix(labelSuffix string) *LabelerData {
 	return l
 }
 
+// ResourceKey sets the tracking label key. Defaults to LabelResourceKey ("ActiveMQArtemis")
+// when not called. Use LabelBrokerKey ("Broker") for Broker CRs.
+func (l *LabelerData) ResourceKey(key string) *LabelerData {
+	l.resourceKey = key
+	return l
+}
+
 func (l *LabelerData) Generate() {
+	key := l.resourceKey
+	if key == "" {
+		key = LabelResourceKey
+	}
 	l.labels = make(map[string]string)
 	l.labels[LabelAppKey] = l.baseName + "-" + l.suffix //"-app"
-	l.labels[LabelResourceKey] = l.baseName
+	l.labels[key] = l.baseName
 }
 
 func GetLabels(crName string) map[string]string {

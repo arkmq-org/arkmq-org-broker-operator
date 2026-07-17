@@ -2244,7 +2244,7 @@ func validateNoDupKeysInBrokerPropertiesForBroker(customResource *v1beta2.Broker
 func validateReservedLabelsForBroker(customResource *v1beta2.Broker) *metav1.Condition {
 	if customResource.Spec.DeploymentPlan.Labels != nil {
 		for key := range customResource.Spec.DeploymentPlan.Labels {
-			if key == selectors.LabelAppKey || key == selectors.LabelResourceKey {
+			if key == selectors.LabelAppKey || key == selectors.LabelBrokerKey {
 				return &metav1.Condition{
 					Type:    v1beta2.ValidConditionType,
 					Status:  metav1.ConditionFalse,
@@ -2256,7 +2256,7 @@ func validateReservedLabelsForBroker(customResource *v1beta2.Broker) *metav1.Con
 	}
 	for index, template := range customResource.Spec.ResourceTemplates {
 		for key := range template.Labels {
-			if key == selectors.LabelAppKey || key == selectors.LabelResourceKey {
+			if key == selectors.LabelAppKey || key == selectors.LabelBrokerKey {
 				return &metav1.Condition{
 					Type:    v1beta2.ValidConditionType,
 					Status:  metav1.ConditionFalse,
@@ -2461,14 +2461,14 @@ func MakeNamersForBroker(customResource *v1beta2.Broker) *common.Namers {
 	newNamers.SecretsConsoleNameBuilder.Prefix(customResource.Name).Base("console").Suffix("secret").Generate()
 	newNamers.SecretsNettyNameBuilder.Prefix(customResource.Name).Base("netty").Suffix("secret").Generate()
 
-	newNamers.LabelBuilder.Base(customResource.Name).Suffix("app").Generate()
+	newNamers.LabelBuilder.Base(customResource.Name).Suffix("app").ResourceKey(selectors.LabelBrokerKey).Generate()
 
 	return &newNamers
 }
 
 func GetDefaultLabelsForBroker(cr *v1beta2.Broker) map[string]string {
 	defaultLabelData := selectors.LabelerData{}
-	defaultLabelData.Base(cr.Name).Suffix("app").Generate()
+	defaultLabelData.Base(cr.Name).Suffix("app").ResourceKey(selectors.LabelBrokerKey).Generate()
 	return defaultLabelData.Labels()
 }
 
