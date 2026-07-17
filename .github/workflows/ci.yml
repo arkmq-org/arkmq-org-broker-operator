@@ -43,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -146,7 +146,7 @@ jobs:
           cache: true
 
       - name: Checkout the repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Start minikube
         id: minikube
@@ -212,7 +212,7 @@ jobs:
           node-version: 18.x
 
       - name: Checkout arkmq-org.github.io
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: arkmq-org/arkmq-org.github.io
           path: arkmq-org.github.io
