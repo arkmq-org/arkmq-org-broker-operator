@@ -29,7 +29,7 @@ jobs:
           go-version: '1.25.9'
 
       - name: Checkout the repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.BOT_TOKEN }}
 
@@ -56,7 +56,7 @@ jobs:
         run: for i in {1..30}; do curl "https://doc.crds.dev/github.com/${{ github.repository }}@${{ github.ref_name }}" | grep 'ActiveMQArtemis' && break; sleep 1; done
 
       - name: Checkout arkmq-org.github.io
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository_owner }}/arkmq-org.github.io
           path: arkmq-org.github.io
