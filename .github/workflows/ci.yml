@@ -207,7 +207,7 @@ jobs:
         run: make scorecard | tee scorecard.log && ! grep 'Suggestions' scorecard.log
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 18.x
 
