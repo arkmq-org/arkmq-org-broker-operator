@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509/pkix"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -37,7 +38,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	rtclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/environments"
 	svc "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/services"
@@ -48,6 +54,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	routev1 "github.com/openshift/api/route/v1"
@@ -60,6 +67,20 @@ import (
 
 	policyv1 "k8s.io/api/policy/v1"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
+)
+
+//go:embed broker_status_script.sh
+var brokerStatusScript string
+
+const (
+	brokerStatusScriptSuffix  = "-status-script"
+	brokerStatusScriptKey     = "broker-status.sh"
+	brokerLoggingConfigSuffix = "-logging-config"
+
+	// ReconcileMeAnnotationKey is the Pod annotation the sidecar script writes
+	// when it detects AMQ221087 (config reload completed). The operator watches
+	// for this annotation and triggers a reconcile + Jolokia status fetch.
+	ReconcileMeAnnotationKey = "broker.arkmq.org/reconcile-me"
 )
 
 // BrokerReconciler reconciles a Broker object (broker.arkmq.org/v1beta2)
@@ -82,6 +103,8 @@ func NewBrokerReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShif
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokers,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokers/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokers/finalizers,verbs=update
+//+kubebuilder:rbac:groups="",namespace=arkmq-org-broker-operator,resources=pods,verbs=get;list;patch;update;watch
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,namespace=arkmq-org-broker-operator,resources=roles;rolebindings,verbs=create;delete;get;list;update;watch
 
 func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
 	reqLogger := r.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "Broker")
@@ -117,9 +140,7 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 		if !reconcileBlocked {
 			err = reconciler.Process(customResource, *namer, r.Client, r.Scheme)
 		}
-		if reconciler.ProcessBrokerStatus(customResource, r.Client, r.Scheme) {
-			requeueRequest = true
-		}
+		reconciler.ProcessBrokerStatus(customResource, r.Client, r.Scheme)
 	}
 
 	brokerstatus.UpdateBlockedStatus(customResource, reconcileBlocked)
@@ -127,11 +148,6 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 
 	crStatusUpdateErr := r.UpdateBrokerCRStatus(customResource, r.Client, namespacedName)
 	if crStatusUpdateErr != nil {
-		requeueRequest = true
-	}
-
-	if !requeueRequest && !reconcileBlocked && hasExtraMountsForBroker(customResource) {
-		reqLogger.V(1).Info("resource has extraMounts, requeuing")
 		requeueRequest = true
 	}
 
@@ -150,18 +166,76 @@ func (r *BrokerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&v1beta2.Broker{}).
 		Owns(&appsv1.StatefulSet{}).
-		Owns(&corev1.Pod{}).
 		Owns(&corev1.Secret{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&corev1.Service{}).
 		Owns(&netv1.Ingress{}).
-		Owns(&policyv1.PodDisruptionBudget{})
+		Owns(&policyv1.PodDisruptionBudget{}).
+		Watches(&corev1.Pod{},
+			handler.EnqueueRequestsFromMapFunc(r.mapPodToBrokerCR),
+			builder.WithPredicates(reconcileMeAnnotationPredicate()),
+		)
 
 	if r.isOnOpenShift {
 		builder.Owns(&routev1.Route{})
 	}
 
 	return builder.Complete(r)
+}
+
+// reconcileMeAnnotationPredicate filters Pod events to only those where the
+// reconcile-me annotation was added or changed.
+func reconcileMeAnnotationPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			_, exists := e.Object.GetAnnotations()[ReconcileMeAnnotationKey]
+			return exists
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldVal := e.ObjectOld.GetAnnotations()[ReconcileMeAnnotationKey]
+			newVal := e.ObjectNew.GetAnnotations()[ReconcileMeAnnotationKey]
+			return newVal != "" && newVal != oldVal
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return false
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			return false
+		},
+	}
+}
+
+// mapPodToBrokerCR maps a Pod event to the owning Broker CR by traversing the
+// ownership chain: Pod -> StatefulSet -> Broker CR.
+func (r *BrokerReconciler) mapPodToBrokerCR(ctx context.Context, obj rtclient.Object) []reconcile.Request {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return nil
+	}
+
+	for _, ownerRef := range pod.GetOwnerReferences() {
+		if ownerRef.Kind != "StatefulSet" {
+			continue
+		}
+		ss := &appsv1.StatefulSet{}
+		if err := r.Get(ctx, types.NamespacedName{
+			Namespace: pod.Namespace,
+			Name:      ownerRef.Name,
+		}, ss); err != nil {
+			return nil
+		}
+		for _, ssOwner := range ss.GetOwnerReferences() {
+			if ssOwner.Kind == "Broker" {
+				return []reconcile.Request{{
+					NamespacedName: types.NamespacedName{
+						Namespace: pod.Namespace,
+						Name:      ssOwner.Name,
+					},
+				}}
+			}
+		}
+	}
+	return nil
 }
 
 func (r *BrokerReconciler) UpdateBrokerCRStatus(desired *v1beta2.Broker, client rtclient.Client, namespacedName types.NamespacedName) error {
@@ -262,6 +336,12 @@ func (reconciler *BrokerReconcilerImpl) Process(customResource *v1beta2.Broker, 
 	reconciler.log.V(2).Info("Reconciler Processing...", "CRD.Name", customResource.Name, "CRD ver", customResource.ResourceVersion, "CRD Gen", customResource.Generation)
 
 	reconciler.CurrentDeployedResources(customResource, client)
+
+	reconciler.ensureStatusScriptConfigMap()
+	reconciler.ensureReloadLoggingConfigMap()
+	if err := reconciler.ensureStatusScriptRBAC(client); err != nil {
+		return err
+	}
 
 	// currentStateful Set is a clone of what exists if already deployed
 	// what follows should transform the resources using the crd
@@ -997,7 +1077,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 		certUser := NewPropsWithHeader()
 		fmt.Fprintln(certUser, "hawtio=/CN = hawtio-online\\.hawtio\\.svc.*/")
-		fmt.Fprintf(certUser, "operator=/.*%s.*/\n", operatorCertSubject.CommonName) // regexp syntax start and with /
+		fmt.Fprintf(certUser, "operator=/.*%s.*/\n", operatorCertSubject.CommonName)
 		// can and should use the full DN after https://issues.apache.org/jira/browse/ARTEMIS-5102
 		fmt.Fprintf(certUser, "probe=/.*%s.*/\n", operandCertSubject.CommonName)
 		if prometheusCertSubject != nil {
@@ -1034,7 +1114,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 		// jmx_exporter metrics perms
 		fmt.Fprintln(rbac, "securityRoles.\"mops.mbeanserver.queryMBeans\".metrics.view=true")
-		fmt.Fprintln(rbac, "securityRoles.\"mops.broker\".metrics.view=true") // for query remove filter
+		fmt.Fprintln(rbac, "securityRoles.\"mops.broker\".metrics.view=true")
 		fmt.Fprintln(rbac, "securityRoles.\"mops.broker.getTotalMessageCount\".metrics.view=true")
 		fmt.Fprintln(rbac, "securityRoles.\"mops.broker.getTotalMessagesAcknowledged\".metrics.view=true")
 		fmt.Fprintln(rbac, "securityRoles.\"mops.broker.getTotalMessagesAdded\".metrics.view=true")
@@ -1189,6 +1269,20 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		podSpec.Tolerations = customResource.Spec.DeploymentPlan.Tolerations
 	}
 
+	statusScriptCMName := customResource.Name + brokerStatusScriptSuffix
+	statusScriptCMPath := cfgMapPathBase + statusScriptCMName
+	statusScriptVolume := volumes.MakeVolumeForConfigMap(statusScriptCMName)
+	statusScriptVolumeMount := volumes.MakeVolumeMountForCfg(statusScriptVolume.Name, statusScriptCMPath, true)
+	container.VolumeMounts = append(container.VolumeMounts, statusScriptVolumeMount)
+	extraVolumes = append(extraVolumes, statusScriptVolume)
+
+	loggingCMName := customResource.Name + brokerLoggingConfigSuffix
+	loggingCMPath := cfgMapPathBase + loggingCMName
+	loggingVolume := volumes.MakeVolumeForConfigMap(loggingCMName)
+	loggingVolumeMount := volumes.MakeVolumeMountForCfg(loggingVolume.Name, loggingCMPath, true)
+	container.VolumeMounts = append(container.VolumeMounts, loggingVolumeMount)
+	extraVolumes = append(extraVolumes, loggingVolume)
+
 	newContainersArray := []corev1.Container{}
 	podSpec.Containers = append(newContainersArray, *container)
 	brokerVolumes, err := reconciler.MakeVolumes(customResource, namer)
@@ -1234,7 +1328,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	} else {
 		loggerOpts := corev1.EnvVar{
 			Name:  getLoginConfigEnvVarNameForBroker(),
-			Value: "-Dlog4j2.level=INFO",
+			Value: fmt.Sprintf("-Dlog4j2.configurationFile=%v/%s", loggingCMPath, LoggingConfigKey),
 		}
 		environments.CreateOrAppend(podSpec.Containers, &loggerOpts)
 	}
@@ -1261,6 +1355,19 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	}
 	environments.CreateOrAppend(podSpec.Containers, &jdkJavaOpts)
 
+	sidecarEnvVars := []corev1.EnvVar{
+		{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.name"},
+		}},
+		{Name: "POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.namespace"},
+		}},
+		{Name: "RELOAD_LOG_PATH", Value: getDataMountPathForBroker() + "/log/reload.log"},
+	}
+	for i := range sidecarEnvVars {
+		environments.Create(podSpec.Containers, &sidecarEnvVars[i])
+	}
+
 	reconciler.configPodSecurity(podSpec, &customResource.Spec.DeploymentPlan.PodSecurity)
 	reconciler.configurePodSecurityContext(podSpec, customResource.Spec.DeploymentPlan.PodSecurityContext)
 
@@ -1269,9 +1376,10 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 	reEvalJdkOpts := generateReEvalOrdinaEnvReplacement(customResource.Spec.Env)
 
+	statusScriptLaunch := fmt.Sprintf("bash %s/%s > /dev/null 2>&1 &", statusScriptCMPath, brokerStatusScriptKey)
 	pts.Spec.Containers[0].Command = []string{
 		"/bin/bash", "-c",
-		fmt.Sprintf("export STATEFUL_SET_ORDINAL=${HOSTNAME##*-}; %s exec java %s $JAVA_ARGS_APPEND org.apache.activemq.artemis.core.server.embedded.Main", reEvalJdkOpts, strings.Join(additionalSystemProps, " ")),
+		fmt.Sprintf("export STATEFUL_SET_ORDINAL=${HOSTNAME##*-}; %s %s exec java %s $JAVA_ARGS_APPEND org.apache.activemq.artemis.core.server.embedded.Main", statusScriptLaunch, reEvalJdkOpts, strings.Join(additionalSystemProps, " ")),
 	}
 
 	reqLogger.V(2).Info("Final Init spec", "Detail", podSpec.InitContainers)
@@ -1576,7 +1684,8 @@ func (reconciler *BrokerReconcilerImpl) configPodSecurity(podSpec *corev1.PodSpe
 		reconciler.log.V(2).Info("Pod serviceAccountName specified", "existing", podSpec.ServiceAccountName, "new", *podSecurity.ServiceAccountName)
 		podSpec.ServiceAccountName = *podSecurity.ServiceAccountName
 	} else {
-		autoMount := false
+		// The sidecar script needs the service account token to patch pod annotations via the K8s API
+		autoMount := true
 		podSpec.AutomountServiceAccountToken = &autoMount
 	}
 	if podSecurity.RunAsUser != nil {
@@ -1865,7 +1974,31 @@ func (reconciler *BrokerReconcilerImpl) ProcessBrokerStatus(cr *v1beta2.Broker, 
 		meta.SetStatusCondition(&cr.Status.Conditions, condition)
 	}
 
+	if !retry {
+		reconciler.clearReconcileMeAnnotations(cr, client)
+	}
+
 	return retry
+}
+
+func (reconciler *BrokerReconcilerImpl) clearReconcileMeAnnotations(cr *v1beta2.Broker, client rtclient.Client) {
+	podList := &corev1.PodList{}
+	if err := client.List(context.TODO(), podList,
+		rtclient.InNamespace(cr.Namespace),
+		rtclient.MatchingLabels{"ActiveMQArtemis": cr.Name},
+	); err != nil {
+		reconciler.log.V(1).Info("failed to list pods for annotation clearing", "error", err)
+		return
+	}
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if _, exists := pod.Annotations[ReconcileMeAnnotationKey]; exists {
+			delete(pod.Annotations, ReconcileMeAnnotationKey)
+			if err := client.Update(context.TODO(), pod); err != nil {
+				reconciler.log.V(1).Info("failed to clear reconcile-me annotation", "pod", pod.Name, "error", err)
+			}
+		}
+	}
 }
 
 func AssertBrokersAvailableForBroker(cr *v1beta2.Broker) ArtemisError {
@@ -1966,7 +2099,7 @@ func (reconciler *BrokerReconcilerImpl) CheckStatus(cr *v1beta2.Broker, client r
 	reconciler.resolveJolokiaEndpoints(cr, client)
 
 	if len(reconciler.jolokiaEndpoints) == 0 {
-		reconciler.log.V(1).Info("no Jolokia Clients available. requeing")
+		reconciler.log.V(1).Info("no Jolokia Clients available")
 		return NewJolokiaClientsNotFoundError(errors.New("Waiting for Jolokia Clients to become available"))
 	}
 
@@ -2009,7 +2142,7 @@ func (reconciler *BrokerReconcilerImpl) GetAndCacheBrokerStatus(jk *jolokia_clie
 
 	reconciler.log.V(2).Info("raw json status", "IP", jk.IP, "ordinal", jk.Ordinal, "status json", currentJSON)
 
-	brokerStatus, err := unmarshallStatus(currentJSON)
+	status, err := unmarshallStatus(currentJSON)
 	if err != nil {
 		reconciler.log.Error(err, "unable to unmarshall broker status", "json", currentJSON)
 		artemisError := NewArtemisStatusError(err, false)
@@ -2017,10 +2150,10 @@ func (reconciler *BrokerReconcilerImpl) GetAndCacheBrokerStatus(jk *jolokia_clie
 		return nil, artemisError
 	}
 
-	reconciler.log.V(2).Info("cached broker status", "ordinal", jk.Ordinal, "status", brokerStatus)
-	reconciler.cachedBrokerStatus[jk.Ordinal] = brokerStatus
+	reconciler.log.V(2).Info("cached broker status", "ordinal", jk.Ordinal, "status", status)
+	reconciler.cachedBrokerStatus[jk.Ordinal] = status
 
-	return &brokerStatus, nil
+	return &status, nil
 
 }
 
@@ -2429,16 +2562,6 @@ func validateExtraMountsForBroker(customResource *v1beta2.Broker, client rtclien
 	return nil, false
 }
 
-func hasExtraMountsForBroker(cr *v1beta2.Broker) bool {
-	if cr == nil {
-		return false
-	}
-	if len(cr.Spec.DeploymentPlan.ExtraMounts.ConfigMaps) > 0 {
-		return true
-	}
-	return len(cr.Spec.DeploymentPlan.ExtraMounts.Secrets) > 0
-}
-
 func MakeNamersForBroker(customResource *v1beta2.Broker) *common.Namers {
 	newNamers := common.Namers{
 		SsGlobalName:                  "",
@@ -2470,6 +2593,150 @@ func GetDefaultLabelsForBroker(cr *v1beta2.Broker) map[string]string {
 	defaultLabelData := selectors.LabelerData{}
 	defaultLabelData.Base(cr.Name).Suffix("app").Generate()
 	return defaultLabelData.Labels()
+}
+
+const brokerReloadLogAppenderFragment = `
+appender.reload_trigger.type = File
+appender.reload_trigger.name = ReloadTrigger
+appender.reload_trigger.fileName = /app/log/reload.log
+appender.reload_trigger.append = false
+appender.reload_trigger.layout.type = PatternLayout
+appender.reload_trigger.layout.pattern = %d %-5level [%logger] %msg%n
+logger.reload.name = org.apache.activemq.artemis.core.server
+logger.reload.level = info
+logger.reload.appenderRef.reload_trigger.ref = ReloadTrigger
+`
+
+func (reconciler *BrokerReconcilerImpl) ensureStatusScriptConfigMap() {
+	cr := reconciler.customResource
+	cmName := cr.Name + brokerStatusScriptSuffix
+
+	desired := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cmName,
+			Namespace: cr.Namespace,
+		},
+		Data: map[string]string{
+			brokerStatusScriptKey: brokerStatusScript,
+		},
+	}
+
+	reconciler.trackDesired(desired)
+}
+
+func (reconciler *BrokerReconcilerImpl) ensureReloadLoggingConfigMap() {
+	cr := reconciler.customResource
+	cmName := cr.Name + brokerLoggingConfigSuffix
+
+	loggingContent := "appender.stdout.name = STDOUT\nappender.stdout.type = Console\nrootLogger = info, STDOUT\n" + brokerReloadLogAppenderFragment
+
+	desired := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cmName,
+			Namespace: cr.Namespace,
+		},
+		Data: map[string]string{
+			LoggingConfigKey: loggingContent,
+		},
+	}
+
+	reconciler.trackDesired(desired)
+}
+
+func (reconciler *BrokerReconcilerImpl) ensureStatusScriptRBAC(client rtclient.Client) error {
+	cr := reconciler.customResource
+	ctx := context.TODO()
+	roleName := cr.Name + "-status-script"
+
+	ownerRef := metav1.OwnerReference{
+		APIVersion: cr.APIVersion,
+		Kind:       cr.Kind,
+		Name:       cr.Name,
+		UID:        cr.UID,
+	}
+	if (ownerRef.APIVersion == "" || ownerRef.Kind == "") && reconciler.scheme != nil {
+		gvks, _, _ := reconciler.scheme.ObjectKinds(cr)
+		if len(gvks) > 0 {
+			ownerRef.APIVersion = gvks[0].GroupVersion().String()
+			ownerRef.Kind = gvks[0].Kind
+		}
+	}
+
+	size := int32(1)
+	if cr.Spec.DeploymentPlan.Size != nil {
+		size = *cr.Spec.DeploymentPlan.Size
+	}
+	ssName := cr.Name + "-ss"
+	podNames := make([]string, size)
+	for i := int32(0); i < size; i++ {
+		podNames[i] = fmt.Sprintf("%s-%d", ssName, i)
+	}
+
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            roleName,
+			Namespace:       cr.Namespace,
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups:     []string{""},
+				Resources:     []string{"pods"},
+				ResourceNames: podNames,
+				Verbs:         []string{"patch"},
+			},
+		},
+	}
+
+	existing := &rbacv1.Role{}
+	if err := client.Get(ctx, types.NamespacedName{Name: roleName, Namespace: cr.Namespace}, existing); err != nil {
+		if k8serrors.IsNotFound(err) {
+			if err := client.Create(ctx, role); err != nil && !k8serrors.IsAlreadyExists(err) {
+				return fmt.Errorf("failed to create status-script Role: %w", err)
+			}
+		} else {
+			return err
+		}
+	} else if !reflect.DeepEqual(existing.Rules, role.Rules) {
+		existing.Rules = role.Rules
+		if err := client.Update(ctx, existing); err != nil {
+			return fmt.Errorf("failed to update status-script Role: %w", err)
+		}
+	}
+
+	bindingName := cr.Name + "-status-script"
+	binding := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            bindingName,
+			Namespace:       cr.Namespace,
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      "default",
+				Namespace: cr.Namespace,
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     roleName,
+		},
+	}
+
+	existingBinding := &rbacv1.RoleBinding{}
+	if err := client.Get(ctx, types.NamespacedName{Name: bindingName, Namespace: cr.Namespace}, existingBinding); err != nil {
+		if k8serrors.IsNotFound(err) {
+			if err := client.Create(ctx, binding); err != nil && !k8serrors.IsAlreadyExists(err) {
+				return fmt.Errorf("failed to create status-script RoleBinding: %w", err)
+			}
+		} else {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Controller Errors

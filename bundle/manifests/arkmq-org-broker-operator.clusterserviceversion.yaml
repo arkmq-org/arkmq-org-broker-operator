@@ -7027,6 +7027,10 @@ spec:
                   value: quay.io/arkmq-org/arkmq-org-broker-init@sha256:45c3184c51abc7b378d696953df53eaa463464eb85f36377851ab9a486f1556f
                 - name: RELATED_IMAGE_BROKER_KUBERNETES_2540
                   value: quay.io/arkmq-org/arkmq-org-broker-kubernetes@sha256:c4676a4647e8fac743453f1e0e6a08107a9bd7989215b39bb3ea583317366f73
+                - name: RELATED_IMAGE_BROKER_INIT_2550
+                  value: quay.io/arkmq-org/arkmq-org-broker-init@sha256:1251fb2be2a640be3a71dd09339255254c3ffbf49d1059dd9ca7d13348956d6e
+                - name: RELATED_IMAGE_BROKER_KUBERNETES_2550
+                  value: quay.io/arkmq-org/arkmq-org-broker-kubernetes@sha256:9892cb9e376c74746ca1be5458baa17ff427179f843dce98ec716ccf939fa35b
                 - name: OPERATOR_NAME
                   valueFrom:
                     fieldRef:
@@ -7121,7 +7125,6 @@ spec:
           - endpoints
           - events
           - persistentvolumeclaims
-          - pods
           - routes
           - secrets
           - serviceaccounts
@@ -7140,6 +7143,18 @@ spec:
           verbs:
           - get
           - list
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - pods
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
           - watch
         - apiGroups:
           - apps
@@ -7283,6 +7298,9 @@ spec:
           - create
           - delete
           - get
+          - list
+          - update
+          - watch
         - apiGroups:
           - route.openshift.io
           resources:
@@ -7465,4 +7483,8 @@ spec:
     name: broker-init-2540
   - image: quay.io/arkmq-org/arkmq-org-broker-kubernetes@sha256:c4676a4647e8fac743453f1e0e6a08107a9bd7989215b39bb3ea583317366f73
     name: broker-kubernetes-2540
+  - image: quay.io/arkmq-org/arkmq-org-broker-init@sha256:1251fb2be2a640be3a71dd09339255254c3ffbf49d1059dd9ca7d13348956d6e
+    name: broker-init-2550
+  - image: quay.io/arkmq-org/arkmq-org-broker-kubernetes@sha256:9892cb9e376c74746ca1be5458baa17ff427179f843dce98ec716ccf939fa35b
+    name: broker-kubernetes-2550
   version: 2.1.5
