@@ -31,6 +31,18 @@ var (
 	defaultInitImage string
 )
 
+func IsDevLatestBuild() bool {
+	return os.Getenv("DEFAULT_BROKER_VERSION") == "0.0.0"
+}
+
+func init() {
+	if IsDevLatestBuild() {
+		FullVersionFromCompactVersion["000"] = "0.0.0"
+		YacfgProfileVersionFromFullVersion["0.0.0"] = YacfgProfileVersionFromFullVersion[LatestVersion]
+		SupportedActiveMQArtemisVersions = append(SupportedActiveMQArtemisVersions, "0.0.0")
+	}
+}
+
 func GetDefaultVersion() string {
 	if defaultVersion == "" {
 		defaultVersion = os.Getenv("DEFAULT_BROKER_VERSION")
