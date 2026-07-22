@@ -1008,19 +1008,33 @@ func (reconciler *BrokerServiceInstanceReconciler) controlPlaneOverrideSecretNam
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSecret(validApps []broker.BrokerApp) error {
-	// Collect all unique ConsumerOf addresses from validated apps only
-	consumerAddresses := make(map[string]bool)
+	// Collect all unique ConsumerOf and ProducerOf addresses from validated apps only
+	appQueues := make(map[string]bool)
 	for _, app := range validApps {
 		for _, capability := range app.Spec.Capabilities {
+			// Collect ConsumerOf addresses for metrics
 			for _, addressRef := range capability.ConsumerOf {
 				if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
 					// ANYCAST - direct queue address
-					consumerAddresses[addressRef.Address] = true
+					appQueues[addressRef.Address] = true
 				} else {
 					// MULTICAST - generate FQQN for each multicast queue
 					for _, queueName := range addressRef.Subscriptions {
 						fqqn := addressRef.Address + FQQNSeparator + queueName
-						consumerAddresses[fqqn] = true
+						appQueues[fqqn] = true
+					}
+				}
+			}
+			// Also collect ProducerOf addresses for metrics
+			for _, addressRef := range capability.ProducerOf {
+				if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
+					// ANYCAST - direct queue address
+					appQueues[addressRef.Address] = true
+				} else {
+					// MULTICAST - generate FQQN for each multicast queue
+					for _, queueName := range addressRef.Subscriptions {
+						fqqn := addressRef.Address + FQQNSeparator + queueName
+						appQueues[fqqn] = true
 					}
 				}
 			}
@@ -1046,14 +1060,14 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 	}
 
 	// Generate prometheus exporter yaml with queue-level metrics
-	prometheusConfig := reconciler.generatePrometheusConfig(consumerAddresses)
+	prometheusConfig := reconciler.generatePrometheusConfig(appQueues)
 	desired.Data[PrometheusConfigFileName] = prometheusConfig
 
 	reconciler.TrackDesired(desired)
 	return nil
 }
 
-func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(consumerAddresses map[string]bool) []byte {
+func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]bool) []byte {
 	buf := NewPropsWithHeader() // yaml
 
 	// HTTP server config with mTLS
@@ -1097,9 +1111,9 @@ func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(cons
 	brokerName := reconciler.instance.Name // Use service name as broker name for restricted mode
 
 	// Add queue-level attributes for specific queues with exact ObjectNames (include quotes) for canonocial string match, this restricts the attribute load
-	if len(consumerAddresses) > 0 {
+	if len(appQueues) > 0 {
 		fmt.Fprintf(buf, "includeObjectNameAttributes:\n")
-		for address := range consumerAddresses {
+		for address := range appQueues {
 			fqqn := strings.SplitN(address, "::", 2)
 			if len(fqqn) > 1 {
 				fmt.Fprintf(buf, "  org.apache.activemq.artemis:broker=\"%s\",component=addresses,address=\"%s\",subcomponent=queues,routing-type=\"multicast\",queue=\"%s\":\n",

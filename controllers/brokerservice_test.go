@@ -695,7 +695,7 @@ var _ = Describe("broker-service-poc", func() {
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("deploying an app with specific queues in ConsumerOf")
+			By("deploying an app with ConsumerOf and ProducerOf queues to test metrics collection")
 			appName := "metrics-test-app"
 			app := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -716,12 +716,10 @@ var _ = Describe("broker-service-poc", func() {
 					Capabilities: []broker.AppCapabilityType{
 						{
 							ConsumerOf: []broker.AddressRef{
-								{Address: "METRICS.QUEUE.ONE"},
-								{Address: "METRICS.QUEUE.TWO"},
+								{Address: "METRICS.QUEUE.CONSUMER"},
 							},
 							ProducerOf: []broker.AddressRef{
-								{Address: "METRICS.QUEUE.ONE"},
-								{Address: "METRICS.QUEUE.TWO"},
+								{Address: "METRICS.QUEUE.PRODUCER.ONLY"},
 							},
 						},
 					},
@@ -777,8 +775,8 @@ var _ = Describe("broker-service-poc", func() {
 				}
 
 				// Verify it includes queue-level metrics for the app queues
-				g.Expect(prometheusConfig).Should(ContainSubstring("METRICS.QUEUE.ONE"), "should include METRICS.QUEUE.ONE")
-				g.Expect(prometheusConfig).Should(ContainSubstring("METRICS.QUEUE.TWO"), "should include METRICS.QUEUE.TWO")
+				g.Expect(prometheusConfig).Should(ContainSubstring("METRICS.QUEUE.CONSUMER"), "should include consumer queue")
+				g.Expect(prometheusConfig).Should(ContainSubstring("METRICS.QUEUE.PRODUCER.ONLY"), "should include producer-only queue")
 				g.Expect(prometheusConfig).Should(ContainSubstring("MessageCount"), "should include MessageCount attribute")
 				g.Expect(prometheusConfig).Should(ContainSubstring("ConsumerCount"), "should include ConsumerCount attribute")
 
@@ -841,10 +839,12 @@ var _ = Describe("broker-service-poc", func() {
 					}
 
 					// Verify queue-level metrics for app queues are present
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.ONE"`), "should have MessageCount for METRICS.QUEUE.ONE")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.TWO"`), "should have MessageCount for METRICS.QUEUE.TWO")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.ONE"`), "should have ConsumerCount for METRICS.QUEUE.ONE")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.TWO"`), "should have ConsumerCount for METRICS.QUEUE.TWO")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.CONSUMER"`), "should have MessageCount for consumer queue")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.CONSUMER"`), "should have ConsumerCount for consumer queue")
+
+					// Producer-only queue metrics
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.PRODUCER\.ONLY"`), "should have MessageCount for producer-only queue")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.PRODUCER\.ONLY"`), "should have ConsumerCount for producer-only queue")
 				}
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
