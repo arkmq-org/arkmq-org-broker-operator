@@ -15,9 +15,6 @@ limitations under the License.
 package controllers
 
 import (
-	"strings"
-	"testing"
-
 	brokerv1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	corev1 "k8s.io/api/core/v1"
@@ -26,25 +23,29 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func TestFindServiceWithCapacity(t *testing.T) {
+// Helper function to create scheme
+func createTestScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	_ = brokerv1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	return scheme
+}
 
-	tests := []struct {
-		name                  string
-		app                   *brokerv1beta2.BrokerApp
-		services              []brokerv1beta2.BrokerService
-		existingApps          []brokerv1beta2.BrokerApp
-		expectedServiceName   string
-		expectError           bool
-		expectedErrorContains string // substring that must appear in error message
-	}{
-		{
-			name: "no resource constraints - picks first service",
-			app: &brokerv1beta2.BrokerApp{
+var _ = Describe("BrokerApp FindServiceWithCapacity", func() {
+	Context("when selecting service for BrokerApp", func() {
+		var scheme *runtime.Scheme
+
+		BeforeEach(func() {
+			scheme = createTestScheme()
+		})
+
+		It("should pick first service when no resource constraints", func() {
+			app := &brokerv1beta2.BrokerApp{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "new-app",
 					Namespace: "test",
@@ -52,21 +53,66 @@ func TestFindServiceWithCapacity(t *testing.T) {
 				Spec: brokerv1beta2.BrokerAppSpec{
 					Resources: corev1.ResourceRequirements{}, // No resources specified
 				},
-			},
-			services: []brokerv1beta2.BrokerService{
+			}
+			services := []brokerv1beta2.BrokerService{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "service2", Namespace: "test"},
 				},
-			},
-			expectedServiceName: "service1",
-			expectError:         false,
-		},
-		{
-			name: "picks service with most available memory",
-			app: &brokerv1beta2.BrokerApp{
+			}
+
+			namespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: app.Namespace},
+			}
+			objs := []runtime.Object{namespace, app}
+			for i := range services {
+				services[i].Status.Conditions = []metav1.Condition{
+					{
+						Type:   brokerv1beta2.DeployedConditionType,
+						Status: metav1.ConditionTrue,
+						Reason: brokerv1beta2.ReadyConditionReason,
+					},
+				}
+				objs = append(objs, &services[i])
+			}
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objs...).
+				WithIndex(&brokerv1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
+					app := obj.(*brokerv1beta2.BrokerApp)
+					if app.Status.Service != nil {
+						return []string{app.Status.Service.Key()}
+					}
+					return nil
+				}).
+				Build()
+
+			reconciler := &BrokerAppInstanceReconciler{
+				BrokerAppReconciler: &BrokerAppReconciler{
+					ReconcilerLoop: &ReconcilerLoop{
+						KubeBits: &KubeBits{
+							Client: fakeClient,
+							Scheme: scheme,
+						},
+					},
+				},
+				instance: app,
+			}
+
+			serviceList := &brokerv1beta2.BrokerServiceList{Items: services}
+			chosen, assignedPort, err := reconciler.findServiceWithCapacity(serviceList)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(chosen).NotTo(BeNil())
+			Expect(chosen.Name).To(Equal("service1"))
+			Expect(assignedPort).NotTo(Equal(UnassignedPort))
+		})
+
+		It("should pick service with most available memory", func() {
+			app := &brokerv1beta2.BrokerApp{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "new-app",
 					Namespace: "test",
@@ -78,8 +124,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			services: []brokerv1beta2.BrokerService{
+			}
+			services := []brokerv1beta2.BrokerService{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
 					Spec: brokerv1beta2.BrokerServiceSpec{
@@ -100,13 +146,58 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			expectedServiceName: "service2", // service2 has more capacity
-			expectError:         false,
-		},
-		{
-			name: "considers already provisioned apps",
-			app: &brokerv1beta2.BrokerApp{
+			}
+
+			namespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: app.Namespace},
+			}
+			objs := []runtime.Object{namespace, app}
+			for i := range services {
+				services[i].Status.Conditions = []metav1.Condition{
+					{
+						Type:   brokerv1beta2.DeployedConditionType,
+						Status: metav1.ConditionTrue,
+						Reason: brokerv1beta2.ReadyConditionReason,
+					},
+				}
+				objs = append(objs, &services[i])
+			}
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objs...).
+				WithIndex(&brokerv1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
+					app := obj.(*brokerv1beta2.BrokerApp)
+					if app.Status.Service != nil {
+						return []string{app.Status.Service.Key()}
+					}
+					return nil
+				}).
+				Build()
+
+			reconciler := &BrokerAppInstanceReconciler{
+				BrokerAppReconciler: &BrokerAppReconciler{
+					ReconcilerLoop: &ReconcilerLoop{
+						KubeBits: &KubeBits{
+							Client: fakeClient,
+							Scheme: scheme,
+						},
+					},
+				},
+				instance: app,
+			}
+
+			serviceList := &brokerv1beta2.BrokerServiceList{Items: services}
+			chosen, assignedPort, err := reconciler.findServiceWithCapacity(serviceList)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(chosen).NotTo(BeNil())
+			Expect(chosen.Name).To(Equal("service2")) // service2 has more capacity
+			Expect(assignedPort).NotTo(Equal(UnassignedPort))
+		})
+
+		It("should consider already provisioned apps when calculating capacity", func() {
+			app := &brokerv1beta2.BrokerApp{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "new-app",
 					Namespace: "test",
@@ -118,8 +209,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			services: []brokerv1beta2.BrokerService{
+			}
+			services := []brokerv1beta2.BrokerService{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
 					Spec: brokerv1beta2.BrokerServiceSpec{
@@ -140,8 +231,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			existingApps: []brokerv1beta2.BrokerApp{
+			}
+			existingApps := []brokerv1beta2.BrokerApp{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "existing-app",
@@ -162,13 +253,61 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			expectedServiceName: "service1", // service1 has more available capacity now
-			expectError:         false,
-		},
-		{
-			name: "no service has enough capacity",
-			app: &brokerv1beta2.BrokerApp{
+			}
+
+			namespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: app.Namespace},
+			}
+			objs := []runtime.Object{namespace, app}
+			for i := range services {
+				services[i].Status.Conditions = []metav1.Condition{
+					{
+						Type:   brokerv1beta2.DeployedConditionType,
+						Status: metav1.ConditionTrue,
+						Reason: brokerv1beta2.ReadyConditionReason,
+					},
+				}
+				objs = append(objs, &services[i])
+			}
+			for i := range existingApps {
+				objs = append(objs, &existingApps[i])
+			}
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objs...).
+				WithIndex(&brokerv1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
+					app := obj.(*brokerv1beta2.BrokerApp)
+					if app.Status.Service != nil {
+						return []string{app.Status.Service.Key()}
+					}
+					return nil
+				}).
+				Build()
+
+			reconciler := &BrokerAppInstanceReconciler{
+				BrokerAppReconciler: &BrokerAppReconciler{
+					ReconcilerLoop: &ReconcilerLoop{
+						KubeBits: &KubeBits{
+							Client: fakeClient,
+							Scheme: scheme,
+						},
+					},
+				},
+				instance: app,
+			}
+
+			serviceList := &brokerv1beta2.BrokerServiceList{Items: services}
+			chosen, assignedPort, err := reconciler.findServiceWithCapacity(serviceList)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(chosen).NotTo(BeNil())
+			Expect(chosen.Name).To(Equal("service1")) // service1 has more available capacity now
+			Expect(assignedPort).NotTo(Equal(UnassignedPort))
+		})
+
+		It("should return error when no service has enough capacity", func() {
+			app := &brokerv1beta2.BrokerApp{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "new-app",
 					Namespace: "test",
@@ -180,8 +319,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			services: []brokerv1beta2.BrokerService{
+			}
+			services := []brokerv1beta2.BrokerService{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
 					Spec: brokerv1beta2.BrokerServiceSpec{
@@ -192,14 +331,57 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			expectedServiceName:   "",
-			expectError:           true,
-			expectedErrorContains: "insufficient memory capacity",
-		},
-		{
-			name: "service with no limit has unlimited capacity",
-			app: &brokerv1beta2.BrokerApp{
+			}
+
+			namespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: app.Namespace},
+			}
+			objs := []runtime.Object{namespace, app}
+			for i := range services {
+				services[i].Status.Conditions = []metav1.Condition{
+					{
+						Type:   brokerv1beta2.DeployedConditionType,
+						Status: metav1.ConditionTrue,
+						Reason: brokerv1beta2.ReadyConditionReason,
+					},
+				}
+				objs = append(objs, &services[i])
+			}
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objs...).
+				WithIndex(&brokerv1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
+					app := obj.(*brokerv1beta2.BrokerApp)
+					if app.Status.Service != nil {
+						return []string{app.Status.Service.Key()}
+					}
+					return nil
+				}).
+				Build()
+
+			reconciler := &BrokerAppInstanceReconciler{
+				BrokerAppReconciler: &BrokerAppReconciler{
+					ReconcilerLoop: &ReconcilerLoop{
+						KubeBits: &KubeBits{
+							Client: fakeClient,
+							Scheme: scheme,
+						},
+					},
+				},
+				instance: app,
+			}
+
+			serviceList := &brokerv1beta2.BrokerServiceList{Items: services}
+			chosen, _, err := reconciler.findServiceWithCapacity(serviceList)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("insufficient memory capacity"))
+			Expect(chosen).To(BeNil())
+		})
+
+		It("should allow unlimited capacity when service has no limit", func() {
+			app := &brokerv1beta2.BrokerApp{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "new-app",
 					Namespace: "test",
@@ -211,8 +393,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			services: []brokerv1beta2.BrokerService{
+			}
+			services := []brokerv1beta2.BrokerService{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
 					Spec: brokerv1beta2.BrokerServiceSpec{
@@ -231,13 +413,58 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			expectedServiceName: "service2", // service2 has unlimited capacity
-			expectError:         false,
-		},
-		{
-			name: "app with missing address",
-			app: &brokerv1beta2.BrokerApp{
+			}
+
+			namespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: app.Namespace},
+			}
+			objs := []runtime.Object{namespace, app}
+			for i := range services {
+				services[i].Status.Conditions = []metav1.Condition{
+					{
+						Type:   brokerv1beta2.DeployedConditionType,
+						Status: metav1.ConditionTrue,
+						Reason: brokerv1beta2.ReadyConditionReason,
+					},
+				}
+				objs = append(objs, &services[i])
+			}
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objs...).
+				WithIndex(&brokerv1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
+					app := obj.(*brokerv1beta2.BrokerApp)
+					if app.Status.Service != nil {
+						return []string{app.Status.Service.Key()}
+					}
+					return nil
+				}).
+				Build()
+
+			reconciler := &BrokerAppInstanceReconciler{
+				BrokerAppReconciler: &BrokerAppReconciler{
+					ReconcilerLoop: &ReconcilerLoop{
+						KubeBits: &KubeBits{
+							Client: fakeClient,
+							Scheme: scheme,
+						},
+					},
+				},
+				instance: app,
+			}
+
+			serviceList := &brokerv1beta2.BrokerServiceList{Items: services}
+			chosen, assignedPort, err := reconciler.findServiceWithCapacity(serviceList)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(chosen).NotTo(BeNil())
+			Expect(chosen.Name).To(Equal("service2")) // service2 has unlimited capacity
+			Expect(assignedPort).NotTo(Equal(UnassignedPort))
+		})
+
+		It("should return error when app has missing addressRef dependency", func() {
+			app := &brokerv1beta2.BrokerApp{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "new-app",
 					Namespace: "test",
@@ -260,8 +487,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			services: []brokerv1beta2.BrokerService{
+			}
+			services := []brokerv1beta2.BrokerService{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
 					Spec: brokerv1beta2.BrokerServiceSpec{
@@ -275,19 +502,60 @@ func TestFindServiceWithCapacity(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "service2", Namespace: "test"},
 					Spec: brokerv1beta2.BrokerServiceSpec{
-						Resources: corev1.ResourceRequirements{
-							// No limits specified = unlimited
+						Resources: corev1.ResourceRequirements{},
+					},
+				},
+			}
+
+			namespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: app.Namespace},
+			}
+			objs := []runtime.Object{namespace, app}
+			for i := range services {
+				services[i].Status.Conditions = []metav1.Condition{
+					{
+						Type:   brokerv1beta2.DeployedConditionType,
+						Status: metav1.ConditionTrue,
+						Reason: brokerv1beta2.ReadyConditionReason,
+					},
+				}
+				objs = append(objs, &services[i])
+			}
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objs...).
+				WithIndex(&brokerv1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
+					app := obj.(*brokerv1beta2.BrokerApp)
+					if app.Status.Service != nil {
+						return []string{app.Status.Service.Key()}
+					}
+					return nil
+				}).
+				Build()
+
+			reconciler := &BrokerAppInstanceReconciler{
+				BrokerAppReconciler: &BrokerAppReconciler{
+					ReconcilerLoop: &ReconcilerLoop{
+						KubeBits: &KubeBits{
+							Client: fakeClient,
+							Scheme: scheme,
 						},
 					},
 				},
-			},
-			expectedServiceName:   "",
-			expectError:           true,
-			expectedErrorContains: "addressRef dependency not satisfied",
-		},
-		{
-			name: "app with address clash",
-			app: &brokerv1beta2.BrokerApp{
+				instance: app,
+			}
+
+			serviceList := &brokerv1beta2.BrokerServiceList{Items: services}
+			chosen, _, err := reconciler.findServiceWithCapacity(serviceList)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("addressRef dependency not satisfied"))
+			Expect(chosen).To(BeNil())
+		})
+
+		It("should return error when there is an address clash", func() {
+			app := &brokerv1beta2.BrokerApp{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "new-app",
 					Namespace: "test",
@@ -306,8 +574,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			services: []brokerv1beta2.BrokerService{
+			}
+			services := []brokerv1beta2.BrokerService{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
 					Spec: brokerv1beta2.BrokerServiceSpec{
@@ -318,8 +586,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			existingApps: []brokerv1beta2.BrokerApp{
+			}
+			existingApps := []brokerv1beta2.BrokerApp{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "existing-app",
@@ -347,15 +615,60 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			expectedServiceName:   "",
-			expectError:           true,
-			expectedErrorContains: "address clash",
-		},
+			}
 
-		{
-			name: "app with address ref type match",
-			app: &brokerv1beta2.BrokerApp{
+			namespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: app.Namespace},
+			}
+			objs := []runtime.Object{namespace, app}
+			for i := range services {
+				services[i].Status.Conditions = []metav1.Condition{
+					{
+						Type:   brokerv1beta2.DeployedConditionType,
+						Status: metav1.ConditionTrue,
+						Reason: brokerv1beta2.ReadyConditionReason,
+					},
+				}
+				objs = append(objs, &services[i])
+			}
+			for i := range existingApps {
+				objs = append(objs, &existingApps[i])
+			}
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objs...).
+				WithIndex(&brokerv1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
+					app := obj.(*brokerv1beta2.BrokerApp)
+					if app.Status.Service != nil {
+						return []string{app.Status.Service.Key()}
+					}
+					return nil
+				}).
+				Build()
+
+			reconciler := &BrokerAppInstanceReconciler{
+				BrokerAppReconciler: &BrokerAppReconciler{
+					ReconcilerLoop: &ReconcilerLoop{
+						KubeBits: &KubeBits{
+							Client: fakeClient,
+							Scheme: scheme,
+						},
+					},
+				},
+				instance: app,
+			}
+
+			serviceList := &brokerv1beta2.BrokerServiceList{Items: services}
+			chosen, _, err := reconciler.findServiceWithCapacity(serviceList)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("address clash"))
+			Expect(chosen).To(BeNil())
+		})
+
+		It("should allow app with matching addressRef type", func() {
+			app := &brokerv1beta2.BrokerApp{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "new-app",
 					Namespace: "test",
@@ -367,7 +680,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 								{
 									Address:      "shared-queue",
 									AppNamespace: "test",
-									AppName:      "existing-app"},
+									AppName:      "existing-app",
+								},
 							},
 						},
 					},
@@ -377,8 +691,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			services: []brokerv1beta2.BrokerService{
+			}
+			services := []brokerv1beta2.BrokerService{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
 					Spec: brokerv1beta2.BrokerServiceSpec{
@@ -389,8 +703,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			existingApps: []brokerv1beta2.BrokerApp{
+			}
+			existingApps := []brokerv1beta2.BrokerApp{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "existing-app",
@@ -419,15 +733,61 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			expectedServiceName:   "service1",
-			expectError:           false,
-			expectedErrorContains: "",
-		},
+			}
 
-		{
-			name: "app with ref type mis match",
-			app: &brokerv1beta2.BrokerApp{
+			namespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: app.Namespace},
+			}
+			objs := []runtime.Object{namespace, app}
+			for i := range services {
+				services[i].Status.Conditions = []metav1.Condition{
+					{
+						Type:   brokerv1beta2.DeployedConditionType,
+						Status: metav1.ConditionTrue,
+						Reason: brokerv1beta2.ReadyConditionReason,
+					},
+				}
+				objs = append(objs, &services[i])
+			}
+			for i := range existingApps {
+				objs = append(objs, &existingApps[i])
+			}
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objs...).
+				WithIndex(&brokerv1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
+					app := obj.(*brokerv1beta2.BrokerApp)
+					if app.Status.Service != nil {
+						return []string{app.Status.Service.Key()}
+					}
+					return nil
+				}).
+				Build()
+
+			reconciler := &BrokerAppInstanceReconciler{
+				BrokerAppReconciler: &BrokerAppReconciler{
+					ReconcilerLoop: &ReconcilerLoop{
+						KubeBits: &KubeBits{
+							Client: fakeClient,
+							Scheme: scheme,
+						},
+					},
+				},
+				instance: app,
+			}
+
+			serviceList := &brokerv1beta2.BrokerServiceList{Items: services}
+			chosen, assignedPort, err := reconciler.findServiceWithCapacity(serviceList)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(chosen).NotTo(BeNil())
+			Expect(chosen.Name).To(Equal("service1"))
+			Expect(assignedPort).NotTo(Equal(UnassignedPort))
+		})
+
+		It("should return error when addressRef type mismatches", func() {
+			app := &brokerv1beta2.BrokerApp{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "new-app",
 					Namespace: "test",
@@ -439,7 +799,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 								{
 									Address:      "shared",
 									AppNamespace: "test",
-									AppName:      "existing-app"},
+									AppName:      "existing-app",
+								},
 							},
 						},
 					},
@@ -449,8 +810,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			services: []brokerv1beta2.BrokerService{
+			}
+			services := []brokerv1beta2.BrokerService{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
 					Spec: brokerv1beta2.BrokerServiceSpec{
@@ -461,8 +822,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			existingApps: []brokerv1beta2.BrokerApp{
+			}
+			existingApps := []brokerv1beta2.BrokerApp{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "existing-app",
@@ -491,14 +852,60 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			expectedServiceName:   "",
-			expectError:           true,
-			expectedErrorContains: "addressRef",
-		},
-		{
-			name: "app producer to shared with ref semantic mis match",
-			app: &brokerv1beta2.BrokerApp{
+			}
+
+			namespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: app.Namespace},
+			}
+			objs := []runtime.Object{namespace, app}
+			for i := range services {
+				services[i].Status.Conditions = []metav1.Condition{
+					{
+						Type:   brokerv1beta2.DeployedConditionType,
+						Status: metav1.ConditionTrue,
+						Reason: brokerv1beta2.ReadyConditionReason,
+					},
+				}
+				objs = append(objs, &services[i])
+			}
+			for i := range existingApps {
+				objs = append(objs, &existingApps[i])
+			}
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objs...).
+				WithIndex(&brokerv1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
+					app := obj.(*brokerv1beta2.BrokerApp)
+					if app.Status.Service != nil {
+						return []string{app.Status.Service.Key()}
+					}
+					return nil
+				}).
+				Build()
+
+			reconciler := &BrokerAppInstanceReconciler{
+				BrokerAppReconciler: &BrokerAppReconciler{
+					ReconcilerLoop: &ReconcilerLoop{
+						KubeBits: &KubeBits{
+							Client: fakeClient,
+							Scheme: scheme,
+						},
+					},
+				},
+				instance: app,
+			}
+
+			serviceList := &brokerv1beta2.BrokerServiceList{Items: services}
+			chosen, _, err := reconciler.findServiceWithCapacity(serviceList)
+
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("addressRef"))
+			Expect(chosen).To(BeNil())
+		})
+
+		It("should return error when producer ref has semantic mismatch", func() {
+			app := &brokerv1beta2.BrokerApp{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "new-app",
 					Namespace: "test",
@@ -511,7 +918,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 									Address:      "shared",
 									PubSub:       &[]bool{true}[0], // pub/sub semantics (multicast)
 									AppNamespace: "test",
-									AppName:      "existing-app"},
+									AppName:      "existing-app",
+								},
 							},
 						},
 					},
@@ -521,8 +929,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			services: []brokerv1beta2.BrokerService{
+			}
+			services := []brokerv1beta2.BrokerService{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "service1", Namespace: "test"},
 					Spec: brokerv1beta2.BrokerServiceSpec{
@@ -533,8 +941,8 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			existingApps: []brokerv1beta2.BrokerApp{
+			}
+			existingApps := []brokerv1beta2.BrokerApp{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "existing-app",
@@ -556,39 +964,24 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-			},
-			expectedServiceName:   "",
-			expectError:           true,
-			expectedErrorContains: "addressRef",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create fake client with services and existing apps
-			objs := make([]runtime.Object, 0, len(tt.services)+len(tt.existingApps)+2)
-
-			// Add namespace object (required for CEL evaluation)
-			namespace := &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: tt.app.Namespace,
-				},
 			}
-			objs = append(objs, namespace, tt.app)
 
-			for i := range tt.services {
-				// Add Deployed condition to all services
-				tt.services[i].Status.Conditions = []metav1.Condition{
+			namespace := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: app.Namespace},
+			}
+			objs := []runtime.Object{namespace, app}
+			for i := range services {
+				services[i].Status.Conditions = []metav1.Condition{
 					{
 						Type:   brokerv1beta2.DeployedConditionType,
 						Status: metav1.ConditionTrue,
 						Reason: brokerv1beta2.ReadyConditionReason,
 					},
 				}
-				objs = append(objs, &tt.services[i])
+				objs = append(objs, &services[i])
 			}
-			for i := range tt.existingApps {
-				objs = append(objs, &tt.existingApps[i])
+			for i := range existingApps {
+				objs = append(objs, &existingApps[i])
 			}
 
 			fakeClient := fake.NewClientBuilder().
@@ -603,7 +996,6 @@ func TestFindServiceWithCapacity(t *testing.T) {
 				}).
 				Build()
 
-			// Create reconciler
 			reconciler := &BrokerAppInstanceReconciler{
 				BrokerAppReconciler: &BrokerAppReconciler{
 					ReconcilerLoop: &ReconcilerLoop{
@@ -613,48 +1005,15 @@ func TestFindServiceWithCapacity(t *testing.T) {
 						},
 					},
 				},
-				instance: tt.app,
+				instance: app,
 			}
 
-			// Create service list
-			serviceList := &brokerv1beta2.BrokerServiceList{
-				Items: tt.services,
-			}
+			serviceList := &brokerv1beta2.BrokerServiceList{Items: services}
+			chosen, _, err := reconciler.findServiceWithCapacity(serviceList)
 
-			// Call findServiceWithCapacity
-			chosen, assignedPort, err := reconciler.findServiceWithCapacity(serviceList)
-
-			// Check error expectation
-			if (err != nil) != tt.expectError {
-				t.Errorf("findServiceWithCapacity() error = %v, expectError %v", err, tt.expectError)
-				return
-			}
-
-			// Check error message content if expected
-			if tt.expectError && tt.expectedErrorContains != "" {
-				if err == nil {
-					t.Errorf("expected error containing '%s', got nil error", tt.expectedErrorContains)
-				} else if !strings.Contains(err.Error(), tt.expectedErrorContains) {
-					t.Errorf("expected error to contain '%s', got: %v", tt.expectedErrorContains, err.Error())
-				}
-			}
-
-			// Check chosen service
-			if tt.expectedServiceName != "" {
-				if chosen == nil {
-					t.Errorf("expected service %s, got nil", tt.expectedServiceName)
-				} else if chosen.Name != tt.expectedServiceName {
-					t.Errorf("expected service %s, got %s", tt.expectedServiceName, chosen.Name)
-				}
-				// If a service was chosen, port should be assigned
-				if assignedPort == UnassignedPort {
-					t.Errorf("expected assigned port for service %s, got UnassignedPort", tt.expectedServiceName)
-				}
-			} else {
-				if chosen != nil {
-					t.Errorf("expected no service, got %s", chosen.Name)
-				}
-			}
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("addressRef"))
+			Expect(chosen).To(BeNil())
 		})
-	}
-}
+	})
+})

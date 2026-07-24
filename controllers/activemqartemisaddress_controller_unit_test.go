@@ -18,13 +18,13 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"testing"
 	"time"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/go-logr/logr"
-	"github.com/stretchr/testify/assert"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -37,19 +37,60 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-func TestDeleteExistingAddress(t *testing.T) {
-	testDeleteExistingAddress(t, false)
-}
+var _ = Describe("ActiveMQArtemisAddress Controller", func() {
 
-func TestDeleteExistingAddressWithRemoveFromBrokerOnDelete(t *testing.T) {
-	testDeleteExistingAddress(t, true)
-}
+	Context("when deleting an existing address", func() {
+		It("should reconcile successfully without removeFromBrokerOnDelete", func() {
+			testDeleteExistingAddressGinkgo(false)
+		})
 
-func testDeleteExistingAddress(t *testing.T, removeFromBrokerOnDelete bool) {
+		It("should reconcile successfully with removeFromBrokerOnDelete", func() {
+			testDeleteExistingAddressGinkgo(true)
+		})
+	})
 
-	var result ctrl.Result
-	var err error
+	Context("when address is not found", func() {
+		It("should return no error and no requeue", func() {
+			interceptorFuncs := interceptor.Funcs{
+				Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					return apierrors.NewNotFound(schema.GroupResource{}, "")
+				},
+			}
+			fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
 
+			r := NewActiveMQArtemisAddressReconciler(fakeClient, nil, logr.New(log.NullLogSink{}))
+
+			result, err := r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
+
+			Expect(err).To(BeNil())
+			Expect(result.Requeue).To(BeFalse())
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+		})
+	})
+
+	Context("when an internal error occurs", func() {
+		It("should return the error", func() {
+			internalError := apierrors.NewInternalError(errors.New("internal-error"))
+
+			interceptorFuncs := interceptor.Funcs{
+				Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					return internalError
+				},
+			}
+			fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
+
+			r := NewActiveMQArtemisAddressReconciler(fakeClient, nil, logr.New(log.NullLogSink{}))
+
+			result, err := r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
+
+			Expect(err).To(Equal(internalError))
+			Expect(result.Requeue).To(BeFalse())
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+		})
+	})
+})
+
+func testDeleteExistingAddressGinkgo(removeFromBrokerOnDelete bool) {
 	addressExists := true
 	interceptorFuncs := interceptor.Funcs{
 		Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
@@ -63,34 +104,7 @@ func testDeleteExistingAddress(t *testing.T, removeFromBrokerOnDelete bool) {
 					RemoveFromBrokerOnDelete: removeFromBrokerOnDelete,
 				}
 				return nil
-			} else {
-				return apierrors.NewNotFound(schema.GroupResource{}, "")
 			}
-		},
-	}
-	fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
-
-	r := NewActiveMQArtemisAddressReconciler(fakeClient, nil, logr.New(log.NullLogSink{}))
-
-	result, err = r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
-
-	assert.Nil(t, err)
-	assert.False(t, result.Requeue)
-	assert.Equal(t, common.GetReconcileResyncPeriod(), result.RequeueAfter)
-
-	addressExists = false
-
-	result, err = r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
-
-	assert.Nil(t, err)
-	assert.False(t, result.Requeue)
-	assert.Equal(t, time.Duration(0), result.RequeueAfter)
-}
-
-func TestDeleteAddressWithNotFoundError(t *testing.T) {
-
-	interceptorFuncs := interceptor.Funcs{
-		Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 			return apierrors.NewNotFound(schema.GroupResource{}, "")
 		},
 	}
@@ -100,27 +114,15 @@ func TestDeleteAddressWithNotFoundError(t *testing.T) {
 
 	result, err := r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
 
-	assert.Nil(t, err)
-	assert.False(t, result.Requeue)
-	assert.Equal(t, time.Duration(0), result.RequeueAfter)
-}
+	Expect(err).To(BeNil())
+	Expect(result.Requeue).To(BeFalse())
+	Expect(result.RequeueAfter).To(Equal(common.GetReconcileResyncPeriod()))
 
-func TestDeleteAddressWithInternalError(t *testing.T) {
+	addressExists = false
 
-	internalError := apierrors.NewInternalError(errors.New("internal-error"))
+	result, err = r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
 
-	interceptorFuncs := interceptor.Funcs{
-		Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			return internalError
-		},
-	}
-	fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
-
-	r := NewActiveMQArtemisAddressReconciler(fakeClient, nil, logr.New(log.NullLogSink{}))
-
-	result, err := r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
-
-	assert.Equal(t, internalError, err)
-	assert.False(t, result.Requeue)
-	assert.Equal(t, time.Duration(0), result.RequeueAfter)
+	Expect(err).To(BeNil())
+	Expect(result.Requeue).To(BeFalse())
+	Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
 }

@@ -18,12 +18,12 @@ package controllers
 
 import (
 	"context"
-	"testing"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/go-logr/logr"
-	"github.com/stretchr/testify/assert"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,131 +35,134 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func TestLabelConflicts_NoReservedKeys(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-	_ = networkingv1.AddToScheme(scheme)
+var _ = Describe("BrokerService label conflict detection", func() {
+	Context("when validating user-supplied labels", func() {
+		It("should accept labels that do not use reserved keys", func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+			_ = networkingv1.AddToScheme(scheme)
 
-	ns := "default"
-	svcName := "test-broker"
+			ns := "default"
+			svcName := "test-broker"
 
-	nsObj := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: ns,
-		},
-	}
-
-	service := &v1beta2.BrokerService{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      svcName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerServiceSpec{},
-	}
-
-	cl := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(service, nsObj).
-		WithStatusSubresource(service).
-		WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
-			app := obj.(*v1beta2.BrokerApp)
-			if app.Status.Service != nil {
-				return []string{app.Status.Service.Key()}
+			nsObj := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: ns,
+				},
 			}
-			return nil
-		}).
-		Build()
 
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
-
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err)
-
-	broker := &v1beta2.Broker{}
-	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
-	assert.NoError(t, err)
-
-	labels := broker.Spec.DeploymentPlan.Labels
-
-	// Verify we don't use the reserved keys
-	_, hasBroker := labels["Broker"]
-	_, hasApplication := labels["application"]
-
-	assert.False(t, hasBroker, "Must not use reserved label key 'Broker'")
-	assert.False(t, hasApplication, "Must not use reserved label key 'application'")
-
-	// Verify we're using standard Kubernetes labels with proper prefixes
-	assert.Contains(t, labels, common.LabelAppKubernetesInstance)
-	assert.Contains(t, labels, common.LabelAppKubernetesComponent)
-	assert.Contains(t, labels, common.LabelAppKubernetesManagedBy)
-	assert.Contains(t, labels, common.LabelBrokerService)
-	assert.Contains(t, labels, common.LabelBrokerPeerIndex)
-}
-
-func TestLabelConflicts_ProperDomainPrefixes(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-	_ = networkingv1.AddToScheme(scheme)
-
-	ns := "default"
-	svcName := "test-broker"
-
-	nsObj := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: ns,
-		},
-	}
-
-	service := &v1beta2.BrokerService{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      svcName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerServiceSpec{},
-	}
-
-	cl := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(service, nsObj).
-		WithStatusSubresource(service).
-		WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
-			app := obj.(*v1beta2.BrokerApp)
-			if app.Status.Service != nil {
-				return []string{app.Status.Service.Key()}
+			service := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      svcName,
+					Namespace: ns,
+				},
+				Spec: v1beta2.BrokerServiceSpec{},
 			}
-			return nil
-		}).
-		Build()
 
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(service, nsObj).
+				WithStatusSubresource(service).
+				WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
+					app := obj.(*v1beta2.BrokerApp)
+					if app.Status.Service != nil {
+						return []string{app.Status.Service.Key()}
+					}
+					return nil
+				}).
+				Build()
 
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err)
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 
-	broker := &v1beta2.Broker{}
-	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
-	assert.NoError(t, err)
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
 
-	labels := broker.Spec.DeploymentPlan.Labels
+			broker := &v1beta2.BrokerCluster{}
+			err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
+			Expect(err).NotTo(HaveOccurred())
 
-	validPrefixes := []string{
-		"app.kubernetes.io/",
-		"broker.arkmq.org/",
-	}
+			labels := broker.Spec.DeploymentPlan.Labels
 
-	for key := range labels {
-		hasValidPrefix := false
-		for _, prefix := range validPrefixes {
-			if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
-				hasValidPrefix = true
-				break
+			// Verify we don't use the reserved keys
+			_, hasBroker := labels["Broker"]
+			_, hasApplication := labels["application"]
+
+			Expect(hasBroker).To(BeFalse(), "Must not use reserved label key 'Broker'")
+			Expect(hasApplication).To(BeFalse(), "Must not use reserved label key 'application'")
+
+			// Verify we're using standard Kubernetes labels with proper prefixes
+			Expect(labels).To(HaveKey(common.LabelAppKubernetesInstance))
+			Expect(labels).To(HaveKey(common.LabelAppKubernetesComponent))
+			Expect(labels).To(HaveKey(common.LabelAppKubernetesManagedBy))
+			Expect(labels).To(HaveKey(common.LabelBrokerService))
+			Expect(labels).To(HaveKey(common.LabelBrokerPeerIndex))
+		})
+		It("should accept labels that use proper non-reserved domain prefixes", func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+			_ = networkingv1.AddToScheme(scheme)
+
+			ns := "default"
+			svcName := "test-broker"
+
+			nsObj := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: ns,
+				},
 			}
-		}
-		assert.True(t, hasValidPrefix,
-			"Label key '%s' must use a domain prefix (app.kubernetes.io/ or broker.arkmq.org/)", key)
-	}
-}
+
+			service := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      svcName,
+					Namespace: ns,
+				},
+				Spec: v1beta2.BrokerServiceSpec{},
+			}
+
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(service, nsObj).
+				WithStatusSubresource(service).
+				WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
+					app := obj.(*v1beta2.BrokerApp)
+					if app.Status.Service != nil {
+						return []string{app.Status.Service.Key()}
+					}
+					return nil
+				}).
+				Build()
+
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			broker := &v1beta2.BrokerCluster{}
+			err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
+			Expect(err).NotTo(HaveOccurred())
+
+			labels := broker.Spec.DeploymentPlan.Labels
+
+			validPrefixes := []string{
+				"app.kubernetes.io/",
+				"broker.arkmq.org/",
+			}
+
+			for key := range labels {
+				hasValidPrefix := false
+				for _, prefix := range validPrefixes {
+					if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
+						hasValidPrefix = true
+						break
+					}
+				}
+				Expect(hasValidPrefix).To(BeTrue(),
+					"Label key '%s' must use a domain prefix (app.kubernetes.io/ or broker.arkmq.org/)", key)
+			}
+		})
+	})
+})
