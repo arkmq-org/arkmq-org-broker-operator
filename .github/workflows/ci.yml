@@ -86,20 +86,30 @@ jobs:
 
       - name: Layer 2 — ratchet on total codebase debt
         run: |
-          # Skip entirely if no .go files changed
           MERGE_BASE=$(git merge-base HEAD origin/main)
           if ! git diff --name-only ${MERGE_BASE} HEAD | grep -q '\.go$'; then
             echo "No .go files changed — skipping debt ratchet."
             exit 0
           fi
 
-          # Count findings at merge-base
+          LINT="./bin/golangci-lint"
+          CONFIG_TMP=$(mktemp --suffix=.yml)
+          JSON_OUT=$(mktemp --suffix=.json)
+          cp .golangci.yml "${CONFIG_TMP}"
+
+          lint_count() {
+            "${LINT}" run --output.json.path "${JSON_OUT}" --output.text.path /dev/null \
+              --config "${CONFIG_TMP}" ./... >/dev/null 2>&1 || true
+            jq '.Issues // [] | length' "${JSON_OUT}"
+          }
+
+          COUNT_AFTER=$(lint_count)
+
           git checkout --quiet ${MERGE_BASE}
-          COUNT_BEFORE=$(golangci-lint run ./... 2>/dev/null | grep -c ' (errcheck)\| (ineffassign)\| (staticcheck)\| (unused)' || true)
+          COUNT_BEFORE=$(lint_count)
           git checkout --quiet -
 
-          # Count findings at PR HEAD
-          COUNT_AFTER=$(golangci-lint run ./... 2>/dev/null | grep -c ' (errcheck)\| (ineffassign)\| (staticcheck)\| (unused)' || true)
+          rm -f "${CONFIG_TMP}" "${JSON_OUT}"
 
           echo "Lint debt: before=${COUNT_BEFORE} after=${COUNT_AFTER}"
 
