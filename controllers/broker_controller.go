@@ -243,9 +243,13 @@ func countOfDeployedBroker(reconciler *BrokerReconcilerImpl) (total int) {
 	return total
 }
 
+func withCRContext(logger logr.Logger, name, namespace string) logr.Logger {
+	return logger.WithValues("CRD.Name", name, "CRD.Namespace", namespace)
+}
+
 func NewBrokerReconcilerImpl(customResource *v1beta2.Broker, parent *BrokerReconciler) *BrokerReconcilerImpl {
 	return &BrokerReconcilerImpl{
-		log:                parent.log,
+		log:                withCRContext(parent.log, customResource.Name, customResource.Namespace),
 		customResource:     customResource,
 		scheme:             parent.Scheme,
 		requestedResources: make(map[reflect.Type]map[string]rtclient.Object),
@@ -258,7 +262,7 @@ func NewBrokerReconcilerImpl(customResource *v1beta2.Broker, parent *BrokerRecon
 func (reconciler *BrokerReconcilerImpl) Process(customResource *v1beta2.Broker, namer common.Namers, client rtclient.Client, scheme *runtime.Scheme) error {
 
 	reconciler.log.V(1).Info("Reconciler Processing...", "Operator version", version.Version, "ActiveMQArtemis release", customResource.Spec.Version)
-	reconciler.log.V(2).Info("Reconciler Processing...", "CRD.Name", customResource.Name, "CRD ver", customResource.ResourceVersion, "CRD Gen", customResource.Generation)
+	reconciler.log.V(2).Info("Reconciler Processing...", "CRD ver", customResource.ResourceVersion, "CRD Gen", customResource.Generation)
 
 	reconciler.CurrentDeployedResources(customResource, client)
 
@@ -519,8 +523,6 @@ func formatTemplatedStringForBroker(customResource *v1beta2.Broker, template str
 }
 
 func (reconciler *BrokerReconcilerImpl) CurrentDeployedResources(customResource *v1beta2.Broker, client rtclient.Client) {
-	reqLogger := reconciler.log.WithValues("ActiveMQArtemis Name", customResource.Name)
-
 	var err error
 	if customResource.Spec.PersistenceEnabled {
 		reconciler.checkExistingPersistentVolumes(customResource, client)
@@ -528,7 +530,7 @@ func (reconciler *BrokerReconcilerImpl) CurrentDeployedResources(customResource 
 
 	reconciler.deployed, err = brokerstatus.GetDeployedResources(customResource, client, reconciler.isOnOpenShift)
 	if err != nil {
-		reqLogger.Error(err, "error getting deployed resources")
+		reconciler.log.Error(err, "error getting deployed resources")
 		return
 	}
 
@@ -542,14 +544,12 @@ func (reconciler *BrokerReconcilerImpl) CurrentDeployedResources(customResource 
 
 	for t, objs := range reconciler.deployed {
 		for _, obj := range objs {
-			reqLogger.V(2).Info("Deployed ", "Type", t, "Name", obj.GetName())
+			reconciler.log.V(2).Info("Deployed ", "Type", t, "Name", obj.GetName())
 		}
 	}
 }
 
 func (reconciler *BrokerReconcilerImpl) ProcessResources(customResource *v1beta2.Broker, client rtclient.Client, scheme *runtime.Scheme) (err error) {
-
-	reqLogger := reconciler.log.WithValues("ActiveMQArtemis Name", customResource.Name)
 
 	for _, requested := range common.ToResourceList(reconciler.requestedResources) {
 		requested.SetNamespace(customResource.Namespace)
@@ -558,7 +558,7 @@ func (reconciler *BrokerReconcilerImpl) ProcessResources(customResource *v1beta2
 		}
 	}
 
-	reqLogger.V(1).Info("Processing resources", "num requested", countOfRequestedBroker(reconciler), "num current", countOfDeployedBroker(reconciler))
+	reconciler.log.V(1).Info("Processing resources", "num requested", countOfRequestedBroker(reconciler), "num current", countOfDeployedBroker(reconciler))
 
 	requested := compare.NewMapBuilder().Add(common.ToResourceList(reconciler.requestedResources)...).ResourceMap()
 
@@ -577,7 +577,7 @@ func (reconciler *BrokerReconcilerImpl) ProcessResources(customResource *v1beta2
 			// not all types will have deltas
 			continue
 		}
-		reqLogger.V(1).Info("", "instances of ", resourceType, "Will create ", len(delta.Added), "update ", len(delta.Updated), "and delete", len(delta.Removed))
+		reconciler.log.V(1).Info("", "instances of ", resourceType, "Will create ", len(delta.Added), "update ", len(delta.Updated), "and delete", len(delta.Removed))
 
 		for index := range delta.Added {
 			resourceToAdd := delta.Added[index]
@@ -1833,7 +1833,7 @@ func (reconciler *BrokerReconcilerImpl) ProcessBrokerStatus(cr *v1beta2.Broker, 
 }
 
 func AssertBrokersAvailableForBroker(cr *v1beta2.Broker) ArtemisError {
-	reqLogger := ctrl.Log.WithValues("ActiveMQArtemis Name", cr.Name)
+	reqLogger := withCRContext(ctrl.Log, cr.Name, cr.Namespace)
 
 	// pre-condition, we must be deployed, avoid broker status roundtrip till ready
 	DeployedCondition := meta.FindStatusCondition(cr.Status.Conditions, v1beta2.DeployedConditionType)
@@ -1845,7 +1845,7 @@ func AssertBrokersAvailableForBroker(cr *v1beta2.Broker) ArtemisError {
 }
 
 func (reconciler *BrokerReconcilerImpl) AssertBrokerPropertiesStatus(cr *v1beta2.Broker, client rtclient.Client, scheme *runtime.Scheme) ArtemisError {
-	reqLogger := ctrl.Log.WithValues("ActiveMQArtemis Name", cr.Name)
+	reqLogger := reconciler.log
 
 	secretProjection, err := reconciler.getSecretProjection(getPropertiesResourceNsNameForBroker(cr), client)
 	if err != nil {
@@ -1884,7 +1884,7 @@ func (reconciler *BrokerReconcilerImpl) AssertBrokerPropertiesStatus(cr *v1beta2
 }
 
 func (reconciler *BrokerReconcilerImpl) AssertJaasPropertiesStatus(cr *v1beta2.Broker, client rtclient.Client, scheme *runtime.Scheme) ArtemisError {
-	reqLogger := ctrl.Log.WithValues("ActiveMQArtemis Name", cr.Name)
+	reqLogger := reconciler.log
 
 	Projection, err := reconciler.getConfigMappedJaasProperties(cr, client)
 	if err != nil {
@@ -1905,7 +1905,7 @@ func (reconciler *BrokerReconcilerImpl) AssertJaasPropertiesStatus(cr *v1beta2.B
 }
 
 func (reconciler *BrokerReconcilerImpl) AssertBrokerImageVersion(cr *v1beta2.Broker, client rtclient.Client) ArtemisError {
-	reqLogger := ctrl.Log.WithValues("ActiveMQArtemis Name", cr.Name)
+	reqLogger := reconciler.log
 
 	// The ResolveBrokerVersionFromCR should never fail because validation succeeded
 	resolvedFullVersion, _ := brokerversion.ResolveBrokerVersionFromCR(cr)
@@ -1995,7 +1995,7 @@ func (reconciler *BrokerReconcilerImpl) resolveJolokiaEndpoints(cr *v1beta2.Brok
 }
 
 func (reconciler *BrokerReconcilerImpl) checkProjectionStatus(cr *v1beta2.Broker, client rtclient.Client, secretProjection *projection, extractStatus func(BrokerStatus *brokerStatus, FileName string) (propertiesStatus, bool)) ArtemisError {
-	reqLogger := ctrl.Log.WithValues("ActiveMQArtemis Name", cr.Name)
+	reqLogger := reconciler.log
 
 	reqLogger.V(2).Info("in sync check", "projection", secretProjection)
 
