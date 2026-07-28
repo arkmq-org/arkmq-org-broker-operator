@@ -93,7 +93,7 @@ func TestPodLabels_StandardKubernetesLabels(t *testing.T) {
 	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
 	assert.NoError(t, err)
 
-	labels := broker.Spec.DeploymentPlan.Labels
+	labels := broker.Spec.Labels
 	assert.Equal(t, svcName, labels[common.LabelAppKubernetesInstance])
 	assert.Equal(t, "broker-service", labels[common.LabelAppKubernetesComponent])
 	assert.Equal(t, "arkmq-org-broker-operator", labels[common.LabelAppKubernetesManagedBy])

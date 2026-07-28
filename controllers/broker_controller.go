@@ -185,8 +185,7 @@ func (r *BrokerReconciler) UpdateBrokerCRStatus(desired *v1beta2.Broker, client 
 }
 
 func EqualBrokerCRStatus(s1, s2 *v1beta2.BrokerStatus) bool {
-	if s1.DeploymentPlanSize != s2.DeploymentPlanSize ||
-		s1.ScaleLabelSelector != s2.ScaleLabelSelector ||
+	if s1.ScaleLabelSelector != s2.ScaleLabelSelector ||
 		!reflect.DeepEqual(s1.Version, s2.Version) ||
 		len(s2.ExternalConfigs) != len(s1.ExternalConfigs) ||
 		brokerExternalConfigsModified(s2.ExternalConfigs, s1.ExternalConfigs) ||
@@ -273,7 +272,11 @@ func (reconciler *BrokerReconcilerImpl) Process(customResource *v1beta2.Broker, 
 		return fmt.Errorf("failed to process stateful set, %w", err)
 	}
 
-	reconciler.ProcessDeploymentPlan(customResource, namer, client, scheme, desiredStatefulSet)
+	requestedReplicas := common.DefaultDeploymentSize
+	desiredStatefulSet.Spec.Replicas = &requestedReplicas
+	if customResource.Spec.PodDisruptionBudget != nil {
+		reconciler.applyPodDisruptionBudget(customResource)
+	}
 
 	// mods to env var values sourced from secrets are not detected by process resources
 	// track updates in trigger env var that has a total checksum
@@ -290,7 +293,7 @@ func (reconciler *BrokerReconcilerImpl) Process(customResource *v1beta2.Broker, 
 
 	reconciler.log.V(1).Info("Reconciler Processing... complete", "CRD ver:", customResource.ResourceVersion, "CRD Gen:", customResource.Generation)
 
-	// we dont't requeue
+	// we don't requeue
 	return err
 }
 
@@ -345,24 +348,10 @@ func (reconciler *BrokerReconcilerImpl) ProcessStatefulSet(customResource *v1bet
 	headlessServiceDefinition = svc.NewHeadlessServiceForCR2(client, headlesServiceName, ssNamespacedName.Namespace, serviceports.GetDefaultPorts(true), labels, headlessServiceDefinition)
 	reconciler.trackDesired(headlessServiceDefinition)
 
-	if customResource.Spec.DeploymentPlan.RevisionHistoryLimit != nil {
-		currentStatefulSet.Spec.RevisionHistoryLimit = customResource.Spec.DeploymentPlan.RevisionHistoryLimit
+	if customResource.Spec.RevisionHistoryLimit != nil {
+		currentStatefulSet.Spec.RevisionHistoryLimit = customResource.Spec.RevisionHistoryLimit
 	}
 	return currentStatefulSet, nil
-}
-
-func (reconciler *BrokerReconcilerImpl) ProcessDeploymentPlan(customResource *v1beta2.Broker, theNamer common.Namers, client rtclient.Client, scheme *runtime.Scheme, currentStatefulSet *appsv1.StatefulSet) {
-
-	deploymentPlan := &customResource.Spec.DeploymentPlan
-
-	reconciler.log.V(2).Info("Processing deployment plan", "plan", deploymentPlan, "broker cr", customResource.Name)
-
-	reqestedReplicas := brokerstatus.GetDeploymentSize(customResource)
-	currentStatefulSet.Spec.Replicas = &reqestedReplicas
-
-	if customResource.Spec.DeploymentPlan.PodDisruptionBudget != nil {
-		reconciler.applyPodDisruptionBudget(customResource)
-	}
 }
 
 func (reconciler *BrokerReconcilerImpl) applyPodDisruptionBudget(customResource *v1beta2.Broker) {
@@ -384,7 +373,7 @@ func (reconciler *BrokerReconcilerImpl) applyPodDisruptionBudget(customResource 
 			},
 		}
 	}
-	desired.Spec = *customResource.Spec.DeploymentPlan.PodDisruptionBudget.DeepCopy()
+	desired.Spec = *customResource.Spec.PodDisruptionBudget.DeepCopy()
 	matchLabels := map[string]string{customResource.Kind: customResource.Name}
 
 	desired.Spec.Selector = &metav1.LabelSelector{
@@ -533,7 +522,7 @@ func (reconciler *BrokerReconcilerImpl) CurrentDeployedResources(customResource 
 	reqLogger := reconciler.log.WithValues("ActiveMQArtemis Name", customResource.Name)
 
 	var err error
-	if customResource.Spec.DeploymentPlan.PersistenceEnabled {
+	if customResource.Spec.PersistenceEnabled {
 		reconciler.checkExistingPersistentVolumes(customResource, client)
 	}
 
@@ -773,7 +762,7 @@ func (reconciler *BrokerReconcilerImpl) checkExistingPersistentVolumes(instance 
 func (reconciler *BrokerReconcilerImpl) MakeVolumes(customResource *v1beta2.Broker, namer common.Namers) ([]corev1.Volume, error) {
 
 	volumeDefinitions := []corev1.Volume{}
-	if customResource.Spec.DeploymentPlan.PersistenceEnabled {
+	if customResource.Spec.PersistenceEnabled {
 		basicCRVolume := volumes.MakePersistentVolume(customResource.Name)
 		volumeDefinitions = append(volumeDefinitions, basicCRVolume...)
 	} else {
@@ -781,9 +770,9 @@ func (reconciler *BrokerReconcilerImpl) MakeVolumes(customResource *v1beta2.Brok
 		volumeDefinitions = append(volumeDefinitions, emptyDirData)
 	}
 
-	volumeDefinitions = append(volumeDefinitions, customResource.Spec.DeploymentPlan.ExtraVolumes...)
+	volumeDefinitions = append(volumeDefinitions, customResource.Spec.ExtraVolumes...)
 
-	for _, epvc := range customResource.Spec.DeploymentPlan.ExtraVolumeClaimTemplates {
+	for _, epvc := range customResource.Spec.ExtraVolumeClaimTemplates {
 		epvcVolume := volumes.MakePersistentVolume(epvc.Name)
 		volumeDefinitions = append(volumeDefinitions, epvcVolume...)
 	}
@@ -796,10 +785,10 @@ func (reconciler *BrokerReconcilerImpl) MakeVolumes(customResource *v1beta2.Brok
 func MakeExtraVolumeMountsForBroker(customResource *v1beta2.Broker) []corev1.VolumeMount {
 	volumeMounts := []corev1.VolumeMount{}
 
-	for _, volume := range customResource.Spec.DeploymentPlan.ExtraVolumes {
+	for _, volume := range customResource.Spec.ExtraVolumes {
 		var volumeMount corev1.VolumeMount
 		found := false
-		for _, vm := range customResource.Spec.DeploymentPlan.ExtraVolumeMounts {
+		for _, vm := range customResource.Spec.ExtraVolumeMounts {
 			if vm.Name == volume.Name {
 				volumeMount = vm
 				if volumeMount.MountPath == "" {
@@ -815,10 +804,10 @@ func MakeExtraVolumeMountsForBroker(customResource *v1beta2.Broker) []corev1.Vol
 		volumeMounts = append(volumeMounts, volumeMount)
 	}
 
-	for _, epvc := range customResource.Spec.DeploymentPlan.ExtraVolumeClaimTemplates {
+	for _, epvc := range customResource.Spec.ExtraVolumeClaimTemplates {
 		var vMount corev1.VolumeMount
 		found := false
-		for _, mount := range customResource.Spec.DeploymentPlan.ExtraVolumeMounts {
+		for _, mount := range customResource.Spec.ExtraVolumeMounts {
 			if epvc.Name == mount.Name {
 				vMount = mount
 				found = true
@@ -852,14 +841,12 @@ func getDataMountPathForBroker() string {
 }
 func MakeContainerPortsForBroker(cr *v1beta2.Broker) []corev1.ContainerPort {
 
-	containerPorts := []corev1.ContainerPort{}
-	if cr.Spec.DeploymentPlan.JolokiaAgentEnabled {
-		jolokiaContainerPort := corev1.ContainerPort{
+	containerPorts := []corev1.ContainerPort{
+		{
 			Name:          "jolokia",
 			ContainerPort: 8778,
 			Protocol:      "TCP",
-		}
-		containerPorts = append(containerPorts, jolokiaContainerPort)
+		},
 	}
 	consoleContainerPort := corev1.ContainerPort{
 		Name:          "wconsj",
@@ -888,20 +875,20 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	// note: work with a clone of the default labels to not modify defaults
 	labels := make(map[string]string)
 	maps.Copy(labels, namer.LabelBuilder.Labels())
-	if customResource.Spec.DeploymentPlan.Labels != nil {
-		maps.Copy(labels, customResource.Spec.DeploymentPlan.Labels)
+	if customResource.Spec.Labels != nil {
+		maps.Copy(labels, customResource.Spec.Labels)
 	}
 
-	pts := pods.MakePodTemplateSpec(current, namespacedName, labels, customResource.Spec.DeploymentPlan.Annotations)
+	pts := pods.MakePodTemplateSpec(current, namespacedName, labels, customResource.Spec.Annotations)
 	podSpec := &pts.Spec
 
-	podSpec.ImagePullSecrets = customResource.Spec.DeploymentPlan.ImagePullSecrets
+	podSpec.ImagePullSecrets = customResource.Spec.ImagePullSecrets
 
 	container := containers.MakeContainer(podSpec, customResource.Name, brokerversion.ResolveImage(customResource, common.BrokerImageKey), MakeEnvVarArrayForCRForBroker(customResource, namer))
 
-	container.Resources = customResource.Spec.DeploymentPlan.Resources
+	container.Resources = customResource.Spec.Resources
 
-	reconciler.configureContianerSecurityContext(container, customResource.Spec.DeploymentPlan.ContainerSecurityContext)
+	reconciler.configureContainerSecurityContext(container, customResource.Spec.ContainerSecurityContext)
 
 	container.TerminationMessagePolicy = corev1.TerminationMessageFallbackToLogsOnError
 
@@ -911,10 +898,10 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		container.Ports = containerPorts
 	}
 
-	reqLogger.V(2).Info("Checking out extraMounts", "extra config", customResource.Spec.DeploymentPlan.ExtraMounts)
+	reqLogger.V(2).Info("Checking out extraMounts", "extra config", customResource.Spec.ExtraMounts)
 
-	configMapsToMount := customResource.Spec.DeploymentPlan.ExtraMounts.ConfigMaps
-	secretsToMount := customResource.Spec.DeploymentPlan.ExtraMounts.Secrets
+	configMapsToMount := customResource.Spec.ExtraMounts.ConfigMaps
+	secretsToMount := customResource.Spec.ExtraMounts.Secrets
 	brokerPropertiesResourceName, isSecret, brokerPropertiesMapData, serr := reconciler.addResourceForBrokerProperties(customResource, namer)
 	if serr != nil {
 		return nil, serr
@@ -1134,7 +1121,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		// jvm options
 		additionalSystemProps = append(additionalSystemProps, "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:AutoBoxCacheMax=20000 -XX:+PrintClassHistogram -XX:+UseG1GC -XX:+UseStringDeduplication -Djava.net.preferIPv4Stack=true")
 
-		if customResource.Spec.DeploymentPlan.LivenessProbe == nil {
+		if customResource.Spec.LivenessProbe == nil {
 			container.LivenessProbe = &corev1.Probe{
 				ProbeHandler: corev1.ProbeHandler{
 					Exec: &corev1.ExecAction{
@@ -1155,7 +1142,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 			}
 		} else {
 			// use the value from the CR
-			container.LivenessProbe = reconciler.configureLivenessProbe(container, customResource.Spec.DeploymentPlan.LivenessProbe)
+			container.LivenessProbe = reconciler.configureLivenessProbe(container, customResource.Spec.LivenessProbe)
 		}
 	}
 	extraVolumes, extraVolumeMounts, err := reconciler.createExtraConfigmapsAndSecretsVolumeMounts(configMapsToMount, secretsToMount, brokerPropertiesResourceName, brokerPropertiesMapData, client)
@@ -1174,19 +1161,19 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		container.VolumeMounts = append(container.VolumeMounts, extraVolumeMounts...)
 	}
 
-	container.StartupProbe = reconciler.configureStartupProbe(container, customResource.Spec.DeploymentPlan.StartupProbe)
-	container.ReadinessProbe = reconciler.configureReadinessProbe(container, customResource.Spec.DeploymentPlan.ReadinessProbe)
+	container.StartupProbe = reconciler.configureStartupProbe(container, customResource.Spec.StartupProbe)
+	container.ReadinessProbe = reconciler.configureReadinessProbe(container, customResource.Spec.ReadinessProbe)
 
-	if len(customResource.Spec.DeploymentPlan.NodeSelector) > 0 {
-		reqLogger.V(1).Info("Adding Node Selectors", "len", len(customResource.Spec.DeploymentPlan.NodeSelector))
-		podSpec.NodeSelector = customResource.Spec.DeploymentPlan.NodeSelector
+	if len(customResource.Spec.NodeSelector) > 0 {
+		reqLogger.V(1).Info("Adding Node Selectors", "len", len(customResource.Spec.NodeSelector))
+		podSpec.NodeSelector = customResource.Spec.NodeSelector
 	}
 
-	reconciler.configureAffinity(podSpec, &customResource.Spec.DeploymentPlan.Affinity)
+	reconciler.configureAffinity(podSpec, &customResource.Spec.Affinity)
 
-	if len(customResource.Spec.DeploymentPlan.Tolerations) > 0 {
-		reqLogger.V(1).Info("Adding Tolerations", "len", len(customResource.Spec.DeploymentPlan.Tolerations))
-		podSpec.Tolerations = customResource.Spec.DeploymentPlan.Tolerations
+	if len(customResource.Spec.Tolerations) > 0 {
+		reqLogger.V(1).Info("Adding Tolerations", "len", len(customResource.Spec.Tolerations))
+		podSpec.Tolerations = customResource.Spec.Tolerations
 	}
 
 	newContainersArray := []corev1.Container{}
@@ -1240,7 +1227,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	}
 
 	// add TopologySpreadConstraints config
-	podSpec.TopologySpreadConstraints = customResource.Spec.DeploymentPlan.TopologySpreadConstraints
+	podSpec.TopologySpreadConstraints = customResource.Spec.TopologySpreadConstraints
 
 	compactVersionToUse, verr := brokerversion.DetermineCompactVersionToUse(customResource)
 	if verr != nil {
@@ -1261,8 +1248,8 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	}
 	environments.CreateOrAppend(podSpec.Containers, &jdkJavaOpts)
 
-	reconciler.configPodSecurity(podSpec, &customResource.Spec.DeploymentPlan.PodSecurity)
-	reconciler.configurePodSecurityContext(podSpec, customResource.Spec.DeploymentPlan.PodSecurityContext)
+	reconciler.configPodSecurity(podSpec, &customResource.Spec.PodSecurity)
+	reconciler.configurePodSecurityContext(podSpec, customResource.Spec.PodSecurityContext)
 
 	pts.Spec = *podSpec
 	pts.Spec.InitContainers = nil
@@ -1297,7 +1284,7 @@ func (reconciler *BrokerReconcilerImpl) brokerPropertiesConfigSystemPropValue(mo
 		result = fmt.Sprintf("-Dbroker.properties=%s%s/,%s%s/%s${STATEFUL_SET_ORDINAL}/", mountPoint, resourceName, mountPoint, resourceName, OrdinalPrefix)
 	}
 
-	for _, extraSecretName := range reconciler.customResource.Spec.DeploymentPlan.ExtraMounts.Secrets {
+	for _, extraSecretName := range reconciler.customResource.Spec.ExtraMounts.Secrets {
 		if strings.HasSuffix(extraSecretName, common.BrokerPropsSuffix) {
 			result = fmt.Sprintf("%s,%s%s/,%s%s/%s${STATEFUL_SET_ORDINAL}/", result, common.SecretPathBase, extraSecretName, common.SecretPathBase, extraSecretName, OrdinalPrefix)
 		}
@@ -1321,12 +1308,12 @@ func getLoggingConfigExtraMountPathForBroker(customResource *v1beta2.Broker) (st
 }
 
 func getConfigExtraMountForBroker(customResource *v1beta2.Broker, suffix string) (string, string, bool) {
-	for _, cm := range customResource.Spec.DeploymentPlan.ExtraMounts.ConfigMaps {
+	for _, cm := range customResource.Spec.ExtraMounts.ConfigMaps {
 		if strings.HasSuffix(cm, suffix) {
 			return "configmaps", cm, true
 		}
 	}
-	for _, s := range customResource.Spec.DeploymentPlan.ExtraMounts.Secrets {
+	for _, s := range customResource.Spec.ExtraMounts.Secrets {
 		if strings.HasSuffix(s, suffix) {
 			return "secrets", s, true
 		}
@@ -1545,7 +1532,7 @@ func (reconciler *BrokerReconcilerImpl) configurePodSecurityContext(podSpec *cor
 	}
 }
 
-func (reconciler *BrokerReconcilerImpl) configureContianerSecurityContext(container *corev1.Container, containerSecurityContext *corev1.SecurityContext) {
+func (reconciler *BrokerReconcilerImpl) configureContainerSecurityContext(container *corev1.Container, containerSecurityContext *corev1.SecurityContext) {
 	reconciler.log.V(1).Info("Configuring Container SecurityContext")
 
 	if nil != containerSecurityContext {
@@ -1680,7 +1667,7 @@ func (reconciler *BrokerReconcilerImpl) StatefulSetForCR(customResource *v1beta2
 		Name:      customResource.Name,
 		Namespace: customResource.Namespace,
 	}
-	replicas := brokerstatus.GetDeploymentSize(customResource)
+	replicas := common.DefaultDeploymentSize
 	currentStateFullSet = ss.MakeStatefulSet(currentStateFullSet, namer.SsNameBuilder.Name(), namer.SvcHeadlessNameBuilder.Name(), namespacedName, nil, namer.LabelBuilder.Labels(), &replicas)
 
 	podTemplateSpec, err := reconciler.PodTemplateSpecForCR(customResource, namer, currentStateFullSet, client)
@@ -1704,10 +1691,10 @@ func (reconciler *BrokerReconcilerImpl) PersistentVolumeClaimArrayForCR(customRe
 	var existing, current *corev1.PersistentVolumeClaim
 	pvcArray := make([]corev1.PersistentVolumeClaim, 0)
 
-	if customResource.Spec.DeploymentPlan.PersistenceEnabled {
+	if customResource.Spec.PersistenceEnabled {
 		capacity := "2Gi"
-		if customResource.Spec.DeploymentPlan.Storage.Size != "" {
-			capacity = customResource.Spec.DeploymentPlan.Storage.Size
+		if customResource.Spec.Storage.Size != "" {
+			capacity = customResource.Spec.Storage.Size
 		}
 
 		tempateClaim := &v1beta2.VolumeClaimTemplate{
@@ -1724,8 +1711,8 @@ func (reconciler *BrokerReconcilerImpl) PersistentVolumeClaimArrayForCR(customRe
 				},
 			},
 		}
-		if customResource.Spec.DeploymentPlan.Storage.StorageClassName != "" {
-			tempateClaim.Spec.StorageClassName = &customResource.Spec.DeploymentPlan.Storage.StorageClassName
+		if customResource.Spec.Storage.StorageClassName != "" {
+			tempateClaim.Spec.StorageClassName = &customResource.Spec.Storage.StorageClassName
 		}
 
 		existing = findExistingByName(spec.VolumeClaimTemplates, tempateClaim)
@@ -1733,7 +1720,7 @@ func (reconciler *BrokerReconcilerImpl) PersistentVolumeClaimArrayForCR(customRe
 		pvcArray = append(pvcArray, *current)
 	}
 
-	for _, epvc := range customResource.Spec.DeploymentPlan.ExtraVolumeClaimTemplates {
+	for _, epvc := range customResource.Spec.ExtraVolumeClaimTemplates {
 		existing = findExistingByName(spec.VolumeClaimTemplates, &epvc)
 		current = persistentvolumeclaims.PersistentVolumeClaim(customResource.Namespace, existing, &epvc)
 		pvcArray = append(pvcArray, *current)
@@ -1753,43 +1740,20 @@ func (reconciler *BrokerReconcilerImpl) PersistentVolumeClaimArrayForCR(customRe
 
 func MakeEnvVarArrayForCRForBroker(customResource *v1beta2.Broker, namer common.Namers) []corev1.EnvVar {
 
-	var requireLogin string
-	if customResource.Spec.DeploymentPlan.RequireLogin {
-		requireLogin = "true"
-	} else {
-		requireLogin = "false"
-	}
-
-	var journalType string
-	if strings.ToLower(customResource.Spec.DeploymentPlan.JournalType) == "aio" {
-		journalType = "aio"
-	} else {
-		journalType = "nio"
-	}
-
-	var jolokiaAgentEnabled string
-	if customResource.Spec.DeploymentPlan.JolokiaAgentEnabled {
-		jolokiaAgentEnabled = "true"
-	} else {
-		jolokiaAgentEnabled = "false"
-	}
-
-	var managementRBACEnabled string
-	if customResource.Spec.DeploymentPlan.ManagementRBACEnabled {
-		managementRBACEnabled = "true"
-	} else {
-		managementRBACEnabled = "false"
-	}
+	const requireLogin = "false"
+	const journalType = "nio"
+	const jolokiaAgentEnabled = "true"
+	const managementRBACEnabled = "true"
 
 	var metricsPluginEnabled string
-	if customResource.Spec.DeploymentPlan.EnableMetricsPlugin != nil {
-		metricsPluginEnabled = strconv.FormatBool(*customResource.Spec.DeploymentPlan.EnableMetricsPlugin)
+	if customResource.Spec.EnableMetricsPlugin != nil {
+		metricsPluginEnabled = strconv.FormatBool(*customResource.Spec.EnableMetricsPlugin)
 	}
 
 	envVar := []corev1.EnvVar{}
 	envVarArrayForBasic := environments.AddEnvVarForBasic(requireLogin, journalType, namer.SvcPingNameBuilder.Name())
 	envVar = append(envVar, envVarArrayForBasic...)
-	if customResource.Spec.DeploymentPlan.PersistenceEnabled {
+	if customResource.Spec.PersistenceEnabled {
 		envVarArrayForPresistent := environments.AddEnvVarForPersistent(customResource.Name)
 		envVar = append(envVar, envVarArrayForPresistent...)
 	}
@@ -1895,7 +1859,7 @@ func (reconciler *BrokerReconcilerImpl) AssertBrokerPropertiesStatus(cr *v1beta2
 	})
 
 	if errorStatus == nil {
-		for _, extraSecretName := range cr.Spec.DeploymentPlan.ExtraMounts.Secrets {
+		for _, extraSecretName := range cr.Spec.ExtraMounts.Secrets {
 			if strings.HasSuffix(extraSecretName, common.BrokerPropsSuffix) {
 				secretProjection, err = reconciler.getSecretProjection(types.NamespacedName{Name: extraSecretName, Namespace: cr.Namespace}, client)
 				if err != nil {
@@ -2173,7 +2137,7 @@ func (reconciler *BrokerReconcilerImpl) validate(customResource *v1beta2.Broker,
 		validationCondition = *condition
 	}
 
-	if validationCondition.Status != metav1.ConditionFalse && customResource.Spec.DeploymentPlan.PodDisruptionBudget != nil {
+	if validationCondition.Status != metav1.ConditionFalse && customResource.Spec.PodDisruptionBudget != nil {
 		condition := validatePodDisruptionForBroker(customResource)
 		if condition != nil {
 			validationCondition = *condition
@@ -2242,14 +2206,14 @@ func validateNoDupKeysInBrokerPropertiesForBroker(customResource *v1beta2.Broker
 }
 
 func validateReservedLabelsForBroker(customResource *v1beta2.Broker) *metav1.Condition {
-	if customResource.Spec.DeploymentPlan.Labels != nil {
-		for key := range customResource.Spec.DeploymentPlan.Labels {
+	if customResource.Spec.Labels != nil {
+		for key := range customResource.Spec.Labels {
 			if key == selectors.LabelAppKey || key == selectors.LabelResourceKey {
 				return &metav1.Condition{
 					Type:    v1beta2.ValidConditionType,
 					Status:  metav1.ConditionFalse,
 					Reason:  v1beta2.ValidConditionFailedReservedLabelReason,
-					Message: fmt.Sprintf("'%s' is a reserved label, it is not allowed in Spec.DeploymentPlan.Labels", key),
+					Message: fmt.Sprintf("'%s' is a reserved label, it is not allowed in Spec.Labels", key),
 				}
 			}
 		}
@@ -2261,7 +2225,7 @@ func validateReservedLabelsForBroker(customResource *v1beta2.Broker) *metav1.Con
 					Type:    v1beta2.ValidConditionType,
 					Status:  metav1.ConditionFalse,
 					Reason:  v1beta2.ValidConditionFailedReservedLabelReason,
-					Message: fmt.Sprintf("'%s' is a reserved label, it is not allowed in Spec.DeploymentPlan.Templates[%d].Labels", key, index),
+					Message: fmt.Sprintf("'%s' is a reserved label, it is not allowed in Spec.ResourceTemplates[%d].Labels", key, index),
 				}
 			}
 		}
@@ -2330,15 +2294,15 @@ func (reconciler *BrokerReconcilerImpl) validateRequiredSecrets(client rtclient.
 
 func (reconciler *BrokerReconcilerImpl) validateStorage() (*metav1.Condition, bool) {
 
-	if reconciler.customResource.Spec.DeploymentPlan.PersistenceEnabled {
-		if reconciler.customResource.Spec.DeploymentPlan.Storage.Size != "" {
-			_, err := resource.ParseQuantity(reconciler.customResource.Spec.DeploymentPlan.Storage.Size)
+	if reconciler.customResource.Spec.PersistenceEnabled {
+		if reconciler.customResource.Spec.Storage.Size != "" {
+			_, err := resource.ParseQuantity(reconciler.customResource.Spec.Storage.Size)
 			if err != nil {
 				return &metav1.Condition{
 					Type:    v1beta2.ValidConditionType,
 					Status:  metav1.ConditionFalse,
 					Reason:  v1beta2.ValidConditionFailureReason,
-					Message: fmt.Sprintf(".Spec.DeploymentPlan.Storage.Size quantity string is invalid, %v", err),
+					Message: fmt.Sprintf(".Spec.Storage.Size quantity string is invalid, %v", err),
 				}, false
 			}
 		}
@@ -2347,7 +2311,7 @@ func (reconciler *BrokerReconcilerImpl) validateStorage() (*metav1.Condition, bo
 }
 
 func validatePodDisruptionForBroker(customResource *v1beta2.Broker) *metav1.Condition {
-	pdb := customResource.Spec.DeploymentPlan.PodDisruptionBudget
+	pdb := customResource.Spec.PodDisruptionBudget
 	if pdb.Selector != nil {
 		return &metav1.Condition{
 			Type:    v1beta2.ValidConditionType,
@@ -2364,8 +2328,8 @@ func validateExtraMountsForBroker(customResource *v1beta2.Broker, client rtclien
 	instanceCounts := map[string]int{}
 	var Condition *metav1.Condition
 	var retry = true
-	var ContextMessage = ".Spec.DeploymentPlan.ExtraMounts.ConfigMaps,"
-	for _, cm := range customResource.Spec.DeploymentPlan.ExtraMounts.ConfigMaps {
+	var ContextMessage = ".Spec.ExtraMounts.ConfigMaps,"
+	for _, cm := range customResource.Spec.ExtraMounts.ConfigMaps {
 		configMap := corev1.ConfigMap{}
 		found := retrieveResource(cm, customResource.Namespace, &configMap, client)
 		if !found {
@@ -2393,8 +2357,8 @@ func validateExtraMountsForBroker(customResource *v1beta2.Broker, client rtclien
 		}
 	}
 
-	ContextMessage = ".Spec.DeploymentPlan.ExtraMounts.Secrets,"
-	for _, s := range customResource.Spec.DeploymentPlan.ExtraMounts.Secrets {
+	ContextMessage = ".Spec.ExtraMounts.Secrets,"
+	for _, s := range customResource.Spec.ExtraMounts.Secrets {
 		secret := corev1.Secret{}
 		found := retrieveResource(s, customResource.Namespace, &secret, client)
 		if !found {
@@ -2433,10 +2397,10 @@ func hasExtraMountsForBroker(cr *v1beta2.Broker) bool {
 	if cr == nil {
 		return false
 	}
-	if len(cr.Spec.DeploymentPlan.ExtraMounts.ConfigMaps) > 0 {
+	if len(cr.Spec.ExtraMounts.ConfigMaps) > 0 {
 		return true
 	}
-	return len(cr.Spec.DeploymentPlan.ExtraMounts.Secrets) > 0
+	return len(cr.Spec.ExtraMounts.Secrets) > 0
 }
 
 func MakeNamersForBroker(customResource *v1beta2.Broker) *common.Namers {

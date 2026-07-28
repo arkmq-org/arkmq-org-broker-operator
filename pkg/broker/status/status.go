@@ -38,7 +38,7 @@ func ProcessStatus(cr *v1beta2.Broker, client rtclient.Client, namespacedName ty
 
 	updateScaleStatus(cr, namer)
 
-	cr.Status.PodStatus = updatePodStatus(cr, client, namespacedName)
+	cr.Status.PodStatus = updatePodStatus(client, namespacedName)
 
 	reqLogger.V(1).Info("PodStatus current", "info:", cr.Status.PodStatus)
 
@@ -67,10 +67,11 @@ func UpdateBlockedStatus(cr *v1beta2.Broker, blocked bool) {
 
 func updateVersionStatus(cr *v1beta2.Broker) {
 	cr.Status.Version.Image = brokerversion.ResolveImage(cr, common.BrokerImageKey)
-	cr.Status.Version.InitImage = brokerversion.ResolveImage(cr, common.InitImageKey)
+	// Broker has no InitImage (no init containers in restricted mode)
+	cr.Status.Version.InitImage = ""
 	cr.Status.Version.BrokerVersion, _ = brokerversion.ResolveBrokerVersionFromCR(cr)
 
-	if brokerversion.IsLockedDown(cr.Spec.DeploymentPlan.Image) || brokerversion.IsLockedDown(cr.Spec.DeploymentPlan.InitImage) {
+	if brokerversion.IsLockedDown(cr.Spec.Image) {
 		cr.Status.Upgrade.SecurityUpdates = false
 		cr.Status.Upgrade.MajorUpdates = false
 		cr.Status.Upgrade.MinorUpdates = false
@@ -101,18 +102,18 @@ func updateVersionStatus(cr *v1beta2.Broker) {
 }
 
 func updateScaleStatus(cr *v1beta2.Broker, n common.Namers) {
-	labels := make([]string, 0, len(n.LabelBuilder.Labels())+len(cr.Spec.DeploymentPlan.Labels))
+	labels := make([]string, 0, len(n.LabelBuilder.Labels())+len(cr.Spec.Labels))
 	for k, v := range n.LabelBuilder.Labels() {
 		labels = append(labels, fmt.Sprintf("%s=%s", k, v))
 	}
-	for k, v := range cr.Spec.DeploymentPlan.Labels {
+	for k, v := range cr.Spec.Labels {
 		labels = append(labels, fmt.Sprintf("%s=%s", k, v))
 	}
 	sort.Strings(labels)
 	cr.Status.ScaleLabelSelector = strings.Join(labels[:], ",")
 }
 
-func updatePodStatus(cr *v1beta2.Broker, client rtclient.Client, namespacedName types.NamespacedName) olm.DeploymentStatus {
+func updatePodStatus(client rtclient.Client, namespacedName types.NamespacedName) olm.DeploymentStatus {
 	reqLogger := ctrl.Log.WithName("util_update_pod_status").WithValues("ActiveMQArtemis Name", namespacedName.Name)
 	reqLogger.V(1).Info("Getting status for pods")
 
@@ -130,7 +131,6 @@ func updatePodStatus(cr *v1beta2.Broker, client rtclient.Client, namespacedName 
 	sfsFound := &appsv1.StatefulSet{}
 	err := client.Get(context.TODO(), ssNamespacedName, sfsFound)
 	if err == nil {
-		cr.Status.DeploymentPlanSize = 1
 		podName := fmt.Sprintf("%s-0", sfsFound.Name)
 		if sfsFound.Status.ReadyReplicas == 0 {
 			status = olm.DeploymentStatus{Starting: []string{podName}}
@@ -179,15 +179,6 @@ func getDeploymentCondition(cr *v1beta2.Broker, client rtclient.Client, valid bo
 		}
 	}
 
-	deploymentSize := GetDeploymentSize(cr)
-	if deploymentSize == 0 {
-		return metav1.Condition{
-			Type:    v1beta2.DeployedConditionType,
-			Status:  metav1.ConditionFalse,
-			Reason:  v1beta2.DeployedConditionZeroSizeReason,
-			Message: common.DeployedConditionZeroSizeMessage,
-		}
-	}
 	if len(cr.Status.PodStatus.Ready) == 0 {
 		crDeployedCondition := metav1.Condition{
 			Type:    v1beta2.DeployedConditionType,
@@ -243,10 +234,6 @@ func podStartingStatusDigestMessage(podName string, status corev1.PodStatus) str
 	}
 	fmt.Fprintf(buf, "}")
 	return buf.String()
-}
-
-func GetDeploymentSize(cr *v1beta2.Broker) int32 {
-	return common.DefaultDeploymentSize
 }
 
 func GetDeployedResources(instance *v1beta2.Broker, client rtclient.Client, onOpenShift bool) (map[reflect.Type][]rtclient.Object, error) {

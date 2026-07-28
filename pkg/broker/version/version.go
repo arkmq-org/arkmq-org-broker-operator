@@ -71,16 +71,12 @@ func determineImageToUse(customResource *v1beta2.Broker, imageTypeKey string) st
 }
 
 func ResolveImage(customResource *v1beta2.Broker, key string) string {
-	var imageName string
-
-	if key == common.InitImageKey && IsLockedDown(customResource.Spec.DeploymentPlan.InitImage) {
-		imageName = customResource.Spec.DeploymentPlan.InitImage
-	} else if key == common.BrokerImageKey && IsLockedDown(customResource.Spec.DeploymentPlan.Image) {
-		imageName = customResource.Spec.DeploymentPlan.Image
-	} else {
-		imageName = determineImageToUse(customResource, key)
+	// Broker has no InitImage (no init containers in restricted mode).
+	// Only the broker image can be locked down via Spec.Image.
+	if key == common.BrokerImageKey && IsLockedDown(customResource.Spec.Image) {
+		return customResource.Spec.Image
 	}
-	return imageName
+	return determineImageToUse(customResource, key)
 }
 
 func IsLockedDown(imageAttribute string) bool {
@@ -98,7 +94,7 @@ func ValidateBrokerImageVersion(customResource *v1beta2.Broker) *metav1.Conditio
 		}
 	}
 
-	if IsLockedDown(customResource.Spec.DeploymentPlan.Image) {
+	if IsLockedDown(customResource.Spec.Image) {
 		if customResource.Spec.Version != "" {
 			if !version.IsSupportedActiveMQArtemisVersion(customResource.Spec.Version) {
 				return &metav1.Condition{

@@ -1097,11 +1097,16 @@ spec:
         name: ""
         version: apps/v1
       specDescriptors:
-      - description: Specifies the deployment plan
-        displayName: Deployment Plan
-        path: deploymentPlan
+      - description: The broker container image. Overrides the operator-managed image.
+        displayName: Image
+        path: image
         x-descriptors:
         - urn:alm:descriptor:com.tectonic.ui:text
+      - description: If true, use a persistent volume via PVC for journal storage.
+        displayName: Persistence Enabled
+        path: persistenceEnabled
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
       - description: Optional list of key=value properties that are applied to the
           broker configuration bean.
         displayName: Broker Properties
@@ -1131,8 +1136,6 @@ spec:
         path: podStatus
         x-descriptors:
         - urn:alm:descriptor:com.tectonic.ui:podStatuses
-      - displayName: Deployment Plan Size
-        path: deploymentPlanSize
       - displayName: Auto scale label selector
         path: scaleLabelSelector
       - displayName: External Configurations Status

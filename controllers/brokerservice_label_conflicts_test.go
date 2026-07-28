@@ -81,7 +81,7 @@ func TestLabelConflicts_NoReservedKeys(t *testing.T) {
 	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
 	assert.NoError(t, err)
 
-	labels := broker.Spec.DeploymentPlan.Labels
+	labels := broker.Spec.Labels
 
 	// Verify we don't use the reserved keys
 	_, hasBroker := labels["Broker"]
@@ -144,7 +144,7 @@ func TestLabelConflicts_ProperDomainPrefixes(t *testing.T) {
 	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
 	assert.NoError(t, err)
 
-	labels := broker.Spec.DeploymentPlan.Labels
+	labels := broker.Spec.Labels
 
 	validPrefixes := []string{
 		"app.kubernetes.io/",

@@ -3,11 +3,7 @@ kind: Broker
 metadata:
   name: ex-broker
 spec:
-  deploymentPlan:
-    image: placeholder
-    size: 1
-    persistenceEnabled: false
-    jolokiaAgentEnabled: false
-    managementRBACEnabled: true
+  image: placeholder
+  persistenceEnabled: false
 status:
   conditions: []

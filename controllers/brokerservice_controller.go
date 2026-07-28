@@ -180,8 +180,8 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 	} else {
 		desired = common.GenerateBroker(reconciler.instance.Name, reconciler.instance.Namespace)
 	}
-	desired.Spec.DeploymentPlan.PersistenceEnabled = false
-	desired.Spec.DeploymentPlan.Labels = map[string]string{
+	desired.Spec.PersistenceEnabled = false
+	desired.Spec.Labels = map[string]string{
 		// Standard Kubernetes labels
 		common.LabelAppKubernetesInstance:  reconciler.instance.Name,
 		common.LabelAppKubernetesComponent: "broker-service",
@@ -191,13 +191,13 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 		common.LabelBrokerPeerIndex: "0",
 	}
 	desired.Spec.Env = reconciler.instance.Spec.Env
-	desired.Spec.DeploymentPlan.Resources = reconciler.instance.Spec.Resources
+	desired.Spec.Resources = reconciler.instance.Spec.Resources
 
 	if reconciler.instance.Spec.Image != nil {
-		desired.Spec.DeploymentPlan.Image = *reconciler.instance.Spec.Image
+		desired.Spec.Image = *reconciler.instance.Spec.Image
 	}
 
-	desired.Spec.DeploymentPlan.ExtraMounts.Secrets = []string{
+	desired.Spec.ExtraMounts.Secrets = []string{
 		reconciler.appPropertiesSecretName(),
 	}
 
