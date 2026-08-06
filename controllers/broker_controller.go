@@ -12,6 +12,7 @@ import (
 	"sort"
 
 	"github.com/RHsyseng/operator-utils/pkg/resource/compare"
+	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	brokerstatus "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/broker/status"
 	brokerversion "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/broker/version"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokervolumes"
@@ -811,7 +812,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	additionalSystemProps := []string{}
 	{
 		mountPathRoot := common.SecretPathBase + getPropertiesResourceNsNameForBroker(customResource).Name
-		securityProperties := NewPropsWithHeader()
+		securityProperties := brokerproperties.NewPropsWithHeader()
 		fmt.Fprintf(securityProperties, "login.config.url.1=file:%s/login.config\n", mountPathRoot)
 		fmt.Fprintf(securityProperties, "security.provider.13=de.dentrassi.crypto.pem.PemKeyStoreProvider\n")
 		fmt.Fprintf(securityProperties, "fips.provider.8=de.dentrassi.crypto.pem.PemKeyStoreProvider\n")
@@ -820,7 +821,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 		additionalSystemProps = append(additionalSystemProps, fmt.Sprintf("-Djava.security.properties=%s/_security.config", mountPathRoot))
 
-		loginConfig := newBufferWithHeader("//")
+		loginConfig := brokerproperties.NewBufferWithHeader("//")
 		fmt.Fprintf(loginConfig, "%s {\n", common.HttpAuthenticatorRealm)
 		fmt.Fprintln(loginConfig, "  org.apache.activemq.artemis.spi.core.security.jaas.TextFileCertificateLoginModule required")
 		fmt.Fprintln(loginConfig, "   reload=true")
@@ -878,7 +879,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		// TODO - make configuable
 		// support <crNname->control-plane-auth-secret, maybe a suffix for the http_server_authenticator realm login.config
 
-		certUser := NewPropsWithHeader()
+		certUser := brokerproperties.NewPropsWithHeader()
 		fmt.Fprintln(certUser, "hawtio=/CN = hawtio-online\\.hawtio\\.svc.*/")
 		fmt.Fprintf(certUser, "operator=/.*%s.*/\n", operatorCertSubject.CommonName) // regexp syntax start and with /
 		// can and should use the full DN after https://issues.apache.org/jira/browse/ARTEMIS-5102
@@ -888,13 +889,13 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		}
 		brokerPropertiesMapData[common.GetCertUsersKey(common.HttpAuthenticatorRealm)] = certUser.Bytes()
 
-		certRoles := NewPropsWithHeader()
+		certRoles := brokerproperties.NewPropsWithHeader()
 		fmt.Fprintln(certRoles, "status=operator,probe")
 		fmt.Fprintln(certRoles, "metrics=operator,prometheus")
 		fmt.Fprintln(certRoles, "hawtio=hawtio")
 		brokerPropertiesMapData[common.GetCertRolesKey(common.HttpAuthenticatorRealm)] = certRoles.Bytes()
 
-		foundationalProps := NewPropsWithHeader()
+		foundationalProps := brokerproperties.NewPropsWithHeader()
 		fmt.Fprintf(foundationalProps, "name=%s\n", environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name))
 		fmt.Fprintln(foundationalProps, "criticalAnalyzer=false")
 		fmt.Fprintln(foundationalProps, "literalMatchMarkers=()")
@@ -911,7 +912,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 		brokerPropertiesMapData["aa_restricted.properties"] = foundationalProps.Bytes()
 
-		rbac := NewPropsWithHeader()
+		rbac := brokerproperties.NewPropsWithHeader()
 		// operator status check
 		fmt.Fprintln(rbac, "securityRoles.\"mops.broker.getStatus\".status.view=true")
 
@@ -928,7 +929,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		caSecret := common.GetOperatorCASecretName()
 		secretsToMount = append(secretsToMount, caSecret)
 
-		jolokiaConfig := NewPropsWithHeader()
+		jolokiaConfig := brokerproperties.NewPropsWithHeader()
 		fmt.Fprintln(jolokiaConfig, "protocol=https")
 		fmt.Fprintln(jolokiaConfig, "authClass=org.apache.activemq.artemis.spi.core.security.jaas.HttpServerAuthenticator")
 		fmt.Fprintf(jolokiaConfig, "caCert=%s%s/%s\n", common.SecretPathBase, caSecret, caSecretKey)
@@ -943,14 +944,14 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 		brokerPropertiesMapData["_jolokia.config"] = jolokiaConfig.Bytes()
 
-		pemCfg := NewPropsWithHeader()
+		pemCfg := brokerproperties.NewPropsWithHeader()
 
 		fmt.Fprintf(pemCfg, "alias=alias\n")
 		fmt.Fprintf(pemCfg, "source.cert=%s%s/tls.crt\n", common.SecretPathBase, operandCertSecretName)
 		fmt.Fprintf(pemCfg, "source.key=%s%s/tls.key\n", common.SecretPathBase, operandCertSecretName)
 		brokerPropertiesMapData["_cert.pemcfg"] = pemCfg.Bytes()
 
-		prometheusConfig := NewPropsWithHeader() // yaml
+		prometheusConfig := brokerproperties.NewPropsWithHeader() // yaml
 		fmt.Fprintf(prometheusConfig, "httpServer:\n")
 		fmt.Fprintf(prometheusConfig, "  authentication:\n")
 		fmt.Fprintf(prometheusConfig, "    plugin:\n")
@@ -1097,7 +1098,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	environments.Create(podSpec.Containers, &envBrokerCustomInstanceDir)
 
 	// JAAS Config
-	if jaasConfigPath, found := getJaasConfigExtraMountPathForBroker(customResource); found {
+	if jaasConfigPath, found := brokerproperties.GetJaasConfigExtraMountPath(customResource.Spec.ExtraMounts); found {
 		debugArgs := corev1.EnvVar{
 			Name:  getJaasConfigEnvVarNameForBroker(),
 			Value: fmt.Sprintf("-Djava.security.auth.login.config=%v", jaasConfigPath),
@@ -1105,7 +1106,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		environments.CreateOrAppend(podSpec.Containers, &debugArgs)
 	}
 
-	if loggingConfigPath, found := getLoggingConfigExtraMountPathForBroker(customResource); found {
+	if loggingConfigPath, found := brokerproperties.GetLoggingConfigExtraMountPath(customResource.Spec.ExtraMounts); found {
 		loggerOpts := corev1.EnvVar{
 			Name:  getLoginConfigEnvVarNameForBroker(),
 			Value: fmt.Sprintf("-Dlog4j2.configurationFile=%v", loggingConfigPath),
@@ -1184,34 +1185,6 @@ func (reconciler *BrokerReconcilerImpl) brokerPropertiesConfigSystemPropValue(mo
 	}
 
 	return result
-}
-
-func getJaasConfigExtraMountPathForBroker(customResource *v1beta2.Broker) (string, bool) {
-	if t, name, found := getConfigExtraMountForBroker(customResource, jaasConfigSuffix); found {
-		return fmt.Sprintf("/amq/extra/%v/%v/login.config", t, name), true
-	}
-	return "", false
-}
-
-func getLoggingConfigExtraMountPathForBroker(customResource *v1beta2.Broker) (string, bool) {
-	if t, name, found := getConfigExtraMountForBroker(customResource, loggingConfigSuffix); found {
-		return fmt.Sprintf("/amq/extra/%v/%v/logging.properties", t, name), true
-	}
-	return "", false
-}
-
-func getConfigExtraMountForBroker(customResource *v1beta2.Broker, suffix string) (string, string, bool) {
-	for _, cm := range customResource.Spec.ExtraMounts.ConfigMaps {
-		if strings.HasSuffix(cm, suffix) {
-			return "configmaps", cm, true
-		}
-	}
-	for _, s := range customResource.Spec.ExtraMounts.Secrets {
-		if strings.HasSuffix(s, suffix) {
-			return "secrets", s, true
-		}
-	}
-	return "", "", false
 }
 
 func (reconciler *BrokerReconcilerImpl) configureStartupProbe(container *corev1.Container, probeFromCr *corev1.Probe) *corev1.Probe {
@@ -1350,7 +1323,7 @@ func (reconciler *BrokerReconcilerImpl) addResourceForBrokerProperties(customRes
 	// fetch and do idempotent transform based on CR
 
 	// deal with upgrade to mutable secret, only upgrade to mutable on not found
-	alder32Bytes := alder32Of(customResource.Spec.BrokerProperties)
+	alder32Bytes := brokerproperties.Alder32Of(customResource.Spec.BrokerProperties)
 	shaOfMap := hex.EncodeToString(alder32Bytes)
 	resourceName := types.NamespacedName{
 		Namespace: customResource.Namespace,
@@ -1375,7 +1348,7 @@ func (reconciler *BrokerReconcilerImpl) addResourceForBrokerProperties(customRes
 		desired = obj.(*corev1.Secret)
 	}
 
-	data := BrokerPropertiesData(reconciler.customResource.Spec.BrokerProperties)
+	data := brokerproperties.BrokerPropertiesData(reconciler.customResource.Spec.BrokerProperties)
 
 	if desired == nil {
 		reconciler.log.V(1).Info("desired brokerprop secret nil, create new one", "name", resourceName.Name)
@@ -1507,10 +1480,10 @@ func (reconciler *BrokerReconcilerImpl) createExtraConfigmapsAndSecretsVolumeMou
 			//now we have a secret. First create a volume
 			secretVol := volumes.MakeVolumeForSecret(secret)
 
-			if secret == brokePropertiesResourceName && hasOrdinalPropertieKeyInData(brokerPropsData) {
+			if secret == brokePropertiesResourceName && brokerproperties.HasOrdinalPropertiesInData(brokerPropsData) {
 				// place ordinal data in subpath in order
-				for _, key := range sortedKeysStringKeyByteValue(brokerPropsData) {
-					matches := ParseBrokerPropertyWithOrdinal(key)
+				for _, key := range brokerproperties.SortedKeysByteValue(brokerPropsData) {
+					matches := brokerproperties.ParseBrokerPropertyWithOrdinal(key)
 					if len(matches) > 0 {
 						subPath := matches[1]
 						secretVol.Secret.Items = append(secretVol.Secret.Items, corev1.KeyToPath{Key: key, Path: fmt.Sprintf("%s/%s", subPath, key)})
@@ -1530,9 +1503,9 @@ func (reconciler *BrokerReconcilerImpl) createExtraConfigmapsAndSecretsVolumeMou
 					return nil, nil, err
 				}
 
-				if len(bpSecret.Data) > 0 && hasOrdinalPropertieKeyInData(bpSecret.Data) {
-					for _, key := range sortedKeysStringKeyByteValue(bpSecret.Data) {
-						matches := ParseBrokerPropertyWithOrdinal(key)
+				if len(bpSecret.Data) > 0 && brokerproperties.HasOrdinalPropertiesInData(bpSecret.Data) {
+					for _, key := range brokerproperties.SortedKeysByteValue(bpSecret.Data) {
+						matches := brokerproperties.ParseBrokerPropertyWithOrdinal(key)
 						if len(matches) > 0 {
 							subPath := matches[1]
 							secretVol.Secret.Items = append(secretVol.Secret.Items, corev1.KeyToPath{Key: key, Path: fmt.Sprintf("%s/%s", subPath, key)})
@@ -1706,7 +1679,7 @@ func (reconciler *BrokerReconcilerImpl) ProcessBrokerStatus(cr *v1beta2.Broker, 
 	}
 	meta.SetStatusCondition(&cr.Status.Conditions, condition)
 
-	if _, _, found := getConfigExtraMountForBroker(cr, jaasConfigSuffix); found {
+	if _, _, found := brokerproperties.GetConfigExtraMount(cr.Spec.ExtraMounts, jaasConfigSuffix); found {
 		err = reconciler.AssertJaasPropertiesStatus(cr, client, scheme)
 		if err == nil {
 			condition = metav1.Condition{
@@ -1906,7 +1879,7 @@ func (reconciler *BrokerReconcilerImpl) checkProjectionStatus(cr *v1beta2.Broker
 
 			if !present {
 				// with ordinal prefix or extras in the map this can be the case
-				matches := ParseBrokerPropertyWithOrdinal(name)
+				matches := brokerproperties.ParseBrokerPropertyWithOrdinal(name)
 				if name != JaasConfigKey && !strings.HasPrefix(name, UncheckedPrefix) && len(matches) == 0 {
 					missingKeys = append(missingKeys, name)
 				}
@@ -2012,7 +1985,7 @@ func (reconciler *BrokerReconcilerImpl) getSecretProjection(secretName types.Nam
 }
 
 func (reconciler *BrokerReconcilerImpl) getConfigMappedJaasProperties(cr *v1beta2.Broker, client rtclient.Client) (*projection, error) {
-	if _, name, found := getConfigExtraMountForBroker(cr, jaasConfigSuffix); found {
+	if _, name, found := brokerproperties.GetConfigExtraMount(cr.Spec.ExtraMounts, jaasConfigSuffix); found {
 		return reconciler.getSecretProjection(types.NamespacedName{Namespace: cr.Namespace, Name: name}, client)
 	}
 	return nil, nil
@@ -2085,7 +2058,7 @@ func (reconciler *BrokerReconcilerImpl) validate(customResource *v1beta2.Broker,
 
 func validateNoDupKeysInBrokerPropertiesForBroker(customResource *v1beta2.Broker) (*metav1.Condition, bool) {
 	if len(customResource.Spec.BrokerProperties) > 0 {
-		if duplicateKey := DuplicateKeyIn(customResource.Spec.BrokerProperties); duplicateKey != "" {
+		if duplicateKey := brokerproperties.DuplicateKeyIn(customResource.Spec.BrokerProperties); duplicateKey != "" {
 			return &metav1.Condition{
 				Type:    v1beta2.ValidConditionType,
 				Status:  metav1.ConditionFalse,
@@ -2234,7 +2207,7 @@ func validateExtraMountsForBroker(customResource *v1beta2.Broker, client rtclien
 			}, retry
 		}
 		if strings.HasSuffix(cm, loggingConfigSuffix) {
-			Condition = AssertConfigMapContainsKey(configMap, LoggingConfigKey, ContextMessage)
+			Condition = brokerproperties.AssertConfigMapContainsKey(configMap, LoggingConfigKey, ContextMessage)
 			instanceCounts[loggingConfigSuffix]++
 		} else if strings.HasSuffix(cm, jaasConfigSuffix) {
 			Condition = &metav1.Condition{
@@ -2263,22 +2236,22 @@ func validateExtraMountsForBroker(customResource *v1beta2.Broker, client rtclien
 			}, retry
 		}
 		if strings.HasSuffix(s, loggingConfigSuffix) {
-			Condition = AssertSecretContainsKey(secret, LoggingConfigKey, ContextMessage)
+			Condition = brokerproperties.AssertSecretContainsKey(secret, LoggingConfigKey, ContextMessage)
 			instanceCounts[loggingConfigSuffix]++
 		} else if strings.HasSuffix(s, jaasConfigSuffix) {
-			Condition = AssertSecretContainsKey(secret, JaasConfigKey, ContextMessage)
+			Condition = brokerproperties.AssertSecretContainsKey(secret, JaasConfigKey, ContextMessage)
 			if Condition == nil {
-				Condition = AssertSyntaxOkOnLoginConfigData(secret.Data[JaasConfigKey], s, ContextMessage)
+				Condition = brokerproperties.AssertSyntaxOkOnLoginConfigData(secret.Data[JaasConfigKey], s, ContextMessage)
 			}
 			instanceCounts[jaasConfigSuffix]++
 		} else if strings.HasSuffix(s, common.BrokerPropsSuffix) {
-			Condition = AssertNoDupKeyInProperties(secret, ContextMessage)
+			Condition = brokerproperties.AssertNoDupKeyInProperties(secret, ContextMessage)
 		}
 		if Condition != nil {
 			return Condition, retry
 		}
 	}
-	Condition = AssertInstanceCounts(instanceCounts)
+	Condition = brokerproperties.AssertInstanceCounts(instanceCounts, "Spec.ExtraMounts,")
 	if Condition != nil {
 		return Condition, false // CR needs update
 	}
@@ -2290,10 +2263,7 @@ func hasExtraMountsForBroker(cr *v1beta2.Broker) bool {
 	if cr == nil {
 		return false
 	}
-	if len(cr.Spec.ExtraMounts.ConfigMaps) > 0 {
-		return true
-	}
-	return len(cr.Spec.ExtraMounts.Secrets) > 0
+	return brokerproperties.HasExtraMounts(cr.Spec.ExtraMounts)
 }
 
 func MakeNamersForBroker(customResource *v1beta2.Broker) *common.Namers {

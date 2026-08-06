@@ -40,6 +40,7 @@ import (
 	"time"
 
 	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
+	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	brokerv1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
@@ -173,7 +174,7 @@ func checkSecretHasCorrectKeyValue(g Gomega, ns types.NamespacedName, key string
 }
 
 func hexShaHashOfMap(props []string) string {
-	return hex.EncodeToString(alder32Of(props))
+	return hex.EncodeToString(brokerproperties.Alder32Of(props))
 }
 
 func CurrentSpecShortName() string {

@@ -10,6 +10,7 @@ import (
 	"github.com/RHsyseng/operator-utils/pkg/olm"
 	"github.com/RHsyseng/operator-utils/pkg/resource/compare"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	routev1 "github.com/openshift/api/route/v1"
 	"github.com/stretchr/testify/assert"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -466,7 +467,7 @@ func TestGetJaasConfigExtraMountPath(t *testing.T) {
 			},
 		},
 	}
-	path, found := getJaasConfigExtraMountPath(cr)
+	path, found := brokerproperties.GetJaasConfigExtraMountPath(cr.Spec.DeploymentPlan.ExtraMounts)
 	assert.Equal(t, path, "/amq/extra/secrets/test-config-jaas-config/login.config")
 	assert.True(t, found)
 
@@ -486,7 +487,7 @@ func TestGetJaasConfigExtraMountPath(t *testing.T) {
 			},
 		},
 	}
-	path, found = getJaasConfigExtraMountPath(cr)
+	path, found = brokerproperties.GetJaasConfigExtraMountPath(cr.Spec.DeploymentPlan.ExtraMounts)
 	assert.Equal(t, path, "/amq/extra/secrets/test-config-jaas-config/login.config")
 	assert.True(t, found)
 }
@@ -503,7 +504,7 @@ func TestGetJaasConfigExtraMountPathNotPresent(t *testing.T) {
 			},
 		},
 	}
-	path, found := getJaasConfigExtraMountPath(cr)
+	path, found := brokerproperties.GetJaasConfigExtraMountPath(cr.Spec.DeploymentPlan.ExtraMounts)
 	assert.Empty(t, path)
 	assert.False(t, found)
 }
@@ -1666,34 +1667,34 @@ func testFormattedObject(t *testing.T, formattedObject map[string]interface{}, e
 func TestParseBrokerPropertyWithOrdinal(t *testing.T) {
 	var matches []string
 
-	matches = ParseBrokerPropertyWithOrdinal("broker-0.maxDiskUsage")
+	matches = brokerproperties.ParseBrokerPropertyWithOrdinal("broker-0.maxDiskUsage")
 	assert.Equal(t, 3, len(matches))
 	assert.Equal(t, "broker-0.maxDiskUsage", matches[0])
 	assert.Equal(t, "broker-0", matches[1])
 	assert.Equal(t, "maxDiskUsage", matches[2])
 
-	matches = ParseBrokerPropertyWithOrdinal("broker-999.maxDiskUsage=97")
+	matches = brokerproperties.ParseBrokerPropertyWithOrdinal("broker-999.maxDiskUsage=97")
 	assert.Equal(t, 3, len(matches))
 	assert.Equal(t, "broker-999.maxDiskUsage=97", matches[0])
 	assert.Equal(t, "broker-999", matches[1])
 	assert.Equal(t, "maxDiskUsage=97", matches[2])
 
-	matches = ParseBrokerPropertyWithOrdinal("maxDiskUsage=97")
+	matches = brokerproperties.ParseBrokerPropertyWithOrdinal("maxDiskUsage=97")
 	assert.Equal(t, 0, len(matches))
 
-	matches = ParseBrokerPropertyWithOrdinal("a.broker-0.maxDiskUsage")
+	matches = brokerproperties.ParseBrokerPropertyWithOrdinal("a.broker-0.maxDiskUsage")
 	assert.Equal(t, 0, len(matches))
 
-	matches = ParseBrokerPropertyWithOrdinal("broker-0-maxDiskUsage")
+	matches = brokerproperties.ParseBrokerPropertyWithOrdinal("broker-0-maxDiskUsage")
 	assert.Equal(t, 0, len(matches))
 
-	matches = ParseBrokerPropertyWithOrdinal("broker-a.maxDiskUsage")
+	matches = brokerproperties.ParseBrokerPropertyWithOrdinal("broker-a.maxDiskUsage")
 	assert.Equal(t, 0, len(matches))
 }
 
 func TestBrokerPropertiesData(t *testing.T) {
 
-	data := BrokerPropertiesData([]string{
+	data := brokerproperties.BrokerPropertiesData([]string{
 		"maxDiskUsage=97",
 		"minDiskFree=5",
 	})
@@ -1706,7 +1707,7 @@ func TestBrokerPropertiesData(t *testing.T) {
 
 func TestBrokerPropertiesDataWithOrdinal(t *testing.T) {
 
-	data := BrokerPropertiesData([]string{
+	data := brokerproperties.BrokerPropertiesData([]string{
 		"broker-0.maxDiskUsage=98",
 		"broker-0.minDiskFree=6",
 		"broker-999.maxDiskUsage=99",
@@ -1729,7 +1730,7 @@ func TestBrokerPropertiesDataWithOrdinal(t *testing.T) {
 
 func TestBrokerPropertiesDataWithAndWithoutOrdinal(t *testing.T) {
 
-	data := BrokerPropertiesData([]string{
+	data := brokerproperties.BrokerPropertiesData([]string{
 		"maxDiskUsage=97",
 		"minDiskFree=5",
 		"broker-0.maxDiskUsage=98",
@@ -1756,13 +1757,13 @@ func TestDuplicateKeyIn(t *testing.T) {
 
 	data := []byte("aa\\=a=VAL\naa\\=b=VAL")
 
-	kv := KeyValuePairs(data)
+	kv := brokerproperties.KeyValuePairs(data)
 
 	assert.Equal(t, len(kv), 2)
 	assert.True(t, strings.HasPrefix(kv[0], "aa"))
 	assert.True(t, strings.HasPrefix(kv[1], "aa"))
 
-	assert.Equal(t, "", DuplicateKeyIn(kv))
+	assert.Equal(t, "", brokerproperties.DuplicateKeyIn(kv))
 
 }
 
