@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/RHsyseng/operator-utils/pkg/resource/compare"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokervolumes"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/containers"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/ingresses"
@@ -1872,35 +1873,11 @@ func (reconciler *BrokerClusterReconcilerImpl) checkExistingService(cr *v1beta2.
 func (reconciler *BrokerClusterReconcilerImpl) checkExistingPersistentVolumes(instance *v1beta2.BrokerCluster, client rtclient.Client) {
 	var i int32
 	for i = 0; i < common.GetDeploymentSize(instance); i++ {
-		ordinalString := strconv.Itoa(int(i))
-		pvcKey := types.NamespacedName{Namespace: instance.Namespace, Name: instance.Name + "-" + namer.CrToSS(instance.Name) + "-" + ordinalString}
-		pvc := &corev1.PersistentVolumeClaim{}
-		err := client.Get(context.TODO(), pvcKey, pvc)
-
-		if err == nil {
-			if len(pvc.OwnerReferences) > 0 {
-				found := false
-				newOwnerReferences := make([]metav1.OwnerReference, 0)
-				for _, oref := range pvc.OwnerReferences {
-					if oref.UID == instance.UID {
-						found = true
-					} else {
-						newOwnerReferences = append(newOwnerReferences, oref)
-					}
-				}
-				if found {
-					reconciler.log.V(1).Info("removing owner ref from pvc to avoid potential data loss")
-					pvc.OwnerReferences = newOwnerReferences
-					if er := client.Update(context.TODO(), pvc); er != nil {
-						reconciler.log.Error(er, "failed to remove ownerReference from pvc", "pvc", *pvc)
-					}
-				}
-			}
-		} else {
-			if !k8serrors.IsNotFound(err) {
-				reconciler.log.Error(err, "got error in getting pvc")
-			}
+		pvcKey := types.NamespacedName{
+			Namespace: instance.Namespace,
+			Name:      instance.Name + "-" + namer.CrToSS(instance.Name) + "-" + strconv.Itoa(int(i)),
 		}
+		brokervolumes.RemovePVCOwnerRef(pvcKey, instance.UID, client, reconciler.log)
 	}
 }
 
@@ -1933,18 +1910,12 @@ func addNewVolumes(existingNames map[string]string, existing *[]corev1.Volume, n
 
 func (reconciler *BrokerClusterReconcilerImpl) MakeVolumes(customResource *v1beta2.BrokerCluster, namer common.Namers) ([]corev1.Volume, error) {
 
-	volumeDefinitions := []corev1.Volume{}
-	if customResource.Spec.DeploymentPlan.PersistenceEnabled {
-		basicCRVolume := volumes.MakePersistentVolume(customResource.Name)
-		volumeDefinitions = append(volumeDefinitions, basicCRVolume...)
-	}
-
-	volumeDefinitions = append(volumeDefinitions, customResource.Spec.DeploymentPlan.ExtraVolumes...)
-
-	for _, epvc := range customResource.Spec.DeploymentPlan.ExtraVolumeClaimTemplates {
-		epvcVolume := volumes.MakePersistentVolume(epvc.Name)
-		volumeDefinitions = append(volumeDefinitions, epvcVolume...)
-	}
+	volumeDefinitions := brokervolumes.MakeVolumes(
+		customResource.Name,
+		customResource.Spec.DeploymentPlan.PersistenceEnabled,
+		customResource.Spec.DeploymentPlan.ExtraVolumes,
+		customResource.Spec.DeploymentPlan.ExtraVolumeClaimTemplates,
+	)
 
 	secretVolumes := make(map[string]string)
 	// Scan acceptors for any with sslEnabled
@@ -1999,47 +1970,12 @@ func addNewVolumeMounts(existingNames map[string]string, existing *[]corev1.Volu
 	}
 }
 
-// MakeExtraVolumeMounts creates volume mounts for ExtraVolumes and ExtraVolumeClaimTemplates
-// This is used by both the main container and init container
 func MakeExtraVolumeMounts(customResource *v1beta2.BrokerCluster) []corev1.VolumeMount {
-	volumeMounts := []corev1.VolumeMount{}
-
-	for _, volume := range customResource.Spec.DeploymentPlan.ExtraVolumes {
-		var volumeMount corev1.VolumeMount
-		found := false
-		for _, vm := range customResource.Spec.DeploymentPlan.ExtraVolumeMounts {
-			if vm.Name == volume.Name {
-				volumeMount = vm
-				if volumeMount.MountPath == "" {
-					volumeMount.MountPath = volumes.GetDefaultMountPath(&volume)
-				}
-				found = true
-				break
-			}
-		}
-		if !found {
-			volumeMount = *volumes.MakeVolumeMountForVolume(&volume)
-		}
-		volumeMounts = append(volumeMounts, volumeMount)
-	}
-
-	for _, epvc := range customResource.Spec.DeploymentPlan.ExtraVolumeClaimTemplates {
-		var vMount corev1.VolumeMount
-		found := false
-		for _, mount := range customResource.Spec.DeploymentPlan.ExtraVolumeMounts {
-			if epvc.Name == mount.Name {
-				vMount = mount
-				found = true
-				break
-			}
-		}
-		if !found {
-			vMount = *volumes.NewVolumeMountForPVC(epvc.Name)
-		}
-		volumeMounts = append(volumeMounts, vMount)
-	}
-
-	return volumeMounts
+	return brokervolumes.MakeExtraVolumeMounts(
+		customResource.Spec.DeploymentPlan.ExtraVolumes,
+		customResource.Spec.DeploymentPlan.ExtraVolumeMounts,
+		customResource.Spec.DeploymentPlan.ExtraVolumeClaimTemplates,
+	)
 }
 
 func (reconciler *BrokerClusterReconcilerImpl) MakeVolumeMounts(customResource *v1beta2.BrokerCluster, namer common.Namers) ([]corev1.VolumeMount, error) {

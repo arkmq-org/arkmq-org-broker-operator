@@ -14,6 +14,7 @@ import (
 	"github.com/RHsyseng/operator-utils/pkg/resource/compare"
 	brokerstatus "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/broker/status"
 	brokerversion "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/broker/version"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokervolumes"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/containers"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/persistentvolumeclaims"
@@ -525,7 +526,11 @@ func formatTemplatedStringForBroker(customResource *v1beta2.Broker, template str
 func (reconciler *BrokerReconcilerImpl) CurrentDeployedResources(customResource *v1beta2.Broker, client rtclient.Client) {
 	var err error
 	if customResource.Spec.PersistenceEnabled {
-		reconciler.checkExistingPersistentVolumes(customResource, client)
+		pvcKey := types.NamespacedName{
+			Namespace: customResource.Namespace,
+			Name:      customResource.Name + "-" + namer.CrToSS(customResource.Name) + "-0",
+		}
+		brokervolumes.RemovePVCOwnerRef(pvcKey, customResource.UID, client, reconciler.log)
 	}
 
 	reconciler.deployed, err = brokerstatus.GetDeployedResources(customResource, client, reconciler.isOnOpenShift)
@@ -730,115 +735,6 @@ func (reconciler *BrokerReconcilerImpl) ensureOwnerReferenceAPIVersion(cr *v1bet
 	return true
 }
 
-func (reconciler *BrokerReconcilerImpl) checkExistingPersistentVolumes(instance *v1beta2.Broker, client rtclient.Client) {
-	pvcKey := types.NamespacedName{Namespace: instance.Namespace, Name: instance.Name + "-" + namer.CrToSS(instance.Name) + "-0"}
-	pvc := &corev1.PersistentVolumeClaim{}
-	err := client.Get(context.TODO(), pvcKey, pvc)
-
-	if err == nil {
-		if len(pvc.OwnerReferences) > 0 {
-			found := false
-			newOwnerReferences := make([]metav1.OwnerReference, 0)
-			for _, oref := range pvc.OwnerReferences {
-				if oref.UID == instance.UID {
-					found = true
-				} else {
-					newOwnerReferences = append(newOwnerReferences, oref)
-				}
-			}
-			if found {
-				reconciler.log.V(1).Info("removing owner ref from pvc to avoid potential data loss")
-				pvc.OwnerReferences = newOwnerReferences
-				if er := client.Update(context.TODO(), pvc); er != nil {
-					reconciler.log.Error(er, "failed to remove ownerReference from pvc", "pvc", *pvc)
-				}
-			}
-		}
-	} else if !k8serrors.IsNotFound(err) {
-		reconciler.log.Error(err, "got error in getting pvc")
-	}
-}
-
-func (reconciler *BrokerReconcilerImpl) MakeVolumes(customResource *v1beta2.Broker, namer common.Namers) ([]corev1.Volume, error) {
-
-	volumeDefinitions := []corev1.Volume{}
-	if customResource.Spec.PersistenceEnabled {
-		basicCRVolume := volumes.MakePersistentVolume(customResource.Name)
-		volumeDefinitions = append(volumeDefinitions, basicCRVolume...)
-	} else {
-		emptyDirData := volumes.MakeEmptyDirVolumeFor(customResource.Name)
-		volumeDefinitions = append(volumeDefinitions, emptyDirData)
-	}
-
-	volumeDefinitions = append(volumeDefinitions, customResource.Spec.ExtraVolumes...)
-
-	for _, epvc := range customResource.Spec.ExtraVolumeClaimTemplates {
-		epvcVolume := volumes.MakePersistentVolume(epvc.Name)
-		volumeDefinitions = append(volumeDefinitions, epvcVolume...)
-	}
-
-	return volumeDefinitions, nil
-}
-
-// MakeExtraVolumeMountsForBroker creates volume mounts for ExtraVolumes and ExtraVolumeClaimTemplates.
-// This is used by both the main container and init container.
-func MakeExtraVolumeMountsForBroker(customResource *v1beta2.Broker) []corev1.VolumeMount {
-	volumeMounts := []corev1.VolumeMount{}
-
-	for _, volume := range customResource.Spec.ExtraVolumes {
-		var volumeMount corev1.VolumeMount
-		found := false
-		for _, vm := range customResource.Spec.ExtraVolumeMounts {
-			if vm.Name == volume.Name {
-				volumeMount = vm
-				if volumeMount.MountPath == "" {
-					volumeMount.MountPath = volumes.GetDefaultMountPath(&volume)
-				}
-				found = true
-				break
-			}
-		}
-		if !found {
-			volumeMount = *volumes.MakeVolumeMountForVolume(&volume)
-		}
-		volumeMounts = append(volumeMounts, volumeMount)
-	}
-
-	for _, epvc := range customResource.Spec.ExtraVolumeClaimTemplates {
-		var vMount corev1.VolumeMount
-		found := false
-		for _, mount := range customResource.Spec.ExtraVolumeMounts {
-			if epvc.Name == mount.Name {
-				vMount = mount
-				found = true
-				break
-			}
-		}
-		if !found {
-			vMount = *volumes.NewVolumeMountForPVC(epvc.Name)
-		}
-		volumeMounts = append(volumeMounts, vMount)
-	}
-
-	return volumeMounts
-}
-
-func (reconciler *BrokerReconcilerImpl) MakeVolumeMounts(customResource *v1beta2.Broker, namer common.Namers) ([]corev1.VolumeMount, error) {
-
-	volumeMounts := []corev1.VolumeMount{}
-	persistentCRVlMnt := volumes.MakePersistentVolumeMount(customResource.Name, getDataMountPathForBroker())
-	volumeMounts = append(volumeMounts, persistentCRVlMnt...)
-
-	// Add extra volumes and extra volume claim templates
-	extraVolumeMounts := MakeExtraVolumeMountsForBroker(customResource)
-	volumeMounts = append(volumeMounts, extraVolumeMounts...)
-
-	return volumeMounts, nil
-}
-
-func getDataMountPathForBroker() string {
-	return "/app"
-}
 func MakeContainerPortsForBroker(cr *v1beta2.Broker) []corev1.ContainerPort {
 
 	containerPorts := []corev1.ContainerPort{
@@ -1153,10 +1049,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	reqLogger.V(2).Info("Extra volumes", "volumes", extraVolumes)
 	reqLogger.V(2).Info("Extra mounts", "mounts", extraVolumeMounts)
 
-	container.VolumeMounts, err = reconciler.MakeVolumeMounts(customResource, namer)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make volume mounts, %w", err)
-	}
+	container.VolumeMounts = brokervolumes.MakeVolumeMounts(customResource.Name, customResource.Spec.ExtraVolumes, customResource.Spec.ExtraVolumeMounts, customResource.Spec.ExtraVolumeClaimTemplates)
 	if len(extraVolumeMounts) > 0 {
 		container.VolumeMounts = append(container.VolumeMounts, extraVolumeMounts...)
 	}
@@ -1178,9 +1071,9 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 	newContainersArray := []corev1.Container{}
 	podSpec.Containers = append(newContainersArray, *container)
-	brokerVolumes, err := reconciler.MakeVolumes(customResource, namer)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make volumes, %w", err)
+	brokerVolumes := brokervolumes.MakeVolumes(customResource.Name, customResource.Spec.PersistenceEnabled, customResource.Spec.ExtraVolumes, customResource.Spec.ExtraVolumeClaimTemplates)
+	if !customResource.Spec.PersistenceEnabled {
+		brokerVolumes = append([]corev1.Volume{volumes.MakeEmptyDirVolumeFor(customResource.Name)}, brokerVolumes...)
 	}
 	if len(extraVolumes) > 0 {
 		brokerVolumes = append(brokerVolumes, extraVolumes...)
