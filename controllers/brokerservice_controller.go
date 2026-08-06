@@ -25,6 +25,7 @@ import (
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/appselector"
+	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	servicemetrics "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/metrics"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
@@ -816,8 +817,8 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 		}
 	}
 
-	buf := NewPropsWithHeader()
-	for _, k := range sortedKeys(props) {
+	buf := brokerproperties.NewPropsWithHeader()
+	for _, k := range brokerproperties.SortedKeys(props) {
 		fmt.Fprint(buf, k)
 	}
 
@@ -859,7 +860,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 		return nil, err
 	}
 	*/
-	usersBuf := NewPropsWithHeader()
+	usersBuf := brokerproperties.NewPropsWithHeader()
 	// Escape app name for safe use in regex pattern to prevent regex injection
 	// The namespacedName format is namespace-name which is already validated
 	escapedAppName := common.EscapeForRegex(app.Name)
@@ -879,8 +880,8 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 		}
 	}
 
-	rolesBuf := NewPropsWithHeader()
-	for _, k := range sortedKeys(dedupMap) {
+	rolesBuf := brokerproperties.NewPropsWithHeader()
+	for _, k := range brokerproperties.SortedKeys(dedupMap) {
 		fmt.Fprint(rolesBuf, k)
 	}
 
@@ -889,7 +890,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 
 	acceptorCfgKey := AppIdentityPrefixed(app, "acceptor.properties")
 
-	buf := NewPropsWithHeader()
+	buf := brokerproperties.NewPropsWithHeader()
 
 	if app.Status.Service == nil {
 		return fmt.Errorf("app %s has no service binding", AppIdentity(app))
@@ -946,7 +947,7 @@ func (reconciler *BrokerServiceInstanceReconciler) getTrustStorePath(_ *broker.B
 
 func (reconciler *BrokerServiceInstanceReconciler) makePemCfgProps(service *broker.BrokerService) []byte {
 
-	buf := NewPropsWithHeader()
+	buf := brokerproperties.NewPropsWithHeader()
 
 	certSecretName := certSecretName(service)
 
@@ -1068,7 +1069,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]bool) []byte {
-	buf := NewPropsWithHeader() // yaml
+	buf := brokerproperties.NewPropsWithHeader() // yaml
 
 	// HTTP server config with mTLS
 	var caSecret string
