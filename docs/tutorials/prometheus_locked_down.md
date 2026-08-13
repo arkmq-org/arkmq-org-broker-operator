@@ -746,7 +746,7 @@ secret/amqps-pem created
 
 Create a broker properties secret for the JAAS configuration. The broker reads
 additional broker properties from secrets ending in `-bp`, but the secret still
-must be listed under `deploymentPlan.extraMounts.secrets` so the operator mounts
+must be listed under `spec.extraMounts.secrets` so the operator mounts
 it.
 
 ```{"stage":"deploy", "runtime":"bash", "label":"create jaas config bp secret"}
@@ -789,6 +789,9 @@ metadata:
   name: artemis-broker
   namespace: locked-down-broker
 spec:
+  image: quay.io/arkmq-org/arkmq-org-broker-kubernetes:snapshot
+  extraMounts:
+    secrets: [artemis-broker-jaas-config-bp, amqps-pem]
   brokerProperties:
     - "messageCounterSamplePeriod=500"
     # Create a queue for messaging
@@ -812,10 +815,6 @@ spec:
     - "acceptorConfigurations.\"amqps\".params.keyStorePath=/amq/extra/secrets/amqps-pem/_amqps.pemcfg"
     - "acceptorConfigurations.\"amqps\".params.trustStoreType=PEMCA"
     - "acceptorConfigurations.\"amqps\".params.trustStorePath=/amq/extra/secrets/arkmq-org-broker-manager-ca/ca.pem"
-  deploymentPlan:
-    image: quay.io/arkmq-org/arkmq-org-broker-kubernetes:snapshot
-    extraMounts:
-      secrets: [artemis-broker-jaas-config-bp, amqps-pem]
 EOF
 ```
 ```shell markdown_runner
