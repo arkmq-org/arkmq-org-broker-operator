@@ -83,7 +83,17 @@ make OPERATOR_IMAGE_REPO=<your repo> OPERATOR_VERSION=<tag> docker-push
 
 Now follow the [quickstart](../getting-started/quick-start.md) to deploy the operator.
 
-## 3. Add .vscode/settings.json
+## Update operator with new image
+
+Once your custom image has been pushed to a registry, you must update the value of **spec.template.spec.containers.image** in **./deploy/operator.yaml**
+
+```$xslt
+        image: ${OPERATOR_IMAGE_REPO}:${TAG}
+```
+
+It is important to remember to build and push a new image whenever you pull new changes from the remote repository, or are testing local changes. 
+
+## Add .vscode/settings.json
 
 ```$xslt
 {
