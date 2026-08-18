@@ -166,6 +166,7 @@ jobs:
           memory: 8g
           addons: ingress
           insecure-registry: ${{env.HOSTNAME}}:5000
+          start-args: --extra-config=kubelet.sync-frequency=10s
 
       - name: Enable minikube ingress-nginx ssl-passthrough
         run: >
@@ -321,7 +322,7 @@ jobs:
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.runTutorials) || (github.event_name == 'pull_request' && steps.changed-tutorial-files.outputs.any_changed == 'true')
         run: |
           minikube delete
-          find docs/tutorials -type f -exec sed -i "s|^minikube start|minikube start  --cpus 2 --memory 8000 --insecure-registry=$HOSTNAME:5000|" {} +
+          find docs/tutorials -type f -exec sed -i "s|^minikube start|minikube start  --cpus 2 --memory 8000 --insecure-registry=$HOSTNAME:5000 --extra-config=kubelet.sync-frequency=10s|" {} +
           sed -i "s|image: quay.io/arkmq-org/arkmq-org-broker-operator:.*|image: ${HOSTNAME}:5000/$IMAGE_NAME:dev.latest|" deploy/operator.yaml
           markdown-runner docs/tutorials --view ci
 

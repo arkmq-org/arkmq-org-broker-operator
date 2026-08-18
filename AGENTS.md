@@ -201,7 +201,8 @@ For quick iteration on specific features (recommended profile: `aiprofile`):
 
 ```bash
 # 1. Start minikube with dedicated profile
-minikube start --profile aiprofile --memory=4096 --cpus=2
+minikube start --profile aiprofile --memory=4096 --cpus=2 \
+  --extra-config=kubelet.sync-frequency=5s
 minikube profile aiprofile
 
 # 2. Configure ingress with SSL passthrough (CRITICAL for restricted mode tests)
@@ -228,7 +229,8 @@ For comprehensive testing before submitting PRs:
 
 ```bash
 # Start with adequate resources
-minikube start --memory=8192 --cpus=4
+minikube start --memory=8192 --cpus=4 \
+  --extra-config=kubelet.sync-frequency=5s
 ```
 
 **2. Configure Ingress with SSL Passthrough**
