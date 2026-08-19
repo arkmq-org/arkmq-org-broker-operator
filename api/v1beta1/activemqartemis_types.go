@@ -772,7 +772,7 @@ type ExternalConfigStatus struct {
 //+operator-sdk:csv:customresourcedefinitions:resources={{"ConfigMap", "v1"}}
 //+operator-sdk:csv:customresourcedefinitions:resources={{"StatefulSet", "apps/v1"}}
 
-// +kubebuilder:deprecatedversion:warning="The ActiveMQArtemis CRD (activemqartemises.broker.amq.io) is deprecated. Use the Broker CRD (brokers.broker.arkmq.org) instead by updating apiVersion to broker.arkmq.org/v1beta2 and kind to Broker. The spec is compatible."
+// +kubebuilder:deprecatedversion:warning="The ActiveMQArtemis CRD (activemqartemises.broker.amq.io) is deprecated. Use the BrokerCluster CRD (brokerclusters.broker.arkmq.org) instead by updating apiVersion to broker.arkmq.org/v1beta2 and kind to BrokerCluster. The spec is compatible."
 // A stateful deployment of one or more brokers
 // +operator-sdk:csv:customresourcedefinitions:displayName="ActiveMQ Artemis"
 type ActiveMQArtemis struct {

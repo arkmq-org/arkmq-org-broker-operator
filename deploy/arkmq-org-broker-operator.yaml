@@ -677,7 +677,7 @@ spec:
       name: Age
       type: date
     deprecated: true
-    deprecationWarning: The ActiveMQArtemis CRD (activemqartemises.broker.amq.io) is deprecated. Use the Broker CRD (brokers.broker.arkmq.org) instead by updating apiVersion to broker.arkmq.org/v1beta2 and kind to Broker. The spec is compatible.
+    deprecationWarning: The ActiveMQArtemis CRD (activemqartemises.broker.amq.io) is deprecated. Use the BrokerCluster CRD (brokerclusters.broker.arkmq.org) instead by updating apiVersion to broker.arkmq.org/v1beta2 and kind to BrokerCluster. The spec is compatible.
     name: v1beta1
     schema:
       openAPIV3Schema:
