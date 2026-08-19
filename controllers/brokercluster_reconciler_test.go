@@ -225,7 +225,7 @@ func TestComparatorMetaAndSpec(t *testing.T) {
 
 func TestGetSingleStatefulSetStatus(t *testing.T) {
 
-	var expected int32 = int32(1)
+	var expected int32 = 1
 	ss := &appsv1.StatefulSet{}
 	ss.ObjectMeta.Name = "joe"
 	ss.Spec.Replicas = &expected
@@ -246,7 +246,7 @@ func TestGetSingleStatefulSetStatus(t *testing.T) {
 		t.Errorf("not good!, expect ss name in stopped %s", statusRunning.Stopped[0])
 	}
 
-	var expectedTwo int32 = int32(2)
+	var expectedTwo int32 = 2
 	ss.Spec.Replicas = &expectedTwo
 	ss.Status.Replicas = 2
 	ss.Status.ReadyReplicas = 1
@@ -544,7 +544,7 @@ func TestNewPodTemplateSpecForCR_IncludesDebugArgs(t *testing.T) {
 
 func TestProcess_TemplateIncludesLabelsServiceAndSecret(t *testing.T) {
 
-	var kindMatch string = "Secret"
+	kindMatch := "Secret"
 	cr := &v1beta2.BrokerCluster{
 		Spec: v1beta2.BrokerClusterSpec{
 			DeploymentPlan: v1beta2.DeploymentPlanType{
@@ -618,8 +618,8 @@ func TestProcess_TemplateIncludesLabelsServiceAndSecret(t *testing.T) {
 
 func TestProcess_TemplateIncludesLabelsSecretRegexp(t *testing.T) {
 
-	var regexpNameMatch string = ".*-props"
-	var exactNameMatch string = "-props"
+	regexpNameMatch := ".*-props"
+	exactNameMatch := "-props"
 
 	cr := &v1beta2.BrokerCluster{
 		Spec: v1beta2.BrokerClusterSpec{
@@ -765,9 +765,9 @@ func Test_Respect_existing_JAVA_OPTS_properties_def(t *testing.T) {
 
 func TestProcess_TemplateKeyValue(t *testing.T) {
 
-	var kindMatch string = "Service"
-	var matchOrdinalServices string = ".+-[0-9]+-svc"
-	var matchGvForIngress string = "networking.k8s.io/v1"
+	kindMatch := "Service"
+	matchOrdinalServices := ".+-[0-9]+-svc"
+	matchGvForIngress := "networking.k8s.io/v1"
 	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
 		Spec: v1beta2.BrokerClusterSpec{
@@ -812,8 +812,9 @@ func TestProcess_TemplateKeyValue(t *testing.T) {
 	assert.NoError(t, err)
 
 	fakeClient := fake.NewClientBuilder().Build()
-	reconciler.ProcessAcceptorsAndConnectors(cr, *namer,
+	err = reconciler.ProcessAcceptorsAndConnectors(cr, *namer,
 		fakeClient, nil, newSS)
+	assert.NoError(t, err)
 
 	err = reconciler.ProcessResources(cr, fakeClient, nil)
 	assert.NoError(t, err)
@@ -859,7 +860,7 @@ func TestProcess_TemplateKeyValue(t *testing.T) {
 
 func TestProcess_TemplateCustomAttributeIngress(t *testing.T) {
 
-	var matchGvForIngress string = "networking.k8s.io/v1"
+	matchGvForIngress := "networking.k8s.io/v1"
 	var ingressClassVal = "SomeClass"
 	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
@@ -898,10 +899,11 @@ func TestProcess_TemplateCustomAttributeIngress(t *testing.T) {
 	reconciler.trackDesired(newSS)
 
 	fakeClient := fake.NewClientBuilder().Build()
-	reconciler.ProcessAcceptorsAndConnectors(cr, *namer,
+	err := reconciler.ProcessAcceptorsAndConnectors(cr, *namer,
 		fakeClient, nil, newSS)
+	assert.NoError(t, err)
 
-	err := reconciler.ProcessResources(cr, fakeClient, nil)
+	err = reconciler.ProcessResources(cr, fakeClient, nil)
 	assert.NoError(t, err)
 
 	var ingressOk = false
@@ -920,7 +922,7 @@ func TestProcess_TemplateCustomAttributeIngress(t *testing.T) {
 
 func TestProcess_TemplateCustomAttributeMisSpellingIngress(t *testing.T) {
 
-	var matchGvForIngress string = "networking.k8s.io/v1"
+	matchGvForIngress := "networking.k8s.io/v1"
 	var ingressClassVal = "SomeClass"
 	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
@@ -958,8 +960,9 @@ func TestProcess_TemplateCustomAttributeMisSpellingIngress(t *testing.T) {
 	assert.NoError(t, err)
 
 	fakeClient := fake.NewClientBuilder().Build()
-	reconciler.ProcessAcceptorsAndConnectors(cr, *namer,
+	err = reconciler.ProcessAcceptorsAndConnectors(cr, *namer,
 		fakeClient, nil, newSS)
+	assert.NoError(t, err)
 
 	err = reconciler.ProcessResources(cr, fakeClient, nil)
 	assert.Error(t, err)
@@ -975,8 +978,8 @@ func TestProcess_TemplateCustomAttributeContainerSecurityContextWithCRNameVar(t 
 }
 
 func testTemplateCustomAttributeContainerSecurityContext(t *testing.T, withCRNameVar bool) {
-	var kindMatchSs string = "StatefulSet"
-	var containerName string = "cr-container"
+	kindMatchSs := "StatefulSet"
+	containerName := "cr-container"
 	if withCRNameVar {
 		containerName = "$(CR_NAME)-container"
 	}
@@ -1039,7 +1042,7 @@ func testTemplateCustomAttributeContainerSecurityContext(t *testing.T, withCRNam
 
 func TestProcess_TemplateCustomAttributePriorityClassName(t *testing.T) {
 
-	var kindMatchSs string = "StatefulSet"
+	kindMatchSs := "StatefulSet"
 
 	cr := &v1beta2.BrokerCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
@@ -1852,7 +1855,9 @@ func TestEnsureOwnerReferenceAPIVersion_DifferentAPIVersion(t *testing.T) {
 
 	existing := &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-secret",
+			Name:            "test-secret",
+			ResourceVersion: "42",
+			UID:             "existing-uid",
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: "broker.amq.io/v1alpha1",
@@ -1878,6 +1883,7 @@ func TestEnsureOwnerReferenceAPIVersion_DifferentAPIVersion(t *testing.T) {
 	assert.False(t, result, "should return false when API versions differ")
 	assert.Len(t, candidate.GetOwnerReferences(), 1, "candidate should have owner references set")
 	assert.Equal(t, "broker.amq.io/v1beta1", candidate.GetOwnerReferences()[0].APIVersion, "candidate should have updated API version")
+	assert.Equal(t, "42", candidate.GetResourceVersion(), "candidate should have ResourceVersion copied from existing")
 }
 
 func TestEnsureOwnerReferenceAPIVersion_MultipleOwnerReferences(t *testing.T) {
@@ -1893,7 +1899,9 @@ func TestEnsureOwnerReferenceAPIVersion_MultipleOwnerReferences(t *testing.T) {
 
 	existing := &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-secret",
+			Name:            "test-secret",
+			ResourceVersion: "99",
+			UID:             "multi-uid",
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: "apps/v1",
@@ -1926,6 +1934,7 @@ func TestEnsureOwnerReferenceAPIVersion_MultipleOwnerReferences(t *testing.T) {
 	assert.Len(t, candidate.GetOwnerReferences(), 2, "candidate should have both owner references")
 	assert.Equal(t, "apps/v1", candidate.GetOwnerReferences()[0].APIVersion, "first owner reference should remain unchanged")
 	assert.Equal(t, "broker.amq.io/v1beta1", candidate.GetOwnerReferences()[1].APIVersion, "ActiveMQArtemis owner reference should be updated")
+	assert.Equal(t, "99", candidate.GetResourceVersion(), "candidate should have ResourceVersion copied from existing")
 }
 
 func TestEnsureOwnerReferenceAPIVersion_DifferentBrokerName(t *testing.T) {

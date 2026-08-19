@@ -216,7 +216,7 @@ var _ = Describe("Scale down controller", func() {
 			By("Sending a message to Host: " + podWithOrdinal1)
 			Eventually(func(g Gomega) {
 
-				sendCmd := []string{"amq-broker/bin/artemis", "producer", "--user", "Jay", "--password", "activemq", "--url", "tcp://" + podWithOrdinal1 + ":61616", "--message-count", "1"}
+				sendCmd := []string{"amq-broker/bin/artemis", "producer", "--user", "Jay", "--password", "activemq", "--url", "tcp://" + podWithOrdinal1 + ":61616", "--message-count", "1", "--destination", "queue://DLQ", "--verbose"}
 				content, err := RunCommandInPod(podWithOrdinal1, brokerKey.Name+"-container", sendCmd)
 				g.Expect(err).To(BeNil())
 				g.Expect(*content).Should(ContainSubstring("Produced: 1 messages"))
@@ -237,6 +237,15 @@ var _ = Describe("Scale down controller", func() {
 				g.Expect(len(createdCrd.Status.PodStatus.Ready)).Should(BeEquivalentTo(1))
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
+			By("Checking message migrated to pod 0")
+			Eventually(func(g Gomega) {
+				curlUrl := "http://" + podWithOrdinal0 + ":8161/console/jolokia/read/org.apache.activemq.artemis:broker=%22amq-broker%22,component=addresses,address=%22DLQ%22,subcomponent=queues,routing-type=%22anycast%22,queue=%22DLQ%22/MessageCount"
+				curlCmd := []string{"curl", "-s", "-H", "Origin: http://localhost:8161", "-u", "user:password", curlUrl}
+				result, err := RunCommandInPod(podWithOrdinal0, brokerKey.Name+"-container", curlCmd)
+				g.Expect(err).To(BeNil())
+				g.Expect(*result).To(ContainSubstring("\"value\":1"))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
 			By("Receiving a message from Host: " + podWithOrdinal0)
 			Eventually(func(g Gomega) {
 
@@ -246,12 +255,12 @@ var _ = Describe("Scale down controller", func() {
 				g.Expect(pod0AfterScaleDown.CreationTimestamp).Should(BeEquivalentTo(pod0BeforeScaleDown.CreationTimestamp))
 				g.Expect(pod0AfterScaleDown.Status.ContainerStatuses[0].RestartCount).Should(BeEquivalentTo(pod0BeforeScaleDown.Status.ContainerStatuses[0].RestartCount))
 
-				recvCmd := []string{"amq-broker/bin/artemis", "consumer", "--user", "Jay", "--password", "activemq", "--url", "tcp://" + podWithOrdinal0 + ":61616", "--message-count", "1", "--receive-timeout", "10000", "--break-on-null", "--verbose"}
+				recvCmd := []string{"amq-broker/bin/artemis", "consumer", "--user", "Jay", "--password", "activemq", "--url", "tcp://" + podWithOrdinal0 + ":61616", "--message-count", "1", "--destination", "queue://DLQ", "--receive-timeout", "10000", "--break-on-null", "--verbose"}
 				content, err := RunCommandInPod(podWithOrdinal0, brokerKey.Name+"-container", recvCmd)
 				g.Expect(err).To(BeNil())
 				g.Expect(*content).Should(ContainSubstring("JMS Message ID:"))
 
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("reverting taints on node")
 			Eventually(func(g Gomega) {

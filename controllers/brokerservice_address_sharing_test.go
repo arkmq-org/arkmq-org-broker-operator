@@ -208,6 +208,13 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			}
 			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
 
+			By("waiting for owner app to be provisioned before creating consumer app")
+			createdOwnerApp := &broker.BrokerApp{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ownerAppName, Namespace: defaultNamespace}, createdOwnerApp)).Should(Succeed())
+				g.Expect(createdOwnerApp.Status.Service).ShouldNot(BeNil())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
 			consumerAppName := NextSpecResourceName()
 			consumerCertName := consumerAppName + "-" + common.DefaultOperandCertSecretName
 			By("installing consumer app cert")

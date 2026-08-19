@@ -63,139 +63,143 @@ var _ = Describe("Address controller tests", func() {
 	})
 
 	Context("address queue config defaults", Label("queue-config-defaults"), func() {
-		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			queueName := "myqueue"
-			addressName := "myaddress"
-			anycastType := "ANYCAST"
-			It("configurationManaged default should be true (without queue configuration)", func() {
-				By("deploy a broker cr")
-				brokerCr, createdBrokerCr := DeployCustomBroker(defaultNamespace, nil)
+		queueName := "myqueue"
+		addressName := "myaddress"
+		anycastType := "ANYCAST"
+		It("configurationManaged default should be true (without queue configuration)", func() {
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
+			By("deploy a broker cr")
+			brokerCr, createdBrokerCr := DeployCustomBroker(defaultNamespace, nil)
 
-				By("deploy an address cr")
-				addressCr, createdAddressCr := DeployCustomAddress(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemisAddress) {
-					candidate.Spec.AddressName = addressName
-					candidate.Spec.QueueName = &queueName
-					candidate.Spec.RoutingType = &anycastType
-				})
-
-				By("verify the configurationManaged attribute of the queue is true")
-				podOrdinal := strconv.FormatInt(0, 10)
-				podName := namer.CrToSS(brokerCr.Name) + "-" + podOrdinal
-
-				CheckQueueExistInPod(brokerCr.Name, podName, queueName, defaultNamespace)
-
-				CheckQueueAttribute(brokerCr.Name, podName, defaultNamespace, queueName, addressName, "anycast", "ConfigurationManaged", "true")
-
-				//cleanup
-				CleanResource(createdBrokerCr, brokerCr.Name, defaultNamespace)
-				CleanResource(createdAddressCr, addressCr.Name, defaultNamespace)
+			By("deploy an address cr")
+			addressCr, createdAddressCr := DeployCustomAddress(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemisAddress) {
+				candidate.Spec.AddressName = addressName
+				candidate.Spec.QueueName = &queueName
+				candidate.Spec.RoutingType = &anycastType
 			})
 
-			It("Verifying the lscrs secret is gone after deleting address CR", Label("delete-secret-check"), func() {
-				By("deploy a broker cr")
-				brokerCr, createdBrokerCr := DeployCustomBroker(defaultNamespace, nil)
+			By("verify the configurationManaged attribute of the queue is true")
+			podOrdinal := strconv.FormatInt(0, 10)
+			podName := namer.CrToSS(brokerCr.Name) + "-" + podOrdinal
 
-				By("deploy an address cr")
-				addressCr, createdAddressCr := DeployCustomAddress(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemisAddress) {
-					candidate.Spec.AddressName = addressName
-					candidate.Spec.QueueName = &queueName
-					candidate.Spec.RoutingType = &anycastType
-					candidate.Spec.RemoveFromBrokerOnDelete = true
-				})
+			CheckQueueExistInPod(brokerCr.Name, podName, queueName, defaultNamespace)
 
-				By("verify the configurationManaged attribute of the queue is true")
-				podOrdinal := strconv.FormatInt(0, 10)
-				podName := namer.CrToSS(brokerCr.Name) + "-" + podOrdinal
+			CheckQueueAttribute(brokerCr.Name, podName, defaultNamespace, queueName, addressName, "anycast", "ConfigurationManaged", "true")
 
-				CheckQueueExistInPod(brokerCr.Name, podName, queueName, defaultNamespace)
-				Eventually(func(g Gomega) {
-					expectedSecuritySecret := &corev1.Secret{}
-					expectedSecuritySecretKey := types.NamespacedName{Name: "secret-address-" + addressCr.Name, Namespace: defaultNamespace}
-					g.Expect(k8sClient.Get(ctx, expectedSecuritySecretKey, expectedSecuritySecret)).Should(Succeed())
-				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			// cleanup
+			CleanResource(createdBrokerCr, brokerCr.Name, defaultNamespace)
+			CleanResource(createdAddressCr, addressCr.Name, defaultNamespace)
+		})
 
-				By("delete the address cr " + addressCr.Name)
+		It("Verifying the lscrs secret is gone after deleting address CR", Label("delete-secret-check"), func() {
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
+			By("deploy a broker cr")
+			brokerCr, createdBrokerCr := DeployCustomBroker(defaultNamespace, nil)
 
-				CleanResource(createdAddressCr, addressCr.Name, defaultNamespace)
-
-				Eventually(func(g Gomega) {
-					expectedSecuritySecret := &corev1.Secret{}
-					expectedSecuritySecretKey := types.NamespacedName{Name: "secret-address-" + addressCr.Name, Namespace: defaultNamespace}
-					g.Expect(k8sClient.Get(ctx, expectedSecuritySecretKey, expectedSecuritySecret)).ShouldNot(Succeed())
-				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-
-				//cleanup
-				By("clean up resources")
-				CleanResource(createdBrokerCr, brokerCr.Name, defaultNamespace)
+			By("deploy an address cr")
+			addressCr, createdAddressCr := DeployCustomAddress(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemisAddress) {
+				candidate.Spec.AddressName = addressName
+				candidate.Spec.QueueName = &queueName
+				candidate.Spec.RoutingType = &anycastType
+				candidate.Spec.RemoveFromBrokerOnDelete = true
 			})
 
-			It("configurationManaged default should be true (with queue configuration)", func() {
-				By("deploy a broker cr")
-				brokerCr, createdBrokerCr := DeployCustomBroker(defaultNamespace, nil)
+			By("verify the configurationManaged attribute of the queue is true")
+			podOrdinal := strconv.FormatInt(0, 10)
+			podName := namer.CrToSS(brokerCr.Name) + "-" + podOrdinal
 
-				By("deploy an address cr")
-				_, createdAddressCr := DeployCustomAddress(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemisAddress) {
-					candidate.Spec.AddressName = addressName
-					candidate.Spec.QueueName = &queueName
-					candidate.Spec.QueueConfiguration = &brokerv1beta1.QueueConfigurationType{
-						RoutingType: &anycastType,
-					}
-				})
+			CheckQueueExistInPod(brokerCr.Name, podName, queueName, defaultNamespace)
+			Eventually(func(g Gomega) {
+				expectedSecuritySecret := &corev1.Secret{}
+				expectedSecuritySecretKey := types.NamespacedName{Name: "secret-address-" + addressCr.Name, Namespace: defaultNamespace}
+				g.Expect(k8sClient.Get(ctx, expectedSecuritySecretKey, expectedSecuritySecret)).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-				By("verify the configurationManaged attribute of the queue is true")
-				podOrdinal := strconv.FormatInt(0, 10)
-				podName := namer.CrToSS(brokerCr.Name) + "-" + podOrdinal
+			By("delete the address cr " + addressCr.Name)
 
-				CheckQueueExistInPod(brokerCr.Name, podName, queueName, defaultNamespace)
+			CleanResource(createdAddressCr, addressCr.Name, defaultNamespace)
 
-				CheckQueueAttribute(brokerCr.Name, podName, defaultNamespace, queueName, addressName, "anycast", "ConfigurationManaged", "true")
+			Eventually(func(g Gomega) {
+				expectedSecuritySecret := &corev1.Secret{}
+				expectedSecuritySecretKey := types.NamespacedName{Name: "secret-address-" + addressCr.Name, Namespace: defaultNamespace}
+				g.Expect(k8sClient.Get(ctx, expectedSecuritySecretKey, expectedSecuritySecret)).ShouldNot(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-				//cleanup
-				CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
-				CleanResource(createdAddressCr, createdAddressCr.Name, defaultNamespace)
+			// cleanup
+			By("clean up resources")
+			CleanResource(createdBrokerCr, brokerCr.Name, defaultNamespace)
+		})
+
+		It("configurationManaged default should be true (with queue configuration)", func() {
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
+			By("deploy a broker cr")
+			brokerCr, createdBrokerCr := DeployCustomBroker(defaultNamespace, nil)
+
+			By("deploy an address cr")
+			_, createdAddressCr := DeployCustomAddress(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemisAddress) {
+				candidate.Spec.AddressName = addressName
+				candidate.Spec.QueueName = &queueName
+				candidate.Spec.QueueConfiguration = &brokerv1beta1.QueueConfigurationType{
+					RoutingType: &anycastType,
+				}
 			})
-		} else {
-			fmt.Println("Test skipped as it requires an existing cluster")
-		}
+
+			By("verify the configurationManaged attribute of the queue is true")
+			podOrdinal := strconv.FormatInt(0, 10)
+			podName := namer.CrToSS(brokerCr.Name) + "-" + podOrdinal
+
+			CheckQueueExistInPod(brokerCr.Name, podName, queueName, defaultNamespace)
+
+			CheckQueueAttribute(brokerCr.Name, podName, defaultNamespace, queueName, addressName, "anycast", "ConfigurationManaged", "true")
+
+			// cleanup
+			CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
+			CleanResource(createdAddressCr, createdAddressCr.Name, defaultNamespace)
+		})
 	})
 
 	Context("broker with address custom resources", Label("broker-address-res"), func() {
-		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			queueName := "myqueue"
-			It("address after recreating broker cr", func() {
-				By("deploy a broker cr")
-				brokerCr, createdBrokerCr := DeployCustomBroker(defaultNamespace, nil)
+		queueName := "myqueue"
+		It("address after recreating broker cr", func() {
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
+			By("deploy a broker cr")
+			brokerCr, createdBrokerCr := DeployCustomBroker(defaultNamespace, nil)
 
-				By("deploy an address cr")
-				_, createdAddressCr := DeployCustomAddress(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemisAddress) {
-					candidate.Spec.AddressName = "myaddress"
-					candidate.Spec.QueueName = &queueName
-				})
-
-				By("verify the queue is created")
-				podOrdinal := strconv.FormatInt(0, 10)
-				podName := namer.CrToSS(brokerCr.Name) + "-" + podOrdinal
-
-				CheckQueueExistInPod(brokerCr.Name, podName, queueName, defaultNamespace)
-
-				By("delete the broker cr")
-				CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
-
-				By("re-deploy the broker cr")
-				brokerCr, createdBrokerCr = DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
-					candidate.Name = brokerCr.Name
-				})
-
-				By("verify the queue is re-created")
-				CheckQueueExistInPod(brokerCr.Name, podName, queueName, defaultNamespace)
-
-				//cleanup
-				CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
-				CleanResource(createdAddressCr, createdAddressCr.Name, defaultNamespace)
+			By("deploy an address cr")
+			_, createdAddressCr := DeployCustomAddress(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemisAddress) {
+				candidate.Spec.AddressName = "myaddress"
+				candidate.Spec.QueueName = &queueName
 			})
-		} else {
-			fmt.Println("Test skipped as it requires an existing cluster")
-		}
+
+			By("verify the queue is created")
+			podOrdinal := strconv.FormatInt(0, 10)
+			podName := namer.CrToSS(brokerCr.Name) + "-" + podOrdinal
+
+			CheckQueueExistInPod(brokerCr.Name, podName, queueName, defaultNamespace)
+
+			By("delete the broker cr")
+			CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
+
+			By("re-deploy the broker cr")
+			brokerCr, createdBrokerCr = DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
+				candidate.Name = brokerCr.Name
+			})
+
+			By("verify the queue is re-created")
+			CheckQueueExistInPod(brokerCr.Name, podName, queueName, defaultNamespace)
+
+			// cleanup
+			CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
+			CleanResource(createdAddressCr, createdAddressCr.Name, defaultNamespace)
+		})
 	})
 
 	Context("address controller test with reconcile", func() {
@@ -348,6 +352,10 @@ var _ = Describe("Address controller tests", func() {
 
 		It("Scale down, verify RemoveFromBrokerOnDelete", func() {
 
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
+
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
 			crd.Spec.DeploymentPlan.Size = common.Int32ToPtr(2)
@@ -365,7 +373,7 @@ var _ = Describe("Address controller tests", func() {
 
 			Expect(k8sClient.Create(ctx, &addressCrd)).Should(Succeed())
 
-			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			if true {
 
 				By("Deploying a broker pair")
 				Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
@@ -409,8 +417,11 @@ var _ = Describe("Address controller tests", func() {
 			}
 
 			// cleanup
-			k8sClient.Delete(ctx, &addressCrd)
-			k8sClient.Delete(ctx, &crd)
+			// addressCrd was already deleted inside the if-block (RemoveFromBrokerOnDelete path);
+			// ignore NotFound so the cleanup does not fail when USE_EXISTING_CLUSTER=true.
+			deleteErr := k8sClient.Delete(ctx, &addressCrd)
+			Expect(deleteErr == nil || errors.IsNotFound(deleteErr)).To(BeTrue())
+			Expect(k8sClient.Delete(ctx, &crd)).To(Succeed())
 		})
 	})
 
@@ -506,12 +517,15 @@ var _ = Describe("Address controller tests", func() {
 				Expect(k8sClient.Delete(ctx, &addressCrd)).Should(Succeed())
 				Expect(k8sClient.Delete(ctx, &crd)).Should(Succeed())
 			} else {
-				fmt.Println("Test skipped as it requires existing cluster with operator installed")
+				Skip("Test skipped as it requires existing cluster with operator installed")
 			}
 
 		})
 
 		It("create address with name only", func() {
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 			crd := generateArtemisSpec(defaultNamespace)
 			Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
 
@@ -562,6 +576,10 @@ var _ = Describe("Address controller tests", func() {
 
 		It("address creation via agent", func() {
 
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
+
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
 			crd.Spec.DeploymentPlan.Size = common.Int32ToPtr(1)
@@ -580,7 +598,7 @@ var _ = Describe("Address controller tests", func() {
 
 			Expect(k8sClient.Create(ctx, &addressCrd)).Should(Succeed())
 
-			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			if true {
 
 				By("Deploying a broker")
 				Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
@@ -609,11 +627,15 @@ var _ = Describe("Address controller tests", func() {
 			}
 
 			// cleanup
-			k8sClient.Delete(ctx, &addressCrd)
-			k8sClient.Delete(ctx, &crd)
+			Expect(k8sClient.Delete(ctx, &addressCrd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, &crd)).To(Succeed())
 		})
 
 		It("address creation before controller manager restart", func() {
+
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
 
 			By("By deploying address cr in advance")
 
@@ -673,11 +695,15 @@ var _ = Describe("Address controller tests", func() {
 			}
 
 			// cleanup
-			k8sClient.Delete(ctx, &addressCrd)
-			k8sClient.Delete(ctx, &crd)
+			Expect(k8sClient.Delete(ctx, &addressCrd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, &crd)).To(Succeed())
 		})
 
 		It("address creation via with ApplyToCrNames before broker", func() {
+
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
 
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
@@ -698,7 +724,7 @@ var _ = Describe("Address controller tests", func() {
 
 			Expect(k8sClient.Create(ctx, &addressCrd)).Should(Succeed())
 
-			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			if true {
 
 				By("Deploying a broker")
 				Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
@@ -728,18 +754,22 @@ var _ = Describe("Address controller tests", func() {
 			}
 
 			// cleanup
-			k8sClient.Delete(ctx, &addressCrd)
-			k8sClient.Delete(ctx, &crd)
+			Expect(k8sClient.Delete(ctx, &addressCrd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, &crd)).To(Succeed())
 		})
 
 		It("address creation via with ApplyToCrNames after broker", func() {
+
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
 
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
 			crd.Spec.DeploymentPlan.Size = common.Int32ToPtr(1)
 			crd.Spec.DeploymentPlan.JolokiaAgentEnabled = true
 
-			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			if true {
 
 				By("Deploying a broker")
 				Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
@@ -780,14 +810,17 @@ var _ = Describe("Address controller tests", func() {
 					}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 				}
 
-				k8sClient.Delete(ctx, &addressCrd)
+				Expect(k8sClient.Delete(ctx, &addressCrd)).To(Succeed())
 			}
 
 			// cleanup
-			k8sClient.Delete(ctx, &crd)
+			Expect(k8sClient.Delete(ctx, &crd)).To(Succeed())
 		})
-
 		It("address creation with multiple namespaces before broker", func() {
+
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
 
 			ctx := context.Background()
 
@@ -809,7 +842,7 @@ var _ = Describe("Address controller tests", func() {
 			otherCrd.Spec.DeploymentPlan.Size = common.Int32ToPtr(2)
 			otherCrd.Spec.DeploymentPlan.JolokiaAgentEnabled = true
 
-			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			if true {
 
 				By("By deploying address cr after ready")
 				addressName := "A4"
@@ -883,14 +916,14 @@ var _ = Describe("Address controller tests", func() {
 					}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 				}
 
-				k8sClient.Delete(ctx, &addressCrd)
-				k8sClient.Delete(ctx, &otherAddressCrd)
+				Expect(k8sClient.Delete(ctx, &addressCrd)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, &otherAddressCrd)).To(Succeed())
 			}
 
 			// cleanup
-			k8sClient.Delete(ctx, &crd)
-			k8sClient.Delete(ctx, &otherCrd)
-			k8sClient.Delete(ctx, otherNS)
+			Expect(k8sClient.Delete(ctx, &crd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, &otherCrd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, otherNS)).To(Succeed())
 		})
 
 		It("address creation with multiple ApplyToCrNames", func() {
@@ -996,7 +1029,7 @@ var _ = Describe("Address controller tests", func() {
 					}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 				}
 
-				k8sClient.Delete(ctx, &addressCrd)
+				Expect(k8sClient.Delete(ctx, &addressCrd)).To(Succeed())
 				// cleanup
 				CleanResource(crd0, crd0.Name, defaultNamespace)
 				CleanResource(crd1, crd1.Name, defaultNamespace)
@@ -1008,6 +1041,9 @@ var _ = Describe("Address controller tests", func() {
 
 	Context("Address conversion test", Label("address-conversion-test"), func() {
 		It("convert empty address CR", func() {
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 			v1beta1AddressCR := brokerv1beta1.ActiveMQArtemisAddress{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "ActiveMQArtemisAddress",
@@ -1352,17 +1388,12 @@ func CheckQueueAttribute(brokerCrName string, podName string, namespace string, 
 		g.Expect(sfsFound.Status.ReadyReplicas).Should(BeEquivalentTo(1))
 	}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-	podKey := types.NamespacedName{
-		Name:      podName,
-		Namespace: namespace,
-	}
-	pod := &corev1.Pod{}
-	Eventually(func(g Gomega) {
-		g.Expect(k8sClient.Get(ctx, podKey, pod)).Should(Succeed())
-		jolokia := jolokia.GetJolokia(k8sClient, pod.Status.PodIP, "8161", "/console/jolokia", "", "", "http")
-		data, err := jolokia.Read("org.apache.activemq.artemis:broker=\"amq-broker\",address=\"" + addressName + "\",component=addresses,queue=\"" + queueName + "\",routing-type=\"" + routingType + "\",subcomponent=queues/" + attrName)
-		g.Expect(err).To(BeNil())
-		g.Expect(data.Value).Should(ContainSubstring(attrValueAsString), data.Value)
+	curlUrl := "http://" + podName + ":8161/console/jolokia/read/org.apache.activemq.artemis:broker=%22amq-broker%22,address=%22" + addressName + "%22,component=addresses,queue=%22" + queueName + "%22,routing-type=%22" + routingType + "%22,subcomponent=queues/" + attrName
+	curlCmd := []string{"curl", "-s", "-H", "Origin: http://localhost:8161", "-u", "admin:admin", curlUrl}
 
+	Eventually(func(g Gomega) {
+		result, err := RunCommandInPodWithNamespace(podName, namespace, brokerCrName+"-container", curlCmd)
+		g.Expect(err).To(BeNil())
+		g.Expect(*result).To(ContainSubstring(attrValueAsString))
 	}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 }

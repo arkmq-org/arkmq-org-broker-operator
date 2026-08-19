@@ -369,14 +369,14 @@ var _ = Describe("broker-service-poc", func() {
 			Expect(k8sClient.Create(ctx, appClientPemcfgSecret, &client.CreateOptions{})).Should(Succeed())
 
 			By("provisioning an app, publisher and consumers, using the broker image to access the artemis client from within the cluster")
-			jobTemplate := func(name string, replicas int32, command []string) batchv1.Job {
+			jobTemplate := func(name string, command []string) batchv1.Job {
 				appLables := map[string]string{"app": name}
 				return batchv1.Job{
 
 					TypeMeta:   metav1.TypeMeta{Kind: "Job", APIVersion: "batch/v1"},
 					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: defaultNamespace, Labels: appLables},
 					Spec: batchv1.JobSpec{
-						Parallelism: common.Int32ToPtr(replicas),
+						Parallelism: common.Int32ToPtr(1),
 						Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: appLables},
 							Spec: corev1.PodSpec{
 								Containers: []corev1.Container{
@@ -473,7 +473,6 @@ var _ = Describe("broker-service-poc", func() {
 			By("deploying single producer to send one message")
 			producer := jobTemplate(
 				"producer",
-				1,
 				[]string{"/bin/sh", "-c", "exec java -classpath /opt/amq/lib/*:/opt/amq/lib/extra/* org.apache.activemq.artemis.cli.Artemis producer --protocol=AMQP --user p --password passwd --url " + serviceUrl + " --message-count 1 --destination queue://APP.JOBS;"},
 			)
 			Expect(k8sClient.Create(ctx, &producer)).Should(Succeed())
@@ -494,7 +493,6 @@ var _ = Describe("broker-service-poc", func() {
 			By("deploying consumer")
 			consumer := jobTemplate(
 				"consumer",
-				1,
 				[]string{"/bin/sh", "-c", "exec java -classpath /opt/amq/lib/*:/opt/amq/lib/extra/* org.apache.activemq.artemis.cli.Artemis consumer --protocol=AMQP --user p --password passwd --url " + serviceUrl + " --message-count 1 --destination queue://APP.JOBS;"},
 			)
 			Expect(k8sClient.Create(ctx, &consumer)).Should(Succeed())
@@ -520,7 +518,6 @@ var _ = Describe("broker-service-poc", func() {
 
 			subscriber1 := jobTemplate(
 				clientId,
-				1,
 				[]string{"/bin/sh", "-c", "exec java -classpath /opt/amq/lib/*:/opt/amq/lib/extra/* org.apache.activemq.artemis.cli.Artemis consumer --protocol=AMQP --url " + serviceUrl + " --message-count=1 --durable --clientID=" + clientId + " --subscriptionName=" + subName + " --destination topic://APP.COMMANDS;"},
 			)
 			Expect(k8sClient.Create(ctx, &subscriber1)).Should(Succeed())
@@ -529,7 +526,6 @@ var _ = Describe("broker-service-poc", func() {
 			subName = "sub-2"
 			subscriber2 := jobTemplate(
 				clientId,
-				1,
 				[]string{"/bin/sh", "-c", "exec java -classpath /opt/amq/lib/*:/opt/amq/lib/extra/* org.apache.activemq.artemis.cli.Artemis consumer --protocol=AMQP --url " + serviceUrl + " --message-count=1 --durable --clientID=" + clientId + " --subscriptionName=" + subName + " --destination topic://APP.COMMANDS;"},
 			)
 			Expect(k8sClient.Create(ctx, &subscriber2)).Should(Succeed())
@@ -538,7 +534,6 @@ var _ = Describe("broker-service-poc", func() {
 
 			publisher := jobTemplate(
 				"publisher",
-				1,
 				[]string{"/bin/sh", "-c", "exec java -classpath /opt/amq/lib/*:/opt/amq/lib/extra/* org.apache.activemq.artemis.cli.Artemis producer --protocol=AMQP --url " + serviceUrl + " --message-count 1 --destination topic://APP.COMMANDS;exit $?"},
 			)
 			Expect(k8sClient.Create(ctx, &publisher)).Should(Succeed())
@@ -835,7 +830,7 @@ var _ = Describe("broker-service-poc", func() {
 					fmt.Printf("Prometheus metrics scrape: status=%d\n", resp.StatusCode)
 					g.Expect(resp.StatusCode).Should(Equal(200))
 
-					defer resp.Body.Close()
+					defer func() { _ = resp.Body.Close() }()
 					body, err := io.ReadAll(resp.Body)
 					g.Expect(err).Should(Succeed())
 

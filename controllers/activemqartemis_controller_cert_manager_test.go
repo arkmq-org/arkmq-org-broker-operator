@@ -442,7 +442,7 @@ var _ = Describe("artemis controller with cert manager test", Label("controller-
 					client, err := amqp.Dial(url, amqp.ConnSASLPlain("dummy-user", "dummy-pass"), amqp.ConnTLS(true), connTLSConfig)
 					g.Expect(err).Should(BeNil())
 					g.Expect(client).ShouldNot(BeNil())
-					defer client.Close()
+					defer func() { _ = client.Close() }()
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 			}
 
@@ -1188,7 +1188,6 @@ func testConfiguredWithCertAndBundle(certSecret string, caSecret string) {
 		candidate.Spec.Console.TrustSecret = &caSecret
 		candidate.Spec.IngressDomain = defaultTestIngressDomain
 	})
-	pod0Name := createdBrokerCr.Name + "-ss-0"
 	By("Checking the broker status reflect the truth")
 	Eventually(func(g Gomega) {
 		crdRef := types.NamespacedName{
@@ -1212,7 +1211,7 @@ func testConfiguredWithCertAndBundle(certSecret string, caSecret string) {
 
 	By("Deploying the broker cr exposing acceptor ssl and connector ssl")
 	brokerCrName = brokerCrNameBase + "1"
-	pod0Name = brokerCrName + "-ss-0"
+	pod0Name := brokerCrName + "-ss-0"
 	brokerCr, createdBrokerCr = DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
 
 		candidate.Name = brokerCrName

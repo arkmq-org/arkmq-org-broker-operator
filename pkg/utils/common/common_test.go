@@ -206,10 +206,10 @@ var _ = Describe("Common Test", func() {
 			UnsetOperatorNameSpace()
 			operatorCertSecretName = nil
 			operatorCASecretName = nil
-			os.Unsetenv("ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME")
-			os.Unsetenv("ACTIVEMQ_ARTEMIS_MANAGER_CERT_SECRET_NAME")
-			os.Unsetenv("ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME")
-			os.Unsetenv("ACTIVEMQ_ARTEMIS_MANAGER_CA_SECRET_NAME")
+			Expect(os.Unsetenv("ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME")).To(Succeed())
+			Expect(os.Unsetenv("ACTIVEMQ_ARTEMIS_MANAGER_CERT_SECRET_NAME")).To(Succeed())
+			Expect(os.Unsetenv("ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME")).To(Succeed())
+			Expect(os.Unsetenv("ACTIVEMQ_ARTEMIS_MANAGER_CA_SECRET_NAME")).To(Succeed())
 		})
 
 		It("should use new default secret when it exists", func() {
@@ -249,7 +249,7 @@ var _ = Describe("Common Test", func() {
 		})
 
 		It("should not fall back to legacy when new env var is set", func() {
-			os.Setenv("ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME", "custom-cert")
+			Expect(os.Setenv("ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME", "custom-cert")).To(Succeed())
 
 			legacySecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: LegacyOperatorCertSecretName, Namespace: testNamespace},
@@ -263,7 +263,7 @@ var _ = Describe("Common Test", func() {
 		})
 
 		It("should not fall back to legacy when legacy env var is set", func() {
-			os.Setenv("ACTIVEMQ_ARTEMIS_MANAGER_CA_SECRET_NAME", "custom-ca")
+			Expect(os.Setenv("ACTIVEMQ_ARTEMIS_MANAGER_CA_SECRET_NAME", "custom-ca")).To(Succeed())
 
 			legacySecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: LegacyOperatorCASecretName, Namespace: testNamespace},

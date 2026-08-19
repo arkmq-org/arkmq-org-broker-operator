@@ -145,7 +145,7 @@ var _ = Describe("security without controller", func() {
 			}}
 
 			By("removing management.xml authorization section from artemis create with a resource template patch")
-			var kindMatchSs string = "StatefulSet"
+			kindMatchSs := "StatefulSet"
 
 			crd.Spec.ResourceTemplates = []brokerv1beta1.ResourceTemplate{
 				{

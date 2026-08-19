@@ -31,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -1395,11 +1394,14 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 	Context("CEL Expression Validation", func() {
 		It("sets Valid=False when appSelectorExpression has syntax error", func() {
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 			ctx := context.Background()
 
 			// Create namespace
 			ns := &corev1.Namespace{
-				ObjectMeta: v1.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-invalid-cel",
 				},
 			}
@@ -1407,7 +1409,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			// Create BrokerService with invalid CEL expression
 			service := &broker.BrokerService{
-				ObjectMeta: v1.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name:      "invalid-cel-service",
 					Namespace: ns.Name,
 				},
@@ -1428,7 +1430,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				// Find Valid condition
 				validCondition := meta.FindStatusCondition(updatedService.Status.Conditions, broker.ValidConditionType)
 				g.Expect(validCondition).NotTo(BeNil())
-				g.Expect(validCondition.Status).To(Equal(v1.ConditionFalse))
+				g.Expect(validCondition.Status).To(Equal(metav1.ConditionFalse))
 				g.Expect(validCondition.Reason).To(Equal(broker.ValidConditionSpecSelectorError))
 				g.Expect(validCondition.Message).To(ContainSubstring("invalid appSelectorExpression"))
 				g.Expect(validCondition.Message).To(ContainSubstring("failed to compile CEL expression"))
@@ -1440,11 +1442,14 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 		})
 
 		It("sets Valid=False when appSelectorExpression returns non-boolean", func() {
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 			ctx := context.Background()
 
 			// Create namespace
 			ns := &corev1.Namespace{
-				ObjectMeta: v1.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-nonbool-cel",
 				},
 			}
@@ -1452,7 +1457,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			// Create BrokerService with expression that returns string
 			service := &broker.BrokerService{
-				ObjectMeta: v1.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name:      "nonbool-cel-service",
 					Namespace: ns.Name,
 				},
@@ -1473,7 +1478,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				// Find Valid condition
 				validCondition := meta.FindStatusCondition(updatedService.Status.Conditions, broker.ValidConditionType)
 				g.Expect(validCondition).NotTo(BeNil())
-				g.Expect(validCondition.Status).To(Equal(v1.ConditionFalse))
+				g.Expect(validCondition.Status).To(Equal(metav1.ConditionFalse))
 				g.Expect(validCondition.Reason).To(Equal(broker.ValidConditionSpecSelectorError))
 				g.Expect(validCondition.Message).To(ContainSubstring("invalid appSelectorExpression"))
 				g.Expect(validCondition.Message).To(ContainSubstring("must return boolean"))
@@ -1485,11 +1490,14 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 		})
 
 		It("sets Valid=True when appSelectorExpression is valid", func() {
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 			ctx := context.Background()
 
 			// Create namespace
 			ns := &corev1.Namespace{
-				ObjectMeta: v1.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-valid-cel",
 				},
 			}
@@ -1497,7 +1505,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			// Create BrokerService with valid CEL expression
 			service := &broker.BrokerService{
-				ObjectMeta: v1.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{
 					Name:      "valid-cel-service",
 					Namespace: ns.Name,
 				},
@@ -1518,7 +1526,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				// Find Valid condition
 				validCondition := meta.FindStatusCondition(updatedService.Status.Conditions, broker.ValidConditionType)
 				g.Expect(validCondition).NotTo(BeNil())
-				g.Expect(validCondition.Status).To(Equal(v1.ConditionTrue))
+				g.Expect(validCondition.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(validCondition.Reason).To(Equal(broker.ValidConditionSuccessReason))
 			}, timeout, interval).Should(Succeed())
 

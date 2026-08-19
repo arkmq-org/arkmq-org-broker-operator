@@ -16,6 +16,7 @@ limitations under the License.
 package controllers
 
 import (
+	"context"
 	"os"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -43,6 +44,10 @@ var _ = Describe("Read-only root filesystem support", Label("read-only-root-file
 
 	Context("using container security context to enable read-only root filesystem and resource templates to patch StatefulSet", Label("resource-templates"), func() {
 		It("successfully deploys and connects 2 clustered brokers", func() {
+
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 
 			By("deploy a broker cr")
 			cr, _ := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
@@ -159,11 +164,25 @@ var _ = Describe("Read-only root filesystem support", Label("read-only-root-file
 					g.Expect(meta.IsStatusConditionTrue(cr.Status.Conditions, brokerv1beta1.ReadyConditionType)).To(BeTrue())
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
+				By("reading broker credentials")
+				credSecret := &corev1.Secret{}
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: cr.Name + "-credentials-secret", Namespace: cr.Namespace}, credSecret)).Should(Succeed())
+					g.Expect(credSecret.Data["AMQ_USER"]).ShouldNot(BeEmpty())
+					g.Expect(credSecret.Data["AMQ_PASSWORD"]).ShouldNot(BeEmpty())
+				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+				brokerUser := string(credSecret.Data["AMQ_USER"])
+				brokerPassword := string(credSecret.Data["AMQ_PASSWORD"])
+
 				By("checking cluster connections")
 				for _, ordinal := range []string{"0", "1"} {
+					podName := cr.Name + "-ss-" + ordinal
 					Eventually(func(g Gomega) {
-						stdOutContent := ExecOnPod(cr.Name+"-ss-"+ordinal, cr.Name, cr.Namespace,
-							[]string{"amq-broker/bin/artemis", "check", "node", "--peers", "2"}, g)
+						stdOutContent := ExecOnPod(podName, cr.Name, cr.Namespace,
+							[]string{"amq-broker/bin/artemis", "check", "node", "--peers", "2",
+								"--url", "tcp://" + podName + ":61616",
+								"--user", brokerUser,
+								"--password", brokerPassword}, g)
 						g.Expect(stdOutContent).Should(ContainSubstring("success"))
 					}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 				}
@@ -175,6 +194,10 @@ var _ = Describe("Read-only root filesystem support", Label("read-only-root-file
 
 	Context("using resource templates to enable read-only filesystem and patch StatefulSet", Label("resource-templates"), func() {
 		It("successfully deploys and connects 2 clustered brokers", func() {
+
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 
 			By("deploy a broker cr")
 			cr, _ := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
@@ -289,11 +312,25 @@ var _ = Describe("Read-only root filesystem support", Label("read-only-root-file
 					g.Expect(meta.IsStatusConditionTrue(cr.Status.Conditions, brokerv1beta1.ReadyConditionType)).To(BeTrue())
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
+				By("reading broker credentials")
+				credSecret := &corev1.Secret{}
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: cr.Name + "-credentials-secret", Namespace: cr.Namespace}, credSecret)).Should(Succeed())
+					g.Expect(credSecret.Data["AMQ_USER"]).ShouldNot(BeEmpty())
+					g.Expect(credSecret.Data["AMQ_PASSWORD"]).ShouldNot(BeEmpty())
+				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+				brokerUser := string(credSecret.Data["AMQ_USER"])
+				brokerPassword := string(credSecret.Data["AMQ_PASSWORD"])
+
 				By("checking cluster connections")
 				for _, ordinal := range []string{"0", "1"} {
+					podName := cr.Name + "-ss-" + ordinal
 					Eventually(func(g Gomega) {
-						stdOutContent := ExecOnPod(cr.Name+"-ss-"+ordinal, cr.Name, cr.Namespace,
-							[]string{"amq-broker/bin/artemis", "check", "node", "--peers", "2"}, g)
+						stdOutContent := ExecOnPod(podName, cr.Name, cr.Namespace,
+							[]string{"amq-broker/bin/artemis", "check", "node", "--peers", "2",
+								"--url", "tcp://" + podName + ":61616",
+								"--user", brokerUser,
+								"--password", brokerPassword}, g)
 						g.Expect(stdOutContent).Should(ContainSubstring("success"))
 					}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 				}
@@ -305,6 +342,10 @@ var _ = Describe("Read-only root filesystem support", Label("read-only-root-file
 
 	Context("using container security context to enable read-only root filesystem and extra volumes to patch StatefulSet", Label("resource-templates"), func() {
 		It("successfully deploys and connects 2 clustered brokers", func() {
+
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 
 			By("deploy a broker cr")
 			cr, _ := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
@@ -395,11 +436,25 @@ var _ = Describe("Read-only root filesystem support", Label("read-only-root-file
 					g.Expect(meta.IsStatusConditionTrue(cr.Status.Conditions, brokerv1beta1.ReadyConditionType)).To(BeTrue())
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
+				By("reading broker credentials")
+				credSecret := &corev1.Secret{}
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: cr.Name + "-credentials-secret", Namespace: cr.Namespace}, credSecret)).Should(Succeed())
+					g.Expect(credSecret.Data["AMQ_USER"]).ShouldNot(BeEmpty())
+					g.Expect(credSecret.Data["AMQ_PASSWORD"]).ShouldNot(BeEmpty())
+				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+				brokerUser := string(credSecret.Data["AMQ_USER"])
+				brokerPassword := string(credSecret.Data["AMQ_PASSWORD"])
+
 				By("checking cluster connections")
 				for _, ordinal := range []string{"0", "1"} {
+					podName := cr.Name + "-ss-" + ordinal
 					Eventually(func(g Gomega) {
-						stdOutContent := ExecOnPod(cr.Name+"-ss-"+ordinal, cr.Name, cr.Namespace,
-							[]string{"amq-broker/bin/artemis", "check", "node", "--peers", "2"}, g)
+						stdOutContent := ExecOnPod(podName, cr.Name, cr.Namespace,
+							[]string{"amq-broker/bin/artemis", "check", "node", "--peers", "2",
+								"--url", "tcp://" + podName + ":61616",
+								"--user", brokerUser,
+								"--password", brokerPassword}, g)
 						g.Expect(stdOutContent).Should(ContainSubstring("success"))
 					}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 				}
