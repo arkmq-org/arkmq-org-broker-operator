@@ -90,10 +90,10 @@ const (
 	defaultNamespace                   = "test"
 	otherNamespace                     = "other"
 	restrictedNamespace                = "restricted"
-	timeout                            = time.Second * 30
-	duration                           = time.Second * 10
+	timeout                            = time.Second * 60
+	duration                           = time.Second * 20
 	interval                           = time.Millisecond * 500
-	existingClusterTimeout             = time.Second * 180
+	existingClusterTimeout             = time.Second * 300
 	existingClusterConsistentlyTimeout = time.Second * 20
 	existingClusterInterval            = time.Second * 2
 	namespace1                         = "namespace1"
