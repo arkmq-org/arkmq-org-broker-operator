@@ -468,6 +468,28 @@ func testWatchNamespace(kind string, g Gomega, testFunc func(g Gomega)) {
 	g.Expect(createNamespace(namespace3, nil)).To(Succeed())
 	g.Expect(createNamespace(restrictedNamespace, &restrictedSecurityPolicy)).To(Succeed())
 
+	defer func() {
+		// Each deleteNamespace call uses Eventually which can panic when the
+		// spec is already in a failed state. Wrap each call in its own
+		// recover so that a timeout on one namespace does not skip deletion
+		// attempts for the remaining namespaces, and so that
+		// createControllerManagerForSuite always runs regardless.
+		safeDelete := func(ns string) {
+			defer func() {
+				if r := recover(); r != nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "cleanup: deleteNamespace(%s) panic (recovered): %v\n", ns, r)
+				}
+			}()
+			deleteNamespace(ns, true, g)
+		}
+		shutdownControllerManager()
+		safeDelete(namespace1)
+		safeDelete(namespace2)
+		safeDelete(namespace3)
+		safeDelete(restrictedNamespace)
+		createControllerManagerForSuite()
+	}()
+
 	switch kind {
 	case "single":
 		createControllerManager(true, defaultNamespace)
@@ -480,13 +502,4 @@ func testWatchNamespace(kind string, g Gomega, testFunc func(g Gomega)) {
 	}
 
 	testFunc(g)
-
-	shutdownControllerManager()
-
-	deleteNamespace(namespace1, true, g)
-	deleteNamespace(namespace2, true, g)
-	deleteNamespace(namespace3, true, g)
-	deleteNamespace(restrictedNamespace, true, g)
-
-	createControllerManagerForSuite()
 }

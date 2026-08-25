@@ -490,7 +490,7 @@ func RunCommandInPodWithNamespace(podName string, podNamespace string, container
 		VersionedParams(&corev1.PodExecOptions{
 			Container: containerName,
 			Command:   command,
-			Stdin:     true,
+			Stdin:     false,
 			Stdout:    true,
 			Stderr:    true,
 		}, runtime.NewParameterCodec(scheme.Scheme))
@@ -508,7 +508,7 @@ func RunCommandInPodWithNamespace(podName string, podNamespace string, container
 	defer cancel()
 
 	err = exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
-		Stdin:  os.Stdin,
+		Stdin:  nil,
 		Stdout: &consumerCapturedOut,
 		Stderr: &consumerCapturedErr,
 		Tty:    false,
@@ -576,7 +576,7 @@ func LogsOfPod(podWithOrdinal string, brokerName string, namespace string, g Gom
 		}, runtime.NewParameterCodec(scheme.Scheme)).Stream(context.TODO())
 	g.Expect(err).To(BeNil())
 
-	defer readCloser.Close()
+	defer func() { _ = readCloser.Close() }()
 
 	result, err := io.ReadAll(readCloser)
 	g.Expect(err).To(BeNil())
@@ -605,7 +605,7 @@ func ExecOnPod(podWithOrdinal string, brokerName string, namespace string, comma
 		VersionedParams(&corev1.PodExecOptions{
 			Container: brokerName + "-container",
 			Command:   command,
-			Stdin:     true,
+			Stdin:     false,
 			Stdout:    true,
 			Stderr:    true,
 		}, runtime.NewParameterCodec(scheme.Scheme))
@@ -621,7 +621,7 @@ func ExecOnPod(podWithOrdinal string, brokerName string, namespace string, comma
 	defer cancel()
 
 	err = exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
-		Stdin:  os.Stdin,
+		Stdin:  nil,
 		Stdout: &outPutbuffer,
 		Stderr: &errBuffer,
 		Tty:    false,
@@ -729,7 +729,7 @@ func GetOperatorLog(ns string) (*string, error) {
 
 						var podLogs io.ReadCloser
 						if podLogs, err = req.Stream(context.Background()); err == nil {
-							defer podLogs.Close()
+							defer func() { _ = podLogs.Close() }()
 							buf := new(bytes.Buffer)
 							if _, err = io.Copy(buf, podLogs); err == nil {
 								str := buf.String()
@@ -1043,6 +1043,23 @@ func InstallCert(certName string, namespace string, customFunc func(candidate *c
 		customFunc(&cmCert)
 	}
 
+	// Delete any stale secret left behind by a previous cert-manager issuance.
+	// cert-manager does NOT delete the secret when the Certificate CR is deleted,
+	// so we must remove it ourselves to prevent InstallCert from returning with
+	// stale certificate material.
+	staleSecret := corev1.Secret{}
+	secretKey := types.NamespacedName{Name: cmCert.Spec.SecretName, Namespace: namespace}
+	getErr := k8sClient.Get(ctx, secretKey, &staleSecret)
+	Expect(client.IgnoreNotFound(getErr)).To(Succeed())
+	if getErr == nil {
+		err := k8sClient.Delete(ctx, &staleSecret)
+		Expect(client.IgnoreNotFound(err)).To(Succeed())
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, secretKey, &staleSecret)
+			g.Expect(errors.IsNotFound(err)).To(BeTrue())
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+	}
+
 	k8sClient.Delete(ctx, &cmCert)
 	Expect(k8sClient.Create(ctx, &cmCert, &client.CreateOptions{})).To(Succeed())
 
@@ -1052,7 +1069,6 @@ func InstallCert(certName string, namespace string, customFunc func(candidate *c
 		g.Expect(k8sClient.Get(ctx, certKey, cert)).Should(Succeed())
 	}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-	secretKey := types.NamespacedName{Name: cmCert.Spec.SecretName, Namespace: namespace}
 	secret := corev1.Secret{}
 	Eventually(func(g Gomega) {
 		g.Expect(k8sClient.Get(ctx, secretKey, &secret)).Should(Succeed())
@@ -1065,6 +1081,23 @@ func InstallCaBundle(bundleName string, sourceSecret string, caFileName string) 
 	bundle := tm.Bundle{}
 	if k8sClient.Get(ctx, types.NamespacedName{Name: bundleName, Namespace: defaultNamespace}, &bundle) == nil {
 		CleanResource(&bundle, bundleName, defaultNamespace)
+	}
+
+	// Delete any stale target secret that trust-manager left in defaultNamespace from a
+	// previous Bundle. trust-manager does not garbage-collect these secrets when the
+	// Bundle CR is deleted, so remove it now to ensure the new Bundle propagates a
+	// fresh CA cert rather than returning with stale material.
+	staleTargetSecret := corev1.Secret{}
+	targetSecretKey := types.NamespacedName{Name: bundleName, Namespace: defaultNamespace}
+	getErr := k8sClient.Get(ctx, targetSecretKey, &staleTargetSecret)
+	Expect(client.IgnoreNotFound(getErr)).To(Succeed())
+	if getErr == nil {
+		err := k8sClient.Delete(ctx, &staleTargetSecret)
+		Expect(client.IgnoreNotFound(err)).To(Succeed())
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, targetSecretKey, &staleTargetSecret)
+			g.Expect(errors.IsNotFound(err)).To(BeTrue())
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 	}
 
 	bundle = tm.Bundle{
