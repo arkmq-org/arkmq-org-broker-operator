@@ -214,7 +214,7 @@ var _ = Describe("minimal", func() {
 				}
 				g.Expect(err).Should(Succeed())
 
-				defer resp.Body.Close()
+				defer func() { _ = resp.Body.Close() }()
 				body, err := io.ReadAll(resp.Body)
 				g.Expect(err).Should(Succeed())
 
@@ -339,7 +339,7 @@ hawtio=hawtio
 			}
 			Expect(k8sClient.Create(ctx, &overrideSecret)).Should(Succeed())
 			DeferCleanup(func() {
-				k8sClient.Delete(ctx, &overrideSecret)
+				_ = k8sClient.Delete(ctx, &overrideSecret) // best-effort cleanup in DeferCleanup
 			})
 
 			crd.Spec.BrokerProperties = []string{
@@ -395,7 +395,7 @@ hawtio=hawtio
 					fmt.Printf("Test 1 - Operator cert: status=%d\n", resp.StatusCode)
 					g.Expect(resp.StatusCode).Should(Equal(200))
 
-					defer resp.Body.Close()
+					defer func() { _ = resp.Body.Close() }()
 					body, err := io.ReadAll(resp.Body)
 					g.Expect(err).Should(Succeed())
 
@@ -455,7 +455,7 @@ hawtio=hawtio
 					fmt.Printf("Test 2 - New-user cert: status=%d\n", resp.StatusCode)
 					g.Expect(resp.StatusCode).Should(Equal(200))
 
-					defer resp.Body.Close()
+					defer func() { _ = resp.Body.Close() }()
 					body, err := io.ReadAll(resp.Body)
 					g.Expect(err).Should(Succeed())
 

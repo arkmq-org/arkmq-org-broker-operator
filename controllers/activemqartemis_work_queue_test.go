@@ -54,6 +54,9 @@ var _ = Describe("work queue", func() {
 
 	Context("ha pub and ha competing sub, compromised total message order", Label("slow"), func() {
 		It("validation", func() {
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
 
 				ctx := context.Background()
@@ -110,6 +113,9 @@ var _ = Describe("work queue", func() {
 
 				By("Deploying the jaas secret " + jaasSecret.Name)
 				Expect(k8sClient.Create(ctx, jaasSecret)).Should(Succeed())
+				DeferCleanup(func() {
+					CleanResource(jaasSecret, jaasSecret.Name, defaultNamespace)
+				})
 				brokerCrd.Spec.DeploymentPlan.ExtraMounts.Secrets = []string{jaasSecret.Name}
 
 				By("deploying custom logging")
@@ -125,6 +131,9 @@ var _ = Describe("work queue", func() {
 
 				loggingConfigMap := configmaps.MakeConfigMap(defaultNamespace, loggingConfigMapName, loggingData)
 				Expect(k8sClient.Create(ctx, loggingConfigMap)).Should(Succeed())
+				DeferCleanup(func() {
+					CleanResource(loggingConfigMap, loggingConfigMap.Name, defaultNamespace)
+				})
 				brokerCrd.Spec.DeploymentPlan.ExtraMounts.ConfigMaps = []string{loggingConfigMapName}
 
 				// this env var can be used in properties, as it will be part of the broker POD env
@@ -202,6 +211,9 @@ var _ = Describe("work queue", func() {
 
 				By("provisioning the broker")
 				Expect(k8sClient.Create(ctx, &brokerCrd)).Should(Succeed())
+				DeferCleanup(func() {
+					CleanResource(&brokerCrd, brokerCrd.Name, defaultNamespace)
+				})
 
 				By("provisioning loadbalanced service for this CR, for use within the cluster via dns")
 				svc := &corev1.Service{
@@ -227,6 +239,9 @@ var _ = Describe("work queue", func() {
 				}
 
 				Expect(k8sClient.Create(ctx, svc)).Should(Succeed())
+				DeferCleanup(func() {
+					CleanResource(svc, svc.Name, defaultNamespace)
+				})
 
 				createdBrokerCrd := &brokerv1beta1.ActiveMQArtemis{}
 				createdBrokerCrdKey := types.NamespacedName{
@@ -297,7 +312,7 @@ var _ = Describe("work queue", func() {
 					resp, err := http.Get("http://" + pod.Status.PodIP + ":8161/metrics")
 					g.Expect(err).Should(Succeed())
 
-					defer resp.Body.Close()
+					defer func() { _ = resp.Body.Close() }()
 					body, err := io.ReadAll(resp.Body)
 					g.Expect(err).Should(Succeed())
 
@@ -334,6 +349,9 @@ var _ = Describe("work queue", func() {
 					[]string{"/bin/sh", "-c", "/opt/amq/bin/artemis consumer --silent --protocol=AMQP --user c --password passwd --url " + serviceUrl + " --message-count " + numMessagesToConsume + " --destination queue://JOBS || (sleep 5 && exit 1)"},
 				)
 				Expect(k8sClient.Create(ctx, &consumers)).Should(Succeed())
+				DeferCleanup(func() {
+					CleanResource(&consumers, consumers.Name, defaultNamespace)
+				})
 
 				By("verifying artemis_consumer_count metric on JOBS")
 				checkJOBSConsumerNonZero := func(metrics string) bool {
@@ -353,6 +371,9 @@ var _ = Describe("work queue", func() {
 					[]string{"/bin/sh", "-c", "/opt/amq/bin/artemis producer --silent --protocol=AMQP --user p --password passwd --url " + serviceUrl + " --message-count " + numMessagesToProduce + " --destination queue://JOBS || (sleep 5 && exit 1)"},
 				)
 				Expect(k8sClient.Create(ctx, &producer)).Should(Succeed())
+				DeferCleanup(func() {
+					CleanResource(&producer, producer.Name, defaultNamespace)
+				})
 
 				By("verifying artemis_routed_message_count metric on JOBS")
 				checkJOBSRoutedNonZero := func(metrics string) bool {
@@ -376,12 +397,6 @@ var _ = Describe("work queue", func() {
 
 				}, existingClusterTimeout, existingClusterInterval*5).Should(Succeed())
 
-				CleanResource(&producer, producer.Name, defaultNamespace)
-				CleanResource(&consumers, consumers.Name, defaultNamespace)
-				CleanResource(createdBrokerCrd, brokerCrd.Name, defaultNamespace)
-				CleanResource(jaasSecret, jaasSecret.Name, defaultNamespace)
-				CleanResource(loggingConfigMap, loggingConfigMap.Name, defaultNamespace)
-				CleanResource(svc, svc.Name, defaultNamespace)
 			}
 		})
 	})

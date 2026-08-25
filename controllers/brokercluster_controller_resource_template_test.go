@@ -47,7 +47,7 @@ var _ = Describe("templates", func() {
 				brokerCrd := generateBrokerSpec(defaultNamespace)
 
 				brokerCrd.Spec.ResourceTemplates = []v1beta2.ResourceTemplate{
-					v1beta2.ResourceTemplate{
+					{
 						// match all kinds with nill selector
 						Patch: FromUnstructuredToRawExtension(&unstructured.Unstructured{
 							Object: map[string]interface{}{

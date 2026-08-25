@@ -207,6 +207,10 @@ var _ = Describe("Address controller DO", Label("do"), func() {
 
 		It("Scale down, verify RemoveFromBrokerOnDelete", Label("slow"), func() {
 
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
+
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
 			crd.Spec.DeploymentPlan.Size = common.Int32ToPtr(2)
@@ -224,51 +228,58 @@ var _ = Describe("Address controller DO", Label("do"), func() {
 
 			Expect(k8sClient.Create(ctx, &addressCrd)).Should(Succeed())
 
-			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			By("Deploying a broker pair")
+			Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
 
-				By("Deploying a broker pair")
-				Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
+			By("Checking ready on SS")
+			Eventually(func(g Gomega) {
+				key := types.NamespacedName{Name: namer.CrToSS(crd.Name), Namespace: defaultNamespace}
+				sfsFound := &appsv1.StatefulSet{}
 
-				By("Checking ready on SS")
+				g.Expect(k8sClient.Get(ctx, key, sfsFound)).Should(Succeed())
+				g.Expect(sfsFound.Status.ReadyReplicas).Should(BeEquivalentTo(2))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("Verfying address is present")
+			ordinals := []string{"0", "1"}
+			for _, ordinal := range ordinals {
+
+				podWithOrdinal := namer.CrToSS(crd.Name) + "-" + ordinal
+				command := []string{"amq-broker/bin/artemis", "address", "show", "--url", "tcp://" + podWithOrdinal + ":61616"}
+
 				Eventually(func(g Gomega) {
-					key := types.NamespacedName{Name: namer.CrToSS(crd.Name), Namespace: defaultNamespace}
-					sfsFound := &appsv1.StatefulSet{}
-
-					g.Expect(k8sClient.Get(ctx, key, sfsFound)).Should(Succeed())
-					g.Expect(sfsFound.Status.ReadyReplicas).Should(BeEquivalentTo(2))
+					stdOutContent := ExecOnPod(podWithOrdinal, crd.Name, defaultNamespace, command, g)
+					g.Expect(stdOutContent).Should(ContainSubstring(addressName))
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-
-				By("Verfying address is present")
-				ordinals := []string{"0", "1"}
-				for _, ordinal := range ordinals {
-
-					podWithOrdinal := namer.CrToSS(crd.Name) + "-" + ordinal
-					command := []string{"amq-broker/bin/artemis", "address", "show", "--url", "tcp://" + podWithOrdinal + ":61616"}
-
-					Eventually(func(g Gomega) {
-						stdOutContent := ExecOnPod(podWithOrdinal, crd.Name, defaultNamespace, command, g)
-						g.Expect(stdOutContent).Should(ContainSubstring(addressName))
-					}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-				}
-
-				By("Deleting address CR")
-				Expect(k8sClient.Delete(ctx, &addressCrd)).Should(Succeed())
-
-				By("Verifying address gone from both brokers")
-				for _, ordinal := range ordinals {
-					podWithOrdinal := namer.CrToSS(crd.Name) + "-" + ordinal
-					command := []string{"amq-broker/bin/artemis", "address", "show", "--url", "tcp://" + podWithOrdinal + ":61616"}
-
-					Eventually(func(g Gomega) {
-						stdOutContent := ExecOnPod(podWithOrdinal, crd.Name, defaultNamespace, command, g)
-						g.Expect(stdOutContent).ShouldNot(ContainSubstring(addressName))
-					}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-				}
 			}
 
-			// cleanup
-			k8sClient.Delete(ctx, &addressCrd)
-			k8sClient.Delete(ctx, &crd)
+			By("Deleting address CR")
+			Expect(k8sClient.Delete(ctx, &addressCrd)).Should(Succeed())
+
+			By("Verifying address gone from both brokers")
+			for _, ordinal := range ordinals {
+				podWithOrdinal := namer.CrToSS(crd.Name) + "-" + ordinal
+				command := []string{"amq-broker/bin/artemis", "address", "show", "--url", "tcp://" + podWithOrdinal + ":61616"}
+
+				Eventually(func(g Gomega) {
+					stdOutContent := ExecOnPod(podWithOrdinal, crd.Name, defaultNamespace, command, g)
+					g.Expect(stdOutContent).ShouldNot(ContainSubstring(addressName))
+				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			}
+
+			By("Waiting for address CR to be fully removed from Kubernetes")
+			// RemoveFromBrokerOnDelete uses a finalizer: the operator removes the address
+			// from broker pods and then strips the finalizer so Kubernetes can delete the
+			// object.  By the time the "address gone from brokers" Eventually above passes,
+			// the operator may have already finished and the CR may be fully gone.
+			// CleanClusterResource handles IsNotFound, waits for true deletion, and avoids
+			// the HTTP-410-Gone race that bare client.IgnoreNotFound(Delete) can hit when
+			// the watch-cache has already evicted the object (IsGone != IsNotFound).
+			CleanClusterResource(&addressCrd, addressCrd.Name, defaultNamespace)
+
+			// cleanup the broker StatefulSet; use CleanClusterResource so any lingering
+			// finalizer activity is waited out before the test ends.
+			CleanClusterResource(&crd, crd.Name, defaultNamespace)
 		})
 	})
 
@@ -364,7 +375,7 @@ var _ = Describe("Address controller DO", Label("do"), func() {
 				Expect(k8sClient.Delete(ctx, &addressCrd)).Should(Succeed())
 				Expect(k8sClient.Delete(ctx, &crd)).Should(Succeed())
 			} else {
-				fmt.Println("Test skipped as it requires existing cluster with operator installed")
+				Skip("Test skipped as it requires existing cluster with operator installed")
 			}
 
 		})
@@ -373,6 +384,10 @@ var _ = Describe("Address controller DO", Label("do"), func() {
 	Context("Address CR with console agent", func() {
 
 		It("address creation via agent", func() {
+
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
 
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
@@ -392,7 +407,7 @@ var _ = Describe("Address controller DO", Label("do"), func() {
 
 			Expect(k8sClient.Create(ctx, &addressCrd)).Should(Succeed())
 
-			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			if true {
 
 				By("Deploying a broker")
 				Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
@@ -421,11 +436,15 @@ var _ = Describe("Address controller DO", Label("do"), func() {
 			}
 
 			// cleanup
-			k8sClient.Delete(ctx, &addressCrd)
-			k8sClient.Delete(ctx, &crd)
+			Expect(k8sClient.Delete(ctx, &addressCrd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, &crd)).To(Succeed())
 		})
 
 		It("address creation via with ApplyToCrNames before broker", func() {
+
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
 
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
@@ -446,7 +465,7 @@ var _ = Describe("Address controller DO", Label("do"), func() {
 
 			Expect(k8sClient.Create(ctx, &addressCrd)).Should(Succeed())
 
-			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			if true {
 
 				By("Deploying a broker")
 				Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
@@ -476,18 +495,22 @@ var _ = Describe("Address controller DO", Label("do"), func() {
 			}
 
 			// cleanup
-			k8sClient.Delete(ctx, &addressCrd)
-			k8sClient.Delete(ctx, &crd)
+			Expect(k8sClient.Delete(ctx, &addressCrd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, &crd)).To(Succeed())
 		})
 
 		It("address creation via with ApplyToCrNames after broker", func() {
+
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
 
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
 			crd.Spec.DeploymentPlan.Size = common.Int32ToPtr(1)
 			crd.Spec.DeploymentPlan.JolokiaAgentEnabled = true
 
-			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			if true {
 
 				By("Deploying a broker")
 				Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
@@ -528,14 +551,18 @@ var _ = Describe("Address controller DO", Label("do"), func() {
 					}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 				}
 
-				k8sClient.Delete(ctx, &addressCrd)
+				Expect(k8sClient.Delete(ctx, &addressCrd)).To(Succeed())
 			}
 
 			// cleanup
-			k8sClient.Delete(ctx, &crd)
+			Expect(k8sClient.Delete(ctx, &crd)).To(Succeed())
 		})
 
 		It("address creation with multiple ApplyToCrNames", Label("slow"), func() {
+
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				Skip("Test skipped as it requires an existing cluster")
+			}
 
 			ctx := context.Background()
 			crd0 := generateOriginalArtemisSpec(defaultNamespace, "broker")
@@ -550,7 +577,7 @@ var _ = Describe("Address controller DO", Label("do"), func() {
 			crd2.Spec.DeploymentPlan.Size = common.Int32ToPtr(1)
 			crd2.Spec.DeploymentPlan.JolokiaAgentEnabled = true
 
-			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			if true {
 
 				By("Deploying a broker 0")
 				Expect(k8sClient.Create(ctx, crd0)).Should(Succeed())
@@ -638,13 +665,13 @@ var _ = Describe("Address controller DO", Label("do"), func() {
 					}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 				}
 
-				k8sClient.Delete(ctx, &addressCrd)
+				Expect(k8sClient.Delete(ctx, &addressCrd)).To(Succeed())
 			}
 
 			// cleanup
-			k8sClient.Delete(ctx, crd0)
-			k8sClient.Delete(ctx, crd1)
-			k8sClient.Delete(ctx, crd2)
+			Expect(k8sClient.Delete(ctx, crd0)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, crd1)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, crd2)).To(Succeed())
 		})
 	})
 })

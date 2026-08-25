@@ -151,8 +151,8 @@ var _ = Describe("artemis controller", Label("do"), func() {
 		It("test operator with env var", func() {
 			if os.Getenv("DEPLOY_OPERATOR") == "true" {
 				// re-install a new operator to have a fresh log
-				uninstallOperator(false, defaultNamespace)
-				installOperator(nil, defaultNamespace)
+				Expect(uninstallOperator(false, defaultNamespace)).Should(Succeed())
+				Expect(installOperator(nil, defaultNamespace)).Should(Succeed())
 				By("checking default operator should have INFO logs")
 				Eventually(func(g Gomega) {
 					oprLog, err := GetOperatorLog(defaultNamespace)
@@ -163,12 +163,12 @@ var _ = Describe("artemis controller", Label("do"), func() {
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 				By("Uninstall existing operator")
-				uninstallOperator(false, defaultNamespace)
+				Expect(uninstallOperator(false, defaultNamespace)).Should(Succeed())
 
 				By("install the operator again with logging env var")
 				envMap := make(map[string]string)
 				envMap["ARGS"] = "--zap-log-level=error"
-				installOperator(envMap, defaultNamespace)
+				Expect(installOperator(envMap, defaultNamespace)).Should(Succeed())
 				By("deploy a basic broker to produce some more log")
 				brokerCr, createdCr := DeployCustomBroker(defaultNamespace, nil)
 
@@ -215,13 +215,13 @@ var _ = Describe("artemis controller", Label("do"), func() {
 		It("default broker versions", func() {
 			if os.Getenv("DEPLOY_OPERATOR") == "true" {
 				By("Uninstall existing operator")
-				uninstallOperator(false, defaultNamespace)
+				Expect(uninstallOperator(false, defaultNamespace)).Should(Succeed())
 
 				By("install the operator again with custom related images")
 				setupEnvs := make(map[string]string)
 				setupEnvs["RELATED_IMAGE_BROKER_KUBERNETES_"+version.GetDefaultCompactVersion()] = "quay.io/arkmq-org/fake-broker:latest"
 				setupEnvs["RELATED_IMAGE_BROKER_INIT_"+version.GetDefaultCompactVersion()] = "quay.io/arkmq-org/fake-broker-init:latest"
-				installOperator(setupEnvs, defaultNamespace)
+				Expect(installOperator(setupEnvs, defaultNamespace)).Should(Succeed())
 
 				By("deploy a broker")
 				brokerCr, createdBrokerCr := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
@@ -269,9 +269,9 @@ var _ = Describe("artemis controller", Label("do"), func() {
 			if os.Getenv("DEPLOY_OPERATOR") == "true" {
 				restrictedNs := NextSpecResourceName()
 				restrictedSecurityPolicy := "restricted"
-				uninstallOperator(false, defaultNamespace)
+				Expect(uninstallOperator(false, defaultNamespace)).To(Succeed())
 				By("creating a restricted namespace " + restrictedNs)
-				createNamespace(restrictedNs, &restrictedSecurityPolicy)
+				Expect(createNamespace(restrictedNs, &restrictedSecurityPolicy)).To(Succeed())
 				Expect(installOperator(nil, restrictedNs)).To(Succeed())
 
 				By("checking operator deployment")
@@ -282,7 +282,7 @@ var _ = Describe("artemis controller", Label("do"), func() {
 					g.Expect(deployment.Status.ReadyReplicas).Should(Equal(int32(1)))
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-				uninstallOperator(false, restrictedNs)
+				Expect(uninstallOperator(false, restrictedNs)).To(Succeed())
 				deleteNamespace(restrictedNs, true, Default)
 				Expect(installOperator(nil, defaultNamespace)).To(Succeed())
 			}
@@ -293,9 +293,9 @@ var _ = Describe("artemis controller", Label("do"), func() {
 		It("maintains memory usage below threshold when managing 1000 broker CRs", func() {
 			if os.Getenv("DEPLOY_OPERATOR") == "true" {
 				tempNs := NextSpecResourceName()
-				uninstallOperator(false, defaultNamespace)
+				Expect(uninstallOperator(false, defaultNamespace)).To(Succeed())
 				By("creating a temp namespace " + tempNs)
-				createNamespace(tempNs, nil)
+				Expect(createNamespace(tempNs, nil)).To(Succeed())
 				Expect(installOperator(nil, tempNs)).To(Succeed())
 
 				By("checking operator deployment")
@@ -422,7 +422,7 @@ var _ = Describe("artemis controller", Label("do"), func() {
 						currentMemoryBytes, thresholdMemoryMegaBytes)
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-				uninstallOperator(false, tempNs)
+				Expect(uninstallOperator(false, tempNs)).To(Succeed())
 				deleteNamespace(tempNs, false, Default)
 				Expect(installOperator(nil, defaultNamespace)).To(Succeed())
 			}

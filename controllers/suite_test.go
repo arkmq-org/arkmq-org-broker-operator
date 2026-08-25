@@ -87,6 +87,7 @@ import (
 
 // Define utility constants for object names and testing timeouts/durations and intervals.
 const (
+	unitLabel                          = "unit"
 	defaultNamespace                   = "test"
 	otherNamespace                     = "other"
 	restrictedNamespace                = "restricted"
@@ -108,7 +109,6 @@ const (
 var (
 	resCount   int64
 	specCount  int64
-	currentDir string
 	k8sClient  client.Client
 	restConfig *rest.Config
 	testEnv    *envtest.Environment
@@ -379,52 +379,87 @@ func setUpTestProxy() {
 	CreateOrOverwriteResource(testProxyIngress)
 
 	if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-		Eventually(func(g Gomega) {
+		Expect(isIngressSSLPassthroughEnabled).To(
+			BeTrue(),
+			"existing-cluster tests require ingress SSL passthrough",
+		)
+		// Wait for both TLS and SSH/stunnel inside the pod to be ready.
+		// The pod runs "yum install openssh-server openssl stunnel" before starting
+		// stunnel+sshd, so TLS reachability at the ingress is not sufficient; we must
+		// also verify that the SSH handshake succeeds before replacing DefaultTransport.
+		// If this bootstrap path is not available in the environment, continue without
+		// overriding DefaultTransport so the suite can still run non-proxy scenarios.
+		proxyReady := false
+		var lastProxyErr error
+		deadline := time.Now().Add(existingClusterTimeout)
+		for !proxyReady && time.Now().Before(deadline) {
 			tlsDialer := new(net.Dialer)
-			// The tls proxy dialer timeout reduce the proxy setup time because the
-			// fisrt connection usually fails and TCP timeouts are often around 3 mins
+			// Short timeout so we retry quickly while stunnel is still starting.
 			tlsDialer.Timeout = 3 * time.Second
 			tlsConn, tlsErr := tls.DialWithDialer(tlsDialer, "tcp", clusterIngressHost+":443",
 				&tls.Config{ServerName: testProxyHost, InsecureSkipVerify: true})
-			g.Expect(tlsErr).Should(BeNil())
-			tlsConn.Close()
-		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-	}
-
-	http.DefaultTransport = &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			tlsConn, tlsErr := tls.Dial("tcp", clusterIngressHost+":443",
-				&tls.Config{ServerName: testProxyHost, InsecureSkipVerify: true})
 			if tlsErr != nil {
-				testProxyLog.V(1).Info("Error creating tls connection", "addr", addr, "error", tlsErr)
-				return nil, fmt.Errorf("Error creating tls connection to %s: %v", addr, tlsErr)
+				lastProxyErr = tlsErr
+				time.Sleep(existingClusterInterval)
+				continue
 			}
 
-			sshConn, sshChans, sshReqs, sshErr := ssh.NewClientConn(tlsConn, "127.0.0.1:2022", &ssh.ClientConfig{
+			_, _, _, sshErr := ssh.NewClientConn(tlsConn, "127.0.0.1:2022", &ssh.ClientConfig{
 				User:            "tunnel",
 				Auth:            []ssh.AuthMethod{ssh.Password("secret")},
 				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 			})
+			_ = tlsConn.Close()
 			if sshErr != nil {
-				testProxyLog.V(1).Info("Error creating SSH connection", "addr", addr, "error", sshErr)
-				tlsConn.Close()
-				return nil, fmt.Errorf("Error creating SSH connection to %s: %v", addr, sshErr)
+				lastProxyErr = sshErr
+				time.Sleep(existingClusterInterval)
+				continue
 			}
 
-			sshClient := ssh.NewClient(sshConn, sshChans, sshReqs)
+			proxyReady = true
+		}
 
-			sshClientConn, sshClientErr := sshClient.DialContext(ctx, network, addr)
-			if sshClientErr != nil {
-				testProxyLog.V(1).Info("Error creating SSH tunnel", "addr", addr, "error", sshClientErr)
-				sshClient.Close()
-				sshConn.Close()
-				tlsConn.Close()
-				return nil, fmt.Errorf("Error creating SSH tunnel to %s: %v", addr, sshClientErr)
-			}
+		Expect(proxyReady).To(
+			BeTrue(),
+			"test proxy tunnel did not become ready: %v",
+			lastProxyErr,
+		)
 
-			testProxyLog.V(1).Info("Opened SSH tunnel", "addr", addr)
-			return &testProxyConn{sshClientConn, addr, sshClient, &sshConn, tlsConn}, nil
-		},
+		http.DefaultTransport = &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				tlsConn, tlsErr := tls.Dial("tcp", clusterIngressHost+":443",
+					&tls.Config{ServerName: testProxyHost, InsecureSkipVerify: true})
+				if tlsErr != nil {
+					testProxyLog.V(1).Info("Error creating tls connection", "addr", addr, "error", tlsErr)
+					return nil, fmt.Errorf("Error creating tls connection to %s: %v", addr, tlsErr)
+				}
+
+				sshConn, sshChans, sshReqs, sshErr := ssh.NewClientConn(tlsConn, "127.0.0.1:2022", &ssh.ClientConfig{
+					User:            "tunnel",
+					Auth:            []ssh.AuthMethod{ssh.Password("secret")},
+					HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+				})
+				if sshErr != nil {
+					testProxyLog.V(1).Info("Error creating SSH connection", "addr", addr, "error", sshErr)
+					_ = tlsConn.Close()
+					return nil, fmt.Errorf("Error creating SSH connection to %s: %v", addr, sshErr)
+				}
+
+				sshClient := ssh.NewClient(sshConn, sshChans, sshReqs)
+
+				sshClientConn, sshClientErr := sshClient.DialContext(ctx, network, addr)
+				if sshClientErr != nil {
+					testProxyLog.V(1).Info("Error creating SSH tunnel", "addr", addr, "error", sshClientErr)
+					_ = sshClient.Close()
+					_ = sshConn.Close()
+					_ = tlsConn.Close()
+					return nil, fmt.Errorf("Error creating SSH tunnel to %s: %v", addr, sshClientErr)
+				}
+
+				testProxyLog.V(1).Info("Opened SSH tunnel", "addr", addr)
+				return &testProxyConn{sshClientConn, addr, sshClient, &sshConn, tlsConn}, nil
+			},
+		}
 	}
 }
 
@@ -438,13 +473,17 @@ type testProxyConn struct {
 
 func (w *testProxyConn) Close() error {
 	testProxyLog.V(1).Info("Closed SSH tunnel", "addr", w.addr)
-	w.Conn.Close()
-	(*w.sshClient).Close()
-	(*w.sshConn).Close()
+	_ = w.Conn.Close()
+	_ = w.sshClient.Close()
+	_ = (*w.sshConn).Close()
 	return (*w.tlsConn).Close()
 }
 
 func cleanUpTestProxy() {
+	if k8sClient == nil {
+		return
+	}
+
 	var err error
 
 	testProxyName := "test-proxy"
@@ -457,8 +496,8 @@ func cleanUpTestProxy() {
 		},
 	}
 
-	err = k8sClient.Delete(ctx, &testProxyDeployment)
-	Expect(err == nil || errors.IsNotFound(err)).To(BeTrue())
+	err = client.IgnoreNotFound(k8sClient.Delete(ctx, &testProxyDeployment))
+	Expect(err).To(BeNil())
 
 	testProxyService := corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -467,8 +506,8 @@ func cleanUpTestProxy() {
 		},
 	}
 
-	err = k8sClient.Delete(ctx, &testProxyService)
-	Expect(err == nil || errors.IsNotFound(err)).To(BeTrue())
+	err = client.IgnoreNotFound(k8sClient.Delete(ctx, &testProxyService))
+	Expect(err).To(BeNil())
 
 	testProxyIngress := netv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
@@ -477,15 +516,15 @@ func cleanUpTestProxy() {
 		},
 	}
 
-	err = k8sClient.Delete(ctx, &testProxyIngress)
-	Expect(err == nil || errors.IsNotFound(err)).To(BeTrue())
+	err = client.IgnoreNotFound(k8sClient.Delete(ctx, &testProxyIngress))
+	Expect(err).To(BeNil())
 }
 
 func createControllerManagerForSuite() {
-	createControllerManager(false, "")
+	createControllerManager("")
 }
 
-func createControllerManager(disableMetrics bool, watchNamespace string) {
+func createControllerManager(watchNamespace string) {
 
 	managerCtx, managerCancel = context.WithCancel(ctx)
 
@@ -515,10 +554,8 @@ func createControllerManager(disableMetrics bool, watchNamespace string) {
 		}
 	}
 
-	if disableMetrics {
-		// if we can shutdown metrics port, we don't need disable it.
-		mgrOptions.Metrics.BindAddress = "0"
-	}
+	// always disable metrics in test to avoid port conflicts
+	mgrOptions.Metrics.BindAddress = "0"
 
 	waitforever := time.Duration(-1)
 	mgrOptions.GracefulShutdownTimeout = &waitforever
@@ -897,31 +934,42 @@ var _ = BeforeSuite(func() {
 
 	// force isLocalOnly=false check from artemis reconciler such that scale down controller will create
 	// role binding to service account for the drainer pod
-	os.Setenv("OPERATOR_WATCH_NAMESPACE", "SomeValueToCauesEqualitytoFailInIsLocalSoDrainControllerSortsCreds")
+	_ = os.Setenv("OPERATOR_WATCH_NAMESPACE", "SomeValueToCauesEqualitytoFailInIsLocalSoDrainControllerSortsCreds")
 
 	// pulled from service account when on a pod
-	os.Setenv("OPERATOR_NAMESPACE", defaultNamespace)
+	_ = os.Setenv("OPERATOR_NAMESPACE", defaultNamespace)
 
-	var err error
-	currentDir, err = os.Getwd()
-	Expect(err).To(Succeed())
-	ctrl.Log.Info("#### Starting test ####", "working dir", currentDir)
+	labelFilter := GinkgoLabelFilter()
+	isUnitOnly := labelFilter != "" && Label(unitLabel).MatchesLabelFilter(labelFilter) && !Labels{}.MatchesLabelFilter(labelFilter)
+
 	if os.Getenv("DEPLOY_OPERATOR") == "true" {
 		ctrl.Log.Info("#### Setting up a real operator ####")
 		setUpRealOperator()
+	} else if !isUnitOnly {
+		if _, hasAssets := os.LookupEnv("KUBEBUILDER_ASSETS"); hasAssets || os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			ctrl.Log.Info("#### Setting up EnvTest ####")
+			setUpEnvTest()
+		} else {
+			ctrl.Log.Info("#### Unit test only mode: skipping control plane setup ####")
+		}
 	} else {
-		ctrl.Log.Info("#### Setting up EnvTest ####")
-		setUpEnvTest()
+		ctrl.Log.Info("#### Unit test only mode: skipping control plane setup ####")
 	}
 })
 
 func cleanUpPVC() {
+	if k8sClient == nil {
+		return
+	}
 	pvcs := &corev1.PersistentVolumeClaimList{}
 	opts := []client.ListOption{}
-	k8sClient.List(context.TODO(), pvcs, opts...)
+	if err := k8sClient.List(context.TODO(), pvcs, opts...); err != nil {
+		ctrl.Log.Error(err, "Failed to list PVCs during cleanup")
+		return
+	}
 	for _, pvc := range pvcs.Items {
 		ctrl.Log.Info("Deleting/GC PVC: " + pvc.Name)
-		k8sClient.Delete(context.TODO(), &pvc, &client.DeleteOptions{})
+		_ = k8sClient.Delete(context.TODO(), &pvc, &client.DeleteOptions{}) // best-effort GC
 	}
 }
 
@@ -932,12 +980,12 @@ var _ = AfterSuite(func() {
 		cleanUpTestProxy()
 	}
 
-	os.Unsetenv("OPERATOR_WATCH_NAMESPACE")
+	_ = os.Unsetenv("OPERATOR_WATCH_NAMESPACE")
 
 	if os.Getenv("DEPLOY_OPERATOR") == "true" {
 		err := uninstallOperator(true, defaultNamespace)
 		Expect(err).NotTo(HaveOccurred())
-	} else {
+	} else if managerCancel != nil {
 		shutdownControllerManager()
 
 		// scaledown controller lifecycle seems a little loose, it does not complete on signal hander like the others

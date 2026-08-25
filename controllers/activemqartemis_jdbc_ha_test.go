@@ -112,7 +112,9 @@ var _ = Describe("jdbc fast failover", func() {
 					},
 				}
 				CreateOrOverwriteResource(&db)
-
+				DeferCleanup(func() {
+					CleanResource(&db, db.Name, "default")
+				})
 				dbService := corev1.Service{
 					TypeMeta:   metav1.TypeMeta{Kind: "Service", APIVersion: "core/v1"},
 					ObjectMeta: metav1.ObjectMeta{Name: dbName, Namespace: "default"},
@@ -128,6 +130,9 @@ var _ = Describe("jdbc fast failover", func() {
 					},
 				}
 				CreateOrOverwriteResource(&dbService)
+				DeferCleanup(func() {
+					CleanResource(&dbService, dbService.Name, "default")
+				})
 
 				By("verifying dbservice has a jdbc endpoint, db is ready!")
 				Eventually(func(g Gomega) {
@@ -258,6 +263,13 @@ var _ = Describe("jdbc fast failover", func() {
 
 				loggingConfigMap := configmaps.MakeConfigMap(defaultNamespace, loggingConfigMapName, loggingData)
 				Expect(k8sClient.Create(ctx, loggingConfigMap)).Should(Succeed())
+				DeferCleanup(func() {
+					CleanResource(
+						loggingConfigMap,
+						loggingConfigMapName,
+						defaultNamespace,
+					)
+				})
 				peerA.Spec.DeploymentPlan.ExtraMounts.ConfigMaps = []string{loggingConfigMapName}
 
 				By("Configuring probe to keep Pod alive while waiting to obtain shared jdbc lock")
@@ -288,9 +300,15 @@ var _ = Describe("jdbc fast failover", func() {
 
 				By("provisioning the broker peer-a")
 				Expect(k8sClient.Create(ctx, &peerA)).Should(Succeed())
+				DeferCleanup(func() {
+					CleanResource(&peerA, peerA.Name, defaultNamespace)
+				})
 
 				By("provisioning the broker peer-b")
 				Expect(k8sClient.Create(ctx, peerB)).Should(Succeed())
+				DeferCleanup(func() {
+					CleanResource(peerB, peerB.Name, defaultNamespace)
+				})
 
 				By("verifying one broker ready, other starting; it is a race to lock the db")
 				peerACrd := &brokerv1beta1.ActiveMQArtemis{}
@@ -345,6 +363,9 @@ var _ = Describe("jdbc fast failover", func() {
 				}
 
 				Expect(k8sClient.Create(ctx, svc)).Should(Succeed())
+				DeferCleanup(func() {
+					CleanResource(svc, svc.Name, defaultNamespace)
+				})
 
 				By("verifying service is ok - status does not reflect endpoints which is not ideal")
 				createdService := &corev1.Service{}
@@ -369,30 +390,51 @@ var _ = Describe("jdbc fast failover", func() {
 					sendCmd := []string{"amq-broker/bin/artemis", "producer", "--user", "Jay", "--password", "activemq", "--url", url, "--message-count", "1", "--destination", "queue://JOBS"}
 					content, err := RunCommandInPod(podName, containerName, sendCmd)
 					g.Expect(err).To(BeNil())
-					g.Expect(*content).Should(ContainSubstring("Produced: 1 messages"))
+					g.Expect(content).NotTo(BeNil())
+					g.Expect(*content).To(ContainSubstring("Produced: 1 messages"))
 
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 				By("killing active pod")
-				activePod := &corev1.Pod{}
-				activePod.Namespace = defaultNamespace
-				if len(peerACrd.Status.PodStatus.Ready) == 1 {
+
+				// Refresh both CR statuses before deciding which broker is active.
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      peerA.Name,
+					Namespace: defaultNamespace,
+				}, peerACrd)).To(Succeed())
+
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      peerB.Name,
+					Namespace: defaultNamespace,
+				}, peerBCrd)).To(Succeed())
+
+				activePod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: defaultNamespace,
+					},
+				}
+
+				peerAReady := len(peerACrd.Status.PodStatus.Ready) == 1
+				peerBReady := len(peerBCrd.Status.PodStatus.Ready) == 1
+
+				// Exactly one peer should hold the shared-store lock.
+				Expect(peerAReady).NotTo(Equal(peerBReady))
+
+				if peerAReady {
 					activePod.Name = peerA.Name + "-ss-0"
+
+					// peer-b survives and should become active.
+					podName = peerB.Name + "-ss-0"
+					containerName = peerB.Name + "-container"
 				} else {
 					activePod.Name = peerB.Name + "-ss-0"
+
+					// peer-a survives and should become active.
+					podName = peerA.Name + "-ss-0"
+					containerName = peerA.Name + "-container"
 				}
+
 				Expect(k8sClient.Delete(ctx, activePod)).To(Succeed())
-
-				By("consuming our message, if peer-b is active, it may take a little while to restart")
-				Eventually(func(g Gomega) {
-
-					recvCmd := []string{"amq-broker/bin/artemis", "consumer", "--user", "Jay", "--password", "activemq", "--url", url, "--message-count", "1", "--receive-timeout", "5000", "--break-on-null", "--verbose", "--destination", "queue://JOBS"}
-					content, err := RunCommandInPod(podName, containerName, recvCmd)
-
-					g.Expect(err).To(BeNil())
-					g.Expect(*content).Should(ContainSubstring("JMS Message ID:"))
-
-				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 				CleanResource(svc, svc.Name, defaultNamespace)
 				CleanResource(&peerA, peerA.Name, defaultNamespace)

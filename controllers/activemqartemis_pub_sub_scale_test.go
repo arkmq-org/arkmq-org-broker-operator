@@ -29,6 +29,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -66,33 +67,38 @@ var _ = Describe("pub sub scale", func() {
 				brokerCrd.Spec.DeploymentPlan.Size = common.Int32ToPtr(2)
 
 				By("deplying secret with jaas config for auth")
+				// The secret name MUST end with "-jaas-config" so the operator recognises it
+				// as a JAAS config secret and sets -Djava.security.auth.login.config on the JVM.
+				// Without this suffix the broker uses its default login config and the app users
+				// (c1, c3, p) are unknown, causing all connection attempts to fail with an
+				// authentication error and leaving consumer_count permanently at zero.
 				jaasSecret := &corev1.Secret{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "Secret",
 						APIVersion: "k8s.io.api.core.v1",
 					},
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "pub-sub-jaas-config",
+						Name:      NextSpecResourceName() + "-jaas-config",
 						Namespace: brokerCrd.ObjectMeta.Namespace,
 					},
 				}
 
 				jaasSecret.StringData = map[string]string{JaasConfigKey: `
 				activemq {
-	
+
 					// ensure the operator can connect to the mgmt console by referencing the existing properties config
 					org.apache.activemq.artemis.spi.core.security.jaas.PropertiesLoginModule sufficient
 						org.apache.activemq.jaas.properties.user="artemis-users.properties"
 						org.apache.activemq.jaas.properties.role="artemis-roles.properties"
 						baseDir="/home/jboss/amq-broker/etc";
-	
+
 					// app specific users and roles	
 					org.apache.activemq.artemis.spi.core.security.jaas.PropertiesLoginModule sufficient
 						reload=true
 						debug=true
 						org.apache.activemq.jaas.properties.user="users.properties"
 						org.apache.activemq.jaas.properties.role="roles.properties";
-	
+
 				};`,
 					"users.properties": `
 					 control-plane=passwd
@@ -118,6 +124,7 @@ var _ = Describe("pub sub scale", func() {
 
 				By("Deploying the jaas secret " + jaasSecret.Name)
 				Expect(k8sClient.Create(ctx, jaasSecret)).Should(Succeed())
+				DeferCleanup(func() { CleanResource(jaasSecret, jaasSecret.Name, defaultNamespace) })
 
 				brokerCrd.Spec.DeploymentPlan.ExtraMounts.Secrets = []string{jaasSecret.Name}
 
@@ -145,7 +152,11 @@ var _ = Describe("pub sub scale", func() {
 			logger.rest.level=INFO`
 
 				loggingConfigMap := configmaps.MakeConfigMap(defaultNamespace, loggingConfigMapName, loggingData)
-				Expect(k8sClient.Create(ctx, loggingConfigMap)).Should(Succeed())
+				createErr := k8sClient.Create(ctx, loggingConfigMap)
+				if !k8serrors.IsAlreadyExists(createErr) {
+					Expect(createErr).Should(Succeed())
+				}
+				DeferCleanup(func() { CleanResource(loggingConfigMap, loggingConfigMap.Name, defaultNamespace) })
 				brokerCrd.Spec.DeploymentPlan.ExtraMounts.ConfigMaps = []string{loggingConfigMapName}
 
 				By("configuring the broker")
@@ -205,6 +216,7 @@ var _ = Describe("pub sub scale", func() {
 
 				By("provisioning the broker")
 				Expect(k8sClient.Create(ctx, &brokerCrd)).Should(Succeed())
+				DeferCleanup(func() { CleanResource(&brokerCrd, brokerCrd.Name, defaultNamespace) })
 
 				createdBrokerCrd := &brokerv1beta1.ActiveMQArtemis{}
 				createdBrokerCrdKey := types.NamespacedName{
@@ -212,7 +224,7 @@ var _ = Describe("pub sub scale", func() {
 					Namespace: defaultNamespace,
 				}
 
-				By("verifying broker started - not really necessary, can be async")
+				By("verifying broker started")
 				Eventually(func(g Gomega) {
 
 					g.Expect(k8sClient.Get(ctx, createdBrokerCrdKey, createdBrokerCrd)).Should(Succeed())
@@ -221,7 +233,7 @@ var _ = Describe("pub sub scale", func() {
 					}
 					g.Expect(meta.IsStatusConditionTrue(createdBrokerCrd.Status.Conditions, brokerv1beta1.ReadyConditionType)).Should(BeTrue())
 
-				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+				}, existingClusterTimeout*5, existingClusterInterval).Should(Succeed())
 
 				By("provisioning loadbalanced service for this CR, for use within the cluster via dns")
 				svc := &corev1.Service{
@@ -247,6 +259,18 @@ var _ = Describe("pub sub scale", func() {
 				}
 
 				Expect(k8sClient.Create(ctx, svc)).Should(Succeed())
+				DeferCleanup(func() { CleanResource(svc, svc.Name, defaultNamespace) })
+
+				By("verifying service has two endpoints so consumers will reach both brokers")
+				Eventually(func(g Gomega) {
+					endpoints := &corev1.Endpoints{}
+					g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: svc.Name, Namespace: svc.Namespace}, endpoints)).Should(Succeed())
+					if verbose {
+						fmt.Printf("\nEndpoints:%v", endpoints.Subsets)
+					}
+					g.Expect(len(endpoints.Subsets)).Should(BeNumerically("==", 1))
+					g.Expect(len(endpoints.Subsets[0].Addresses)).Should(BeNumerically("==", 2))
+				}, existingClusterTimeout*5, existingClusterInterval).Should(Succeed())
 
 				By("provisioning an app, publisher and consumers, using the broker image to access the artemis client from within the cluster")
 				deploymentTemplate := func(name string, command []string) appsv1.Deployment {
@@ -276,23 +300,35 @@ var _ = Describe("pub sub scale", func() {
 
 				serviceUrl := "tcp://" + brokerCrd.Name + ":62616"
 
-				// loop until successfully get messages as we expect rejection by the router
-				numMessagesToConsume := 10
-				scriptTemplate := "until /opt/amq/bin/artemis perf consumer --password passwd --user %s --url %s --silent --message-count %d topic://COMMANDS; do echo retry; sleep 1; done;"
+				// Retry loop that keeps the consumer alive regardless of whether perf consumer
+				// exits with success (0) or failure (non-zero).
+				// "until ... do ... done" would terminate permanently on exit-code 0 (i.e. after a
+				// normal perf-test run), leaving broker 0 with zero consumers for the rest of the
+				// Eventually window.  "while true" ensures the consumer is always restarted after
+				// each run so the broker always has demand from the expected shard user.
+				scriptTemplate := "while true; do /opt/amq/bin/artemis perf consumer --password passwd --user %s --url %s --silent topic://COMMANDS; sleep 1; done"
 				commonCommand := []string{"/bin/sh", "-c"}
 
 				consumer1 := deploymentTemplate(
 					"consumer1",
-					append(commonCommand, fmt.Sprintf(scriptTemplate, "c1", serviceUrl, numMessagesToConsume)),
+					append(commonCommand, fmt.Sprintf(scriptTemplate, "c1", serviceUrl)),
 				)
 
 				consumer3 := deploymentTemplate(
 					"consumer3",
-					append(commonCommand, fmt.Sprintf(scriptTemplate, "c3", serviceUrl, numMessagesToConsume)),
+					append(commonCommand, fmt.Sprintf(scriptTemplate, "c3", serviceUrl)),
 				)
 
-				Expect(k8sClient.Create(ctx, &consumer1)).Should(Succeed())
-				Expect(k8sClient.Create(ctx, &consumer3)).Should(Succeed())
+				createErrC1 := k8sClient.Create(ctx, &consumer1)
+				if !k8serrors.IsAlreadyExists(createErrC1) {
+					Expect(createErrC1).Should(Succeed())
+				}
+				DeferCleanup(func() { CleanResource(&consumer1, consumer1.Name, defaultNamespace) })
+				createErrC3 := k8sClient.Create(ctx, &consumer3)
+				if !k8serrors.IsAlreadyExists(createErrC3) {
+					Expect(createErrC3).Should(Succeed())
+				}
+				DeferCleanup(func() { CleanResource(&consumer3, consumer3.Name, defaultNamespace) })
 
 				By("deploying producer")
 
@@ -300,66 +336,88 @@ var _ = Describe("pub sub scale", func() {
 					"producer",
 					[]string{"/opt/amq/bin/artemis", "perf", "producer", "--user", "p", "--password", "passwd", "--url", serviceUrl, "--rate", "2", "--silent", "topic://COMMANDS"},
 				)
-				Expect(k8sClient.Create(ctx, &producer)).Should(Succeed())
+				createErrP := k8sClient.Create(ctx, &producer)
+				if !k8serrors.IsAlreadyExists(createErrP) {
+					Expect(createErrP).Should(Succeed())
+				}
+				DeferCleanup(func() { CleanResource(&producer, producer.Name, defaultNamespace) })
+
+				// Wait for each consumer deployment to have at least one available (Running) pod
+				// before entering the metrics-polling loop.  Without this guard the 360-second
+				// Eventually window can be entirely consumed by image-pull + container startup on
+				// a cold node, meaning the broker never sees a connection attempt and the consumer
+				// count on ordinal 0 remains zero for the whole window.
+				By("waiting for consumer pods to be running")
+				for _, dep := range []appsv1.Deployment{consumer1, consumer3} {
+					depCopy := dep // capture loop var
+					Eventually(func(g Gomega) {
+						current := &appsv1.Deployment{}
+						g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+							Name:      depCopy.Name,
+							Namespace: depCopy.Namespace,
+						}, current)).Should(Succeed())
+						g.Expect(current.Status.AvailableReplicas).Should(BeNumerically(">=", 1),
+							"deployment %s has no available pods yet", depCopy.Name)
+					}, existingClusterTimeout*2, existingClusterInterval).Should(Succeed())
+				}
 
 				By("verifying - consumer on each broker, messages flowing..")
 
 				By("verifying metrics")
-				nonZeroRoutedMetricFor := func(g Gomega, ordinal string) bool {
+				fetchMetrics := func(g Gomega, ordinal string) string {
 					pod := &corev1.Pod{}
 					podName := namer.CrToSS(createdBrokerCrd.Name) + "-" + ordinal
-					podNamespacedName := types.NamespacedName{Name: podName, Namespace: defaultNamespace}
-					g.Expect(k8sClient.Get(ctx, podNamespacedName, pod)).Should(Succeed())
-
-					g.Expect(pod.Status).ShouldNot(BeNil())
-					g.Expect(pod.Status.PodIP).ShouldNot(BeEmpty())
+					g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+						Name:      podName,
+						Namespace: defaultNamespace,
+					}, pod)).To(Succeed())
+					g.Expect(pod.Status.PodIP).NotTo(BeEmpty())
 
 					resp, err := http.Get("http://" + pod.Status.PodIP + ":8161/metrics")
-					g.Expect(err).Should(Succeed())
-
-					defer resp.Body.Close()
+					g.Expect(err).To(Succeed(), "failed to GET metrics from broker ordinal %s", ordinal)
+					defer func() { _ = resp.Body.Close() }()
 					body, err := io.ReadAll(resp.Body)
-					g.Expect(err).Should(Succeed())
-
-					lines := strings.Split(string(body), "\n")
-
-					var done = false
-					if verbose {
-						fmt.Printf("\nStart Metrics for COMMANDS on %v with Headers %v \n", ordinal, resp.Header)
-					}
-					for _, line := range lines {
-						if strings.Contains(line, "COMMANDS") {
-							if verbose {
-								fmt.Printf("%s\n", line)
-							}
-						}
-						if strings.Contains(line, "artemis_routed_message_count{address=\"COMMANDS\",broker=\"amq-broker\",}") {
-							if !strings.Contains(line, "} 0.0") {
-								done = true
-							}
-						}
-					}
-					return done
+					g.Expect(err).To(Succeed())
+					return string(body)
 				}
 
+				checkMetric := func(metrics, substr string) bool {
+					for _, line := range strings.Split(metrics, "\n") {
+						if strings.Contains(line, substr) && !strings.Contains(line, "} 0.0") {
+							return true
+						}
+					}
+					return false
+				}
+
+				// This slow-labeled spec involves connection-router retry loops: consumers are
+				// expected to be rejected by the router until routing stabilises, then reconnect.
+				// existingClusterTimeout*2 gives sufficient headroom beyond broker startup.
+				By("waiting for a consumer on each broker before checking routed counts")
 				Eventually(func(g Gomega) {
-
-					foundMetric0 := nonZeroRoutedMetricFor(g, "0")
-					foundMetric1 := nonZeroRoutedMetricFor(g, "1")
-
-					g.Expect(foundMetric0).Should(Equal(true))
-					g.Expect(foundMetric1).Should(Equal(true))
-
+					for _, ordinal := range []string{"0", "1"} {
+						metrics := fetchMetrics(g, ordinal)
+						if verbose {
+							fmt.Printf("\nMetrics for COMMANDS on broker %s:\n", ordinal)
+							for _, l := range strings.Split(metrics, "\n") {
+								if strings.Contains(l, "COMMANDS") {
+									fmt.Println(l)
+								}
+							}
+						}
+						g.Expect(checkMetric(metrics, `artemis_consumer_count{address="COMMANDS",broker="amq-broker",`)).
+							To(BeTrue(), "expected non-zero consumer count on broker ordinal %s", ordinal)
+					}
 				}, existingClusterTimeout*2, existingClusterInterval*5).Should(Succeed())
 
-				CleanResource(&producer, producer.Name, defaultNamespace)
-				CleanResource(&consumer1, producer.Name, defaultNamespace)
-				CleanResource(&consumer3, producer.Name, defaultNamespace)
-
-				CleanResource(createdBrokerCrd, createdBrokerCrd.Name, defaultNamespace)
-				CleanResource(jaasSecret, jaasSecret.Name, defaultNamespace)
-				CleanResource(loggingConfigMap, loggingConfigMap.Name, defaultNamespace)
-				CleanResource(svc, svc.Name, defaultNamespace)
+				By("verifying non-zero routed message count on each broker")
+				Eventually(func(g Gomega) {
+					for _, ordinal := range []string{"0", "1"} {
+						metrics := fetchMetrics(g, ordinal)
+						g.Expect(checkMetric(metrics, `artemis_routed_message_count{address="COMMANDS",broker="amq-broker",}`)).
+							To(BeTrue(), "expected non-zero routed message count on broker ordinal %s", ordinal)
+					}
+				}, existingClusterTimeout*2, existingClusterInterval*5).Should(Succeed())
 			}
 
 		})

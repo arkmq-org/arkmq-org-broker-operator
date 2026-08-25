@@ -69,6 +69,10 @@ var _ = Describe("security controller", func() {
 
 		It("management connector config", Label("mgmt-connector-config"), func() {
 
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
+
 			By("deploy a security cr")
 			_, createdSecurityCr := DeploySecurity(NextSpecResourceName(), defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemisSecurity) {
 				candidate.Spec.SecuritySettings.Management.Connector = brokerv1beta1.ConnectorConfigType{
@@ -147,6 +151,9 @@ var _ = Describe("security controller", func() {
 		})
 
 		It("no password in security log test", func() {
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 			By("deploy a security cr")
 			StartCapturingLog()
 			defer StopCapturingLog()
@@ -184,6 +191,10 @@ var _ = Describe("security controller", func() {
 		})
 
 		It("security after recreating broker cr", func() {
+
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 
 			By("deploy a security cr")
 			_, createdSecurityCr := DeploySecurity(NextSpecResourceName(), defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemisSecurity) {
@@ -253,6 +264,10 @@ var _ = Describe("security controller", func() {
 		})
 
 		It("security with console domain name specified", Label("sec-console-domain-name"), func() {
+
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 
 			By("deploy a security cr")
 
@@ -348,6 +363,9 @@ var _ = Describe("security controller", func() {
 
 	Context("Reconcile Test", func() {
 		It("testing security applied after broker", Label("security-apply-restart"), func() {
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 			By("deploying the broker cr")
 			crd, createdCrd := DeployCustomBroker(defaultNamespace, func(brokerCrdToDeploy *brokerv1beta1.ActiveMQArtemis) {
 
@@ -641,6 +659,10 @@ var _ = Describe("security controller", func() {
 
 		It("reconcile twice with nothing changed", func() {
 
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
+
 			By("Creating security cr")
 			ctx := context.Background()
 			crd := generateSecuritySpec("", defaultNamespace)
@@ -856,6 +878,10 @@ var _ = Describe("security controller", func() {
 
 		It("Reconcile security on multiple broker CRs", func() {
 
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
+
 			By("Deploying 3 brokers")
 			broker1Cr, createdBroker1Cr := DeployBroker("ex-aao", defaultNamespace)
 			broker2Cr, createdBroker2Cr := DeployBroker("ex-aao1", defaultNamespace)
@@ -934,6 +960,10 @@ var _ = Describe("security controller", func() {
 		})
 
 		It("Reconcile security on broker with non shell safe annotations", func() {
+
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 
 			By("Deploying broker")
 			brokerCrd := generateArtemisSpec(defaultNamespace)
@@ -1144,6 +1174,10 @@ var _ = Describe("security controller", func() {
 	})
 
 	It("reconcile after Broker CR deployed, verify force reconcile", func() {
+
+		if k8sClient == nil {
+			Skip("Test skipped as it requires a cluster or envtest environment")
+		}
 
 		By("Creating Broker CR")
 		ctx := context.Background()

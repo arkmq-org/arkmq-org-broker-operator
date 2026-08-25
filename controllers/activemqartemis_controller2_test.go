@@ -54,6 +54,10 @@ var _ = Describe("artemis controller 2", func() {
 	Context("persistent volumes tests", Label("controller-2-test"), func() {
 		It("controller resource recover test", Label("controller-resource-recover-test"), func() {
 
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
+
 			By("deploy a broker cr")
 			acceptorName := "amqp"
 			_, crd := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {

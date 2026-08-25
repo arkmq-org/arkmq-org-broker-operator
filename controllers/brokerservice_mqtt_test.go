@@ -24,6 +24,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -259,9 +260,9 @@ var _ = Describe("broker-service", func() {
 				fmt.Println("Successfully connected to the broker!")
 			}
 
-			messageReceived := false
+			var messageReceived atomic.Bool
 			messageHandler := func(client mqtt.Client, msg mqtt.Message) {
-				messageReceived = true
+				messageReceived.Store(true)
 				fmt.Printf("Received message: '%s' from topic: %s\n", msg.Payload(), msg.Topic())
 			}
 
@@ -272,21 +273,26 @@ var _ = Describe("broker-service", func() {
 
 			if token := client.Connect(); token.Wait() && token.Error() != nil {
 				log.Printf("mqtt token: %v", token)
-
-				log.Fatalf("Failed to connect to broker: %v", token.Error())
+				Fail(fmt.Sprintf("Failed to connect to broker: %v", token.Error()))
 			}
+			fmt.Println("Connected:", client.IsConnected())
 
 			if token := client.Subscribe("mytopic", 1, messageHandler); token.Wait() && token.Error() != nil {
-				log.Fatalf("Failed to subscribe to topic: %v", token.Error())
+				Fail(fmt.Sprintf("Failed to subscribe to topic: %v", token.Error()))
 			}
+			fmt.Println("Subscribed, SUBACK received")
 
 			text := "Hello MQTT from Go!"
-			if token := client.Publish("mytopic", 0, false, text); token.Wait() && token.Error() != nil {
-				log.Fatalf("Failed to publish to topic: %v", token.Error())
-			}
 
 			Eventually(func(g Gomega) {
-				g.Expect(messageReceived).Should(BeTrue())
+				if !messageReceived.Load() {
+					token := client.Publish("mytopic", 1, false, text)
+					token.Wait()
+					if err := token.Error(); err != nil {
+						fmt.Printf("publish retry failed: %v\n", err)
+					}
+				}
+				g.Expect(messageReceived.Load()).Should(BeTrue())
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("scraping prometheus metrics")
@@ -320,7 +326,7 @@ var _ = Describe("broker-service", func() {
 					fmt.Printf("Prometheus metrics scrape: status=%d\n", resp.StatusCode)
 					g.Expect(resp.StatusCode).Should(Equal(200))
 
-					defer resp.Body.Close()
+					defer func() { _ = resp.Body.Close() }()
 					body, err := io.ReadAll(resp.Body)
 					g.Expect(err).Should(Succeed())
 

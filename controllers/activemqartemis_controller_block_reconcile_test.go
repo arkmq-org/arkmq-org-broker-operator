@@ -46,6 +46,10 @@ var _ = Describe("reconcile block with annotation", func() {
 	Context("test", Label("block-reconcile"), func() {
 		It("deploy, annotate, verify", func() {
 
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
+
 			deploycount := "DEPLOY_COUNT"
 			By("deploy a broker cr")
 			crd, _ := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
@@ -150,6 +154,10 @@ var _ = Describe("reconcile block with annotation", func() {
 		})
 
 		It("annotate, deploy, verify", func() {
+
+			if k8sClient == nil {
+				Skip("Test skipped as it requires a cluster or envtest environment")
+			}
 
 			By("deploy a broker with blocked annotation")
 			crd, _ := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {

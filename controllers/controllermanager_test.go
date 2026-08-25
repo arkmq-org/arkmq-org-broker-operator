@@ -162,7 +162,7 @@ var _ = Describe("tests regarding controller manager", func() {
 					Eventually(func(g Gomega) {
 						getPersistedVersionedCrd(createdCr.Name, restrictedNamespace, createdCr)
 						createdCr.Spec.DeploymentPlan.Size = common.Int32ToPtr(1)
-						k8sClient.Update(ctx, createdCr)
+						g.Expect(k8sClient.Update(ctx, createdCr)).Should(Succeed())
 						g.Expect(len(createdCr.Status.PodStatus.Ready)).Should(BeEquivalentTo(1))
 						By("Checking messsage count on broker 0")
 						curlUrl := "http://" + podWithOrdinal + ":8161/console/jolokia/read/org.apache.activemq.artemis:address=%22TEST%22,broker=%22amq-broker%22,component=addresses,queue=%22TEST%22,routing-type=%22anycast%22,subcomponent=queues/MessageCount"
@@ -404,13 +404,12 @@ func createNamespace(namespace string, securityPolicy *string) error {
 
 	err := k8sClient.Create(ctx, &ns, &client.CreateOptions{})
 
-	// envTest won't delete, get stuck in Terminating state
+	// Treat AlreadyExists as success: the namespace is usable regardless of
+	// whether it was just created or already present from a prior run.
+	// envTest won't delete namespaces (they get stuck in Terminating state):
 	// https://github.com/kubernetes-sigs/controller-runtime/issues/880
-	if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
-		if errors.IsAlreadyExists(err) {
-			// hense the ns may exist as we will only delete for USE_EXISTING_CLUSTER
-			err = nil
-		}
+	if errors.IsAlreadyExists(err) {
+		err = nil
 	}
 	return err
 }
@@ -460,6 +459,10 @@ func deleteNamespace(namespace string, wait bool, g Gomega) {
 
 func testWatchNamespace(kind string, g Gomega, testFunc func(g Gomega)) {
 
+	if managerCancel == nil {
+		Skip("Test skipped as it requires a cluster or envtest environment")
+	}
+
 	shutdownControllerManager()
 
 	restrictedSecurityPolicy := "restricted"
@@ -468,25 +471,25 @@ func testWatchNamespace(kind string, g Gomega, testFunc func(g Gomega)) {
 	g.Expect(createNamespace(namespace3, nil)).To(Succeed())
 	g.Expect(createNamespace(restrictedNamespace, &restrictedSecurityPolicy)).To(Succeed())
 
+	defer func() {
+		shutdownControllerManager()
+		deleteNamespace(namespace1, true, g)
+		deleteNamespace(namespace2, true, g)
+		deleteNamespace(namespace3, true, g)
+		deleteNamespace(restrictedNamespace, true, g)
+		createControllerManagerForSuite()
+	}()
+
 	switch kind {
 	case "single":
-		createControllerManager(true, defaultNamespace)
+		createControllerManager(defaultNamespace)
 	case "restricted":
-		createControllerManager(true, restrictedNamespace)
+		createControllerManager(restrictedNamespace)
 	case "all":
-		createControllerManager(true, "")
+		createControllerManager("")
 	default:
-		createControllerManager(true, namespace2+","+namespace3)
+		createControllerManager(namespace2 + "," + namespace3)
 	}
 
 	testFunc(g)
-
-	shutdownControllerManager()
-
-	deleteNamespace(namespace1, true, g)
-	deleteNamespace(namespace2, true, g)
-	deleteNamespace(namespace3, true, g)
-	deleteNamespace(restrictedNamespace, true, g)
-
-	createControllerManagerForSuite()
 }

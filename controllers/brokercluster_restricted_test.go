@@ -46,7 +46,7 @@ var _ = Describe("brokercluster restricted", func() {
 
 				By("creating a BrokerCluster with spec.restricted=true")
 				brokerCrd := generateBrokerSpec(defaultNamespace)
-				brokerCrd.Spec.Restricted = ptr.To(true)
+				brokerCrd.Spec.Restricted = ptr.To(true) //nolint:staticcheck // test explicitly exercises the deprecated restricted field rejection path
 				brokerCrd.Spec.DeploymentPlan.Size = ptr.To(int32(1))
 
 				Expect(k8sClient.Create(ctx, &brokerCrd)).Should(Succeed())
