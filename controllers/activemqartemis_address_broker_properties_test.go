@@ -40,14 +40,6 @@ import (
 
 var _ = Describe("BrokerProperties Address tests", func() {
 
-	BeforeEach(func() {
-		BeforeEachSpec()
-	})
-
-	AfterEach(func() {
-		AfterEachSpec()
-	})
-
 	Context("bp address queue config defaults", Label("queue-config-defaults"), func() {
 		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
 			queueName := "myqueue"

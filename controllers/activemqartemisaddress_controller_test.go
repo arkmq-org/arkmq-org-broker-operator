@@ -30,7 +30,6 @@ import (
 	gomegaTypes "github.com/onsi/gomega/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -53,14 +52,6 @@ import (
 )
 
 var _ = Describe("Address controller tests", func() {
-
-	BeforeEach(func() {
-		BeforeEachSpec()
-	})
-
-	AfterEach(func() {
-		AfterEachSpec()
-	})
 
 	Context("address queue config defaults", Label("queue-config-defaults"), func() {
 		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
@@ -791,15 +782,9 @@ var _ = Describe("Address controller tests", func() {
 
 			ctx := context.Background()
 
-			otherNS := &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: otherNamespace,
-				},
-			}
-			err := k8sClient.Create(ctx, otherNS)
-			if err != nil {
-				Expect(errors.IsConflict(err))
-			}
+			Expect(createNamespace(otherNamespace, nil)).To(Succeed())
+
+			watchNamespaces(otherNamespace)
 
 			crd := generateArtemisSpec(defaultNamespace)
 			crd.Spec.DeploymentPlan.Size = common.Int32ToPtr(2)
@@ -890,7 +875,7 @@ var _ = Describe("Address controller tests", func() {
 			// cleanup
 			k8sClient.Delete(ctx, &crd)
 			k8sClient.Delete(ctx, &otherCrd)
-			k8sClient.Delete(ctx, otherNS)
+			deleteNamespace(otherNamespace, false, Default)
 		})
 
 		It("address creation with multiple ApplyToCrNames", func() {

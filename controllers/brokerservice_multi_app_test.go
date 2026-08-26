@@ -27,7 +27,6 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,7 +45,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 	var installedCertManager bool = false
 
 	BeforeEach(func() {
-		BeforeEachSpec()
 
 		if verbose {
 			fmt.Println("Time with MicroSeconds: ", time.Now().Format("2006-01-02 15:04:05.000000"), " test:", CurrentSpecReport())
@@ -103,7 +101,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				installedCertManager = false
 			}
 		}
-		AfterEachSpec()
 	})
 
 	Context("multiple apps on single service", func() {
@@ -549,15 +546,9 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			serviceName := NextSpecResourceName()
 
 			By("ensuring other namespace exists")
-			otherNs := corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: otherNamespace,
-				},
-			}
-			err := k8sClient.Create(ctx, &otherNs)
-			if err != nil && !errors.IsAlreadyExists(err) {
-				Fail(fmt.Sprintf("Failed to create other namespace: %v", err))
-			}
+			Expect(createNamespace(otherNamespace, nil)).To(Succeed())
+
+			watchNamespaces(otherNamespace)
 
 			By("setting up certificates")
 			certName := serviceName + "-" + common.DefaultOperandCertSecretName
@@ -1397,19 +1388,11 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 		It("sets Valid=False when appSelectorExpression has syntax error", func() {
 			ctx := context.Background()
 
-			// Create namespace
-			ns := &corev1.Namespace{
-				ObjectMeta: v1.ObjectMeta{
-					Name: "test-invalid-cel",
-				},
-			}
-			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
-
 			// Create BrokerService with invalid CEL expression
 			service := &broker.BrokerService{
 				ObjectMeta: v1.ObjectMeta{
-					Name:      "invalid-cel-service",
-					Namespace: ns.Name,
+					Name:      NextSpecResourceName(),
+					Namespace: defaultNamespace,
 				},
 				Spec: broker.BrokerServiceSpec{
 					AppSelectorExpression: `app.metadata.namespace ==`, // Syntax error
@@ -1436,25 +1419,16 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, service)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, ns)).Should(Succeed())
 		})
 
 		It("sets Valid=False when appSelectorExpression returns non-boolean", func() {
 			ctx := context.Background()
 
-			// Create namespace
-			ns := &corev1.Namespace{
-				ObjectMeta: v1.ObjectMeta{
-					Name: "test-nonbool-cel",
-				},
-			}
-			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
-
 			// Create BrokerService with expression that returns string
 			service := &broker.BrokerService{
 				ObjectMeta: v1.ObjectMeta{
-					Name:      "nonbool-cel-service",
-					Namespace: ns.Name,
+					Name:      NextSpecResourceName(),
+					Namespace: defaultNamespace,
 				},
 				Spec: broker.BrokerServiceSpec{
 					AppSelectorExpression: `app.metadata.namespace`, // Returns string, not bool
@@ -1481,25 +1455,16 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, service)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, ns)).Should(Succeed())
 		})
 
 		It("sets Valid=True when appSelectorExpression is valid", func() {
 			ctx := context.Background()
 
-			// Create namespace
-			ns := &corev1.Namespace{
-				ObjectMeta: v1.ObjectMeta{
-					Name: "test-valid-cel",
-				},
-			}
-			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
-
 			// Create BrokerService with valid CEL expression
 			service := &broker.BrokerService{
 				ObjectMeta: v1.ObjectMeta{
-					Name:      "valid-cel-service",
-					Namespace: ns.Name,
+					Name:      NextSpecResourceName(),
+					Namespace: defaultNamespace,
 				},
 				Spec: broker.BrokerServiceSpec{
 					AppSelectorExpression: `app.metadata.namespace.startsWith("team-")`,
@@ -1524,7 +1489,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, service)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, ns)).Should(Succeed())
 		})
 	})
 })

@@ -33,14 +33,6 @@ import (
 
 var _ = Describe("Read-only root filesystem support", Label("read-only-root-filesystem"), func() {
 
-	BeforeEach(func() {
-		BeforeEachSpec()
-	})
-
-	AfterEach(func() {
-		AfterEachSpec()
-	})
-
 	Context("using container security context to enable read-only root filesystem and resource templates to patch StatefulSet", Label("resource-templates"), func() {
 		It("successfully deploys and connects 2 clustered brokers", func() {
 

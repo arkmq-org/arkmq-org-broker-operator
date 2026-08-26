@@ -25,23 +25,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var _ = Describe("tests regarding controller manager", func() {
-
-	BeforeEach(func() {
-		BeforeEachSpec()
-	})
-
-	AfterEach(func() {
-		AfterEachSpec()
-	})
 
 	Context("operator namespaces test", func() {
 
@@ -382,81 +371,6 @@ var _ = Describe("tests regarding controller manager", func() {
 		})
 	})
 })
-
-func createNamespace(namespace string, securityPolicy *string) error {
-	ns := corev1.Namespace{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Namespace",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name: namespace,
-		},
-	}
-
-	if securityPolicy != nil {
-		ns.ObjectMeta.Labels = map[string]string{
-			"pod-security.kubernetes.io/audit":   *securityPolicy,
-			"pod-security.kubernetes.io/enforce": *securityPolicy,
-			"pod-security.kubernetes.io/warn":    *securityPolicy,
-		}
-	}
-
-	err := k8sClient.Create(ctx, &ns, &client.CreateOptions{})
-
-	// envTest won't delete, get stuck in Terminating state
-	// https://github.com/kubernetes-sigs/controller-runtime/issues/880
-	if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
-		if errors.IsAlreadyExists(err) {
-			// hense the ns may exist as we will only delete for USE_EXISTING_CLUSTER
-			err = nil
-		}
-	}
-	return err
-}
-
-func deleteNamespace(namespace string, wait bool, g Gomega) {
-
-	// envTest won't delete, get stuck in Terminating state
-	// https://github.com/kubernetes-sigs/controller-runtime/issues/880
-	if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
-		return
-	}
-	ns := corev1.Namespace{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Namespace",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name: namespace,
-		},
-	}
-
-	By("Deleting namespace: " + namespace)
-	key := types.NamespacedName{Name: namespace}
-
-	g.Expect(k8sClient.Get(ctx, key, &ns)).Should(Succeed())
-
-	zeroGracePeriodSeconds := int64(0) // immediate delete
-	g.Expect(k8sClient.Delete(ctx, &ns, &client.DeleteOptions{GracePeriodSeconds: &zeroGracePeriodSeconds})).To(Succeed())
-
-	if !wait {
-		return
-	}
-
-	By("verifying gone: " + namespace)
-	g.Eventually(func(g Gomega) {
-		// verify gone
-		err := k8sClient.Get(ctx, key, &ns)
-		if err == nil && verbose {
-			fmt.Printf("\nNamespace %s Status: %v\n", namespace, ns.Status)
-			fmt.Printf("\nNamespace %s Spec: %v\n", namespace, ns)
-
-		}
-		g.Expect(err).ShouldNot(BeNil())
-	}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-
-}
 
 func testWatchNamespace(kind string, g Gomega, testFunc func(g Gomega)) {
 

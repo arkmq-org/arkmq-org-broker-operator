@@ -194,6 +194,14 @@ restricted mode tests
 - Refer to contribution_guide.md (lines 850-889) for complete setup details
 - Only ask user if setup fails
 - Clean up test resources after test completion
+- Local-operator specs use UUID-prefixed namespaces (`test-<6 hex>`) by default.
+  Assignment and default-ns creation run in a **suite-level** Ginkgo `BeforeEach`,
+  so a new `Describe` cannot skip isolation by omitting `BeforeEachSpec()`. Nested
+  hooks still see the prefixed `defaultNamespace` / `otherNamespace` / etc.
+  Set `TEST_DISABLE_NS_PREFIX=true` to keep the original names (`test`, `other`,
+  `restricted`) for interactive debugging. `DEPLOY_OPERATOR=true` also disables
+  prefixing so the suite operator can stay in `test`.
+  Cleanup leftovers: `kubectl delete ns -l test.arkmq.org/isolation=true`.
 
 ### Quick Start - Running Specific E2E Tests
 
@@ -201,7 +209,7 @@ For quick iteration on specific features (recommended profile: `aiprofile`):
 
 ```bash
 # 1. Start minikube with dedicated profile
-minikube start --profile aiprofile --memory=4096 --cpus=2 \
+minikube start --profile aiprofile --memory=8192 --cpus=8 \
   --extra-config=kubelet.sync-frequency=5s
 minikube profile aiprofile
 
@@ -358,7 +366,8 @@ minikube start --cpus=4 --memory=8192
 ### Cleanup
 
 ```bash
-# Delete test namespaces
+# Delete leftover prefixed spec namespaces (and the shared names if present)
+kubectl delete namespace -l test.arkmq.org/isolation=true --ignore-not-found=true
 kubectl delete namespace test other restricted --ignore-not-found=true
 
 # Stop or delete minikube

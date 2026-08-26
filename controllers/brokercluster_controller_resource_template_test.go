@@ -32,14 +32,6 @@ import (
 
 var _ = Describe("templates", func() {
 
-	BeforeEach(func() {
-		BeforeEachSpec()
-	})
-
-	AfterEach(func() {
-		AfterEachSpec()
-	})
-
 	Context("dud template", func() {
 		It("missing kind field applies with error", func() {
 			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {

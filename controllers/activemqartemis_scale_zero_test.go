@@ -42,14 +42,6 @@ import (
 
 var _ = Describe("subresource scale down", func() {
 
-	BeforeEach(func() {
-		BeforeEachSpec()
-	})
-
-	AfterEach(func() {
-		AfterEachSpec()
-	})
-
 	Context("scale to zero via scale subresource", func() {
 		It("deploy plan 1", func() {
 			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {

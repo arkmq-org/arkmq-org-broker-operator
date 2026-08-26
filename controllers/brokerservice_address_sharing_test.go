@@ -26,7 +26,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,7 +40,6 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 	var installedCertManager bool = false
 
 	BeforeEach(func() {
-		BeforeEachSpec()
 
 		if verbose {
 			fmt.Println("Time with MicroSeconds: ", time.Now().Format("2006-01-02 15:04:05.000000"), " test:", CurrentSpecReport())
@@ -98,7 +96,6 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				installedCertManager = false
 			}
 		}
-		AfterEachSpec()
 	})
 
 	Context("Phase 2: Same-Namespace Sharing", func() {
@@ -957,15 +954,9 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			serviceName := NextSpecResourceName()
 
 			By("ensuring other namespace exists")
-			otherNs := corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: otherNamespace,
-				},
-			}
-			err := k8sClient.Create(ctx, &otherNs)
-			if err != nil && !errors.IsAlreadyExists(err) {
-				Fail(fmt.Sprintf("Failed to create other namespace: %v", err))
-			}
+			Expect(createNamespace(otherNamespace, nil)).To(Succeed())
+
+			watchNamespaces(otherNamespace)
 
 			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
 			By("installing broker cert")

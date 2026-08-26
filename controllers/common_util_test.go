@@ -983,7 +983,28 @@ func CertManagerInstalled() bool {
 	return err == nil
 }
 
+var certInfraRestartedForSpec int64
+
+func RestartCertInfra() {
+	if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+		return
+	}
+	if certInfraRestartedForSpec == specCount {
+		return
+	}
+	certInfraRestartedForSpec = specCount
+	for _, deploy := range []string{"cert-manager", "cert-manager-cainjector", "cert-manager-webhook", "trust-manager"} {
+		cmd := exec.Command(kubeTool, "rollout", "restart", "deployment/"+deploy, "-n", "cert-manager")
+		_ = cmd.Run()
+	}
+	for _, deploy := range []string{"cert-manager", "cert-manager-cainjector", "cert-manager-webhook", "trust-manager"} {
+		cmd := exec.Command(kubeTool, "rollout", "status", "deployment/"+deploy, "-n", "cert-manager", "--timeout=60s")
+		_ = cmd.Run()
+	}
+}
+
 func InstallClusteredIssuer(issuerName string, customFunc func(*cmv1.ClusterIssuer)) *cmv1.ClusterIssuer {
+	RestartCertInfra()
 	issuer := cmv1.ClusterIssuer{}
 	if k8sClient.Get(ctx, types.NamespacedName{Name: issuerName, Namespace: defaultNamespace}, &issuer) == nil {
 		CleanResource(&issuer, issuerName, defaultNamespace)
@@ -1007,7 +1028,9 @@ func InstallClusteredIssuer(issuerName string, customFunc func(*cmv1.ClusterIssu
 		customFunc(&issuer)
 	}
 	k8sClient.Delete(ctx, &issuer)
-	Expect(k8sClient.Create(ctx, &issuer, &client.CreateOptions{})).To(Succeed())
+	Eventually(func() error {
+		return k8sClient.Create(ctx, &issuer, &client.CreateOptions{})
+	}, "60s", "2s").Should(Succeed())
 	issKey := types.NamespacedName{Name: issuerName, Namespace: defaultNamespace}
 	currentIssuer := &cmv1.ClusterIssuer{}
 	Eventually(func(g Gomega) {
@@ -1130,7 +1153,9 @@ func InstallCaBundle(bundleName string, sourceSecret string, caFileName string) 
 	}
 
 	k8sClient.Delete(ctx, &bundle)
-	Expect(k8sClient.Create(ctx, &bundle, &client.CreateOptions{})).To(Succeed())
+	Eventually(func() error {
+		return k8sClient.Create(ctx, &bundle, &client.CreateOptions{})
+	}, "60s", "2s").Should(Succeed())
 	bundleKey := types.NamespacedName{Name: bundleName, Namespace: "cert-manager"}
 	newBundle := &tm.Bundle{}
 	Eventually(func(g Gomega) {

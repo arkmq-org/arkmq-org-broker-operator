@@ -43,14 +43,6 @@ import (
 
 var _ = Describe("artemis controller 2", func() {
 
-	BeforeEach(func() {
-		BeforeEachSpec()
-	})
-
-	AfterEach(func() {
-		AfterEachSpec()
-	})
-
 	Context("persistent volumes tests", Label("controller-2-test"), func() {
 		It("controller resource recover test", Label("controller-resource-recover-test"), func() {
 

@@ -87,18 +87,12 @@ import (
 
 // Define utility constants for object names and testing timeouts/durations and intervals.
 const (
-	defaultNamespace                   = "test"
-	otherNamespace                     = "other"
-	restrictedNamespace                = "restricted"
 	timeout                            = time.Second * 60
 	duration                           = time.Second * 20
 	interval                           = time.Millisecond * 500
 	existingClusterTimeout             = time.Second * 300
 	existingClusterConsistentlyTimeout = time.Second * 20
 	existingClusterInterval            = time.Second * 2
-	namespace1                         = "namespace1"
-	namespace2                         = "namespace2"
-	namespace3                         = "namespace3"
 	specShortNameLimit                 = 25
 
 	// Default ingress domain for tests
@@ -106,6 +100,13 @@ const (
 )
 
 var (
+	defaultNamespace    = specNamespaceDefaultBase
+	otherNamespace      = specNamespaceOtherBase
+	restrictedNamespace = specNamespaceRestrictedBase
+	namespace1          = specNamespace1Base
+	namespace2          = specNamespace2Base
+	namespace3          = specNamespace3Base
+
 	resCount   int64
 	specCount  int64
 	currentDir string
@@ -155,6 +156,9 @@ var (
 	defaultUid                                = int64(185)
 	watchClientList                *list.List = nil
 	testProxyLog                   logr.Logger
+
+	specSetupKey    string
+	specTeardownKey string
 )
 
 func init() {
@@ -216,7 +220,9 @@ func setUpEnvTest() {
 
 	setUpIngress()
 
-	setUpNamespace()
+	if namespaceIsolationDisabled() {
+		setUpNamespace()
+	}
 
 	setUpTestProxy()
 
@@ -235,17 +241,7 @@ func setUpNamespace() {
 	err := k8sClient.Create(ctx, &testNamespace)
 	Expect(err == nil || errors.IsAlreadyExists(err)).To(BeTrue())
 
-	if isOpenshift {
-		Eventually(func(g Gomega) {
-			testNamespaceKey := types.NamespacedName{Name: defaultNamespace}
-			g.Expect(k8sClient.Get(ctx, testNamespaceKey, &testNamespace)).Should(Succeed())
-			uidRange := testNamespace.Annotations["openshift.io/sa.scc.uid-range"]
-			g.Expect(uidRange).ShouldNot(BeEmpty())
-			uidRangeTokens := strings.Split(uidRange, "/")
-			defaultUid, err = strconv.ParseInt(uidRangeTokens[0], 10, 64)
-			g.Expect(err).Should(Succeed())
-		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-	}
+	waitForOpenShiftUidRange(defaultNamespace)
 }
 
 func setUpIngress() {
@@ -609,6 +605,15 @@ func shutdownControllerManager() {
 	managerCancel()
 	// wait for start routine to exit
 	<-managerChannel
+}
+
+func watchNamespaces(extra ...string) {
+	namespaces := defaultNamespace
+	for _, ns := range extra {
+		namespaces += "," + ns
+	}
+	shutdownControllerManager()
+	createControllerManager(false, namespaces)
 }
 
 func setUpRealOperator() {
@@ -1008,14 +1013,47 @@ func StopCapturingLog() {
 	capturingLogWriter.Buffer = nil
 }
 
+func currentSpecKey() string {
+	loc := CurrentSpecReport().LeafNodeLocation
+	return fmt.Sprintf("%s:%d", loc.FileName, loc.LineNumber)
+}
+
+// Suite-level so a Describe cannot skip isolation by omitting BeforeEachSpec.
+var _ = BeforeEach(func() {
+	BeforeEachSpec()
+})
+
+var _ = AfterEach(func() {
+	AfterEachSpec()
+})
+
 func BeforeEachSpec() {
+	key := currentSpecKey()
+	if specSetupKey == key {
+		return
+	}
+	specSetupKey = key
+
 	specCount++
+
+	assignSpecNamespaces()
+	allocateDefaultSpecNamespace()
+	retargetOperatorNamespace()
+
+	if !namespaceIsolationDisabled() && os.Getenv("DEPLOY_OPERATOR") != "true" {
+		shutdownControllerManager()
+		createControllerManager(false, defaultNamespace)
+		Eventually(func() bool {
+			return k8Manager.GetCache().WaitForCacheSync(managerCtx)
+		}, "30s", "100ms").Should(BeTrue(), "manager cache failed to sync for namespace %s", defaultNamespace)
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	//Print running spec
 	currentSpecReport := CurrentSpecReport()
-	fmt.Printf("\n\033[1m\033[32mSpec %d running: %s \033[33m[%s]\033[0m\n%s:%d",
+	fmt.Printf("\n\033[1m\033[32mSpec %d running: %s \033[33m[%s]\033[0m\n%s:%d (namespace %s)",
 		specCount, currentSpecReport.FullText(), CurrentSpecShortName(),
-		currentSpecReport.LeafNodeLocation.FileName, currentSpecReport.LeafNodeLocation.LineNumber)
+		currentSpecReport.LeafNodeLocation.FileName, currentSpecReport.LeafNodeLocation.LineNumber, defaultNamespace)
 
 	if verboseWithWatch && os.Getenv("USE_EXISTING_CLUSTER") == "true" {
 
@@ -1047,6 +1085,11 @@ func BeforeEachSpec() {
 }
 
 func AfterEachSpec() {
+	key := currentSpecKey()
+	if specTeardownKey == key {
+		return
+	}
+	specTeardownKey = key
 
 	if watchClientList != nil {
 		for e := watchClientList.Front(); e != nil; e = e.Next() {

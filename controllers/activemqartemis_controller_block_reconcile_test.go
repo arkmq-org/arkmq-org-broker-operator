@@ -35,14 +35,6 @@ import (
 
 var _ = Describe("reconcile block with annotation", func() {
 
-	BeforeEach(func() {
-		BeforeEachSpec()
-	})
-
-	AfterEach(func() {
-		AfterEachSpec()
-	})
-
 	Context("test", Label("block-reconcile"), func() {
 		It("deploy, annotate, verify", func() {
 

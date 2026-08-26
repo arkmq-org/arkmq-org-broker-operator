@@ -40,14 +40,6 @@ import (
 
 var _ = Describe("artemis as scaledown controller", func() {
 
-	BeforeEach(func() {
-		BeforeEachSpec()
-	})
-
-	AfterEach(func() {
-		AfterEachSpec()
-	})
-
 	Context("managed scale down test", func() {
 		It("deploy plan 3 clustered messages on ordinal 1", Label("managed-scaledown-check", "verySlow"), func() {
 

@@ -44,8 +44,6 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 		// Enable namespace permission for tests
 		appselector.SetNamespacePermission(true)
 
-		BeforeEachSpec()
-
 		if verbose {
 			fmt.Println("Time with MicroSeconds: ", time.Now().Format("2006-01-02 15:04:05.000000"), " test:", CurrentSpecReport())
 		}
@@ -103,7 +101,6 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 				installedCertManager = false
 			}
 		}
-		AfterEachSpec()
 	})
 
 	Context("namespace label-based authorization", func() {
@@ -165,6 +162,8 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 			defer func() {
 				_ = k8sClient.Delete(ctx, qaNs)
 			}()
+
+			watchNamespaces(prodNamespace, devNamespace, qaNamespace)
 
 			// Install certificates for apps in each namespace
 			for _, ns := range []string{prodNamespace, devNamespace, qaNamespace} {
@@ -441,6 +440,8 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, ordersNs)).Should(Succeed())
+
+			watchNamespaces(paymentsNamespace, ordersNamespace)
 			defer func() {
 				_ = k8sClient.Delete(ctx, ordersNs)
 			}()

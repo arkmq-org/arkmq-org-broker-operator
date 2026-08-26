@@ -53,14 +53,6 @@ var dummyPythonScript string
 
 var _ = Describe("artemis controller", Label("do"), func() {
 
-	BeforeEach(func() {
-		BeforeEachSpec()
-	})
-
-	AfterEach(func() {
-		AfterEachSpec()
-	})
-
 	Context("tls jolokia access", Label("do-secure-console-with-sni"), func() {
 		It("check the util works in test env", func() {
 			domainName := common.GetClusterDomain()

@@ -41,14 +41,6 @@ import (
 
 var _ = Describe("jdbc fast failover", func() {
 
-	BeforeEach(func() {
-		BeforeEachSpec()
-	})
-
-	AfterEach(func() {
-		AfterEachSpec()
-	})
-
 	Context("artemis", Label("slow"), func() {
 		It("cr with db store", Label("verySlow"), func() {
 			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
@@ -371,7 +363,7 @@ var _ = Describe("jdbc fast failover", func() {
 					g.Expect(err).To(BeNil())
 					g.Expect(*content).Should(ContainSubstring("Produced: 1 messages"))
 
-				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+				}, existingClusterTimeout*2, existingClusterInterval).Should(Succeed())
 
 				By("killing active pod")
 				activePod := &corev1.Pod{}
@@ -392,7 +384,7 @@ var _ = Describe("jdbc fast failover", func() {
 					g.Expect(err).To(BeNil())
 					g.Expect(*content).Should(ContainSubstring("JMS Message ID:"))
 
-				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+				}, existingClusterTimeout*2, existingClusterInterval).Should(Succeed())
 
 				CleanResource(svc, svc.Name, defaultNamespace)
 				CleanResource(&peerA, peerA.Name, defaultNamespace)

@@ -32,14 +32,6 @@ import (
 
 var _ = Describe("brokercluster restricted", func() {
 
-	BeforeEach(func() {
-		BeforeEachSpec()
-	})
-
-	AfterEach(func() {
-		AfterEachSpec()
-	})
-
 	Context("deprecated spec.restricted flag", Label("brokercluster-restricted"), func() {
 		It("rejects a BrokerCluster with restricted=true as invalid", func() {
 			if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
