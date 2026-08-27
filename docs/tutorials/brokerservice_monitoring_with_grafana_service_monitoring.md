@@ -98,10 +98,11 @@ kubectl config set-context --current --namespace=service-app-project
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.5/cert-manager.yaml
 ```
 
-Wait for `cert-manager` to be ready:
+Wait for the cert-manager deployments to be available, then wait for all pods — including the webhook — to be ready before proceeding:
 
 ```bash {"stage":"init", "label":"wait for cert-manager", "runtime":"bash"}
 kubectl wait deployment --for=condition=Available -n cert-manager --timeout=600s cert-manager cert-manager-cainjector cert-manager-webhook
+kubectl wait pods --all --for=condition=Ready -n cert-manager --timeout=300s
 ```
 
 ### Install Trust Manager
