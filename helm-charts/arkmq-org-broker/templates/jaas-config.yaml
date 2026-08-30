@@ -1,0 +1,17 @@
+{{- if and .Values.configuration.jaas .Values.configuration.jaas.create }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "broker.jaasConfigSecretName" . }}
+  namespace: {{ include "broker.namespace" . }}
+  labels:
+  {{- include "broker.labels" . | nindent 4 }}
+  {{- with .Values.configuration.annotations }}
+  annotations:
+    {{ toYaml . | nindent 4 }}
+  {{- end }}
+stringData:
+  login.config: {{ required ".Values.configuration.jaas.login is required" .Values.configuration.jaas.login | quote }}
+  roles.properties: {{ required ".Values.configuration.jaas.roles is required" .Values.configuration.jaas.roles | quote }}
+  users.properties: {{ required ".Values.configuration.jaas.users is required" .Values.configuration.jaas.users | quote }}
+{{- end }}

@@ -1,0 +1,15 @@
+{{- if and $.Values.configuration.logging .Values.configuration.logging.create }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "broker.loggingConfigSecretName" . }}
+  namespace: {{ include "broker.namespace" . }}
+  labels:
+  {{- include "broker.labels" . | nindent 4 }}
+  {{- with .Values.configuration.annotations }}
+  annotations:
+    {{ toYaml . | nindent 4 }}
+  {{- end }}
+stringData:
+  logging.properties: {{ required ".Values.configuration.logging.properties is required" .Values.configuration.logging.properties | quote }}
+{{- end }}

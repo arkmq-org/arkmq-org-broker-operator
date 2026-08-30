@@ -1,0 +1,9 @@
+apiVersion: v2
+name: arkmq-org-broker
+description: A Helm chart for ActiveMQ Artemis Broker
+
+type: application
+
+version: 0.0.1
+
+appVersion: "0.0.1"

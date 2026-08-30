@@ -1,0 +1,80 @@
+# -- Override the name of the chart
+nameOverride: ""
+# -- Override the full name of the chart
+fullnameOverride: ""
+# -- Override the namespace of the chart
+namespaceOverride: ""
+
+service:
+  create: false
+  additionalLabels: {}
+  annotations: {}
+  ports:
+  - port: 61616
+    targetPort: 61616
+  type: ClusterIP
+
+broker:
+  version: ""
+  acceptors: []
+  connectors: {}
+  console: {}
+  ingressDomain: ""
+  deploymentPlan:
+    size: 1
+    resources: {}
+    extraMounts: []
+
+  env: []
+  additionalLabels: {}
+  annotations: {}
+  resourceTemplates: []
+  properties: []
+  restricted: false
+
+configuration:
+  credentials:
+    adminUser: ""
+    adminPassword: ""
+    clusterUser: ""
+    clusterPassword: ""
+  logging:
+    create: false
+    properties: ""
+  jaas:
+    create: false
+    annotations: { }
+    login: |
+      activemq {
+              // ensure the operator can connect to the broker by referencing the existing properties config
+              org.apache.activemq.artemis.spi.core.security.jaas.PropertiesLoginModule sufficient
+                  org.apache.activemq.jaas.properties.user="artemis-users.properties"
+                  org.apache.activemq.jaas.properties.role="artemis-roles.properties"
+                  baseDir="/home/jboss/amq-broker/etc";
+
+              org.apache.activemq.artemis.spi.core.security.jaas.PropertiesLoginModule sufficient
+                  reload=true
+                  org.apache.activemq.jaas.properties.user="users.properties"
+                  org.apache.activemq.jaas.properties.role="roles.properties";
+
+      };
+
+    roles: ""
+    users: ""
+  annotations: {}
+  broker: []
+#    - name: props-list
+#      properties:
+#        - "a=b"
+#    - name: props-string
+#      properties: |
+#        a=b
+#    - name: config-json-string
+#      config: |
+#        {"a":"b"}
+#    - name: mixed-objects
+#      properties:
+#        - "a=b"
+#        - "b=c"
+#      config:
+#        a: b
