@@ -148,9 +148,16 @@ vet: ## Run go vet against code.
 ## Run tests.
 test test-v: TEST_VARS = KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" RECONCILE_RESYNC_PERIOD=5s
 
+## Run unit tests only (no cluster required, E2E specs self-skip)
+test-unit test-unit-v: TEST_VARS = USE_EXISTING_CLUSTER=false KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)"
+
 ## Run tests against minikube with local operator.
 test-mk test-mk-v: TEST_ARGS += -test.timeout=120m -ginkgo.label-filter='!do'
 test-mk test-mk-v: TEST_VARS = USE_EXISTING_CLUSTER=true RECONCILE_RESYNC_PERIOD=5s
+
+## PR-scoped E2E: broker-service and control plane (excludes verySlow)
+test-mk-pr test-mk-pr-v: TEST_ARGS += -test.timeout=50m -ginkgo.label-filter='!do && !verySlow' -ginkgo.focus='broker-service|restricted rbac'
+test-mk-pr test-mk-pr-v: TEST_VARS = USE_EXISTING_CLUSTER=true RECONCILE_RESYNC_PERIOD=5s
 
 ## Run tests against minikube with deployed operator(do)
 test-mk-do test-mk-do-v: TEST_ARGS += -test.timeout=60m -ginkgo.label-filter='do'
@@ -160,14 +167,21 @@ test-mk-do test-mk-do-v: TEST_VARS = DEPLOY_OPERATOR=true USE_EXISTING_CLUSTER=t
 test-mk-do-fast test-mk-do-fast-v: TEST_ARGS += -test.timeout=30m -ginkgo.label-filter='do && !slow'
 test-mk-do-fast test-mk-do-fast-v: TEST_VARS = DEPLOY_OPERATOR=true USE_EXISTING_CLUSTER=true
 
-test-v test-mk-v test-mk-do-v test-mk-do-fast-v: TEST_ARGS += -v
-test-v test-mk test-mk-v test-mk-do test-mk-do-v test-mk-do-fast test-mk-do-fast-v: TEST_ARGS += -ginkgo.poll-progress-after=150s -ginkgo.fail-fast -coverprofile cover-mk.out
+test-v test-mk-v test-mk-do-v test-mk-do-fast-v test-mk-pr-v test-unit-v: TEST_ARGS += -v
+test-v test-mk test-mk-v test-mk-do test-mk-do-v test-mk-do-fast test-mk-do-fast-v test-mk-pr test-mk-pr-v: TEST_ARGS += -ginkgo.poll-progress-after=150s -ginkgo.fail-fast -coverprofile cover-mk.out
 
 test test-v: manifests generate fmt vet envtest
 	$(TEST_VARS) go test ./... -p 1 $(TEST_ARGS) $(TEST_EXTRA_ARGS)
 
+test-unit test-unit-v: manifests generate fmt vet envtest
+	$(TEST_VARS) go test ./... -p 1 $(TEST_ARGS) $(TEST_EXTRA_ARGS)
+
 test-mk test-mk-v test-mk-do test-mk-do-v test-mk-do-fast test-mk-do-fast-v: TEST_VARS += HELM=$(HELM)
 test-mk test-mk-v test-mk-do test-mk-do-v test-mk-do-fast test-mk-do-fast-v: manifests generate fmt vet envtest helm
+	$(TEST_VARS) go test ./... -p 1 $(TEST_ARGS) $(TEST_EXTRA_ARGS)
+
+test-mk-pr test-mk-pr-v: TEST_VARS += HELM=$(HELM)
+test-mk-pr test-mk-pr-v: manifests generate fmt vet envtest helm
 	$(TEST_VARS) go test ./... -p 1 $(TEST_ARGS) $(TEST_EXTRA_ARGS)
 
 ##@ Debugging
