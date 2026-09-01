@@ -250,7 +250,11 @@ The Vault Agent Injector is the official HashiCorp solution for injecting secret
 
 ### Deploy the broker (hashicorp-broker)
 
-Create the broker CR with Vault Agent Injector annotations. The template constructs the broker properties using the address name from Vault with the path `secret/data/broker`:
+Create the broker CR with Vault Agent Injector annotations. The template constructs the broker properties using the address name from Vault with the path `secret/data/broker`.
+
+`EXTRA_BROKER_PROPERTIES` tells the operator to append the Vault-injected file to
+its own broker properties search path. No manual `-Dbroker.properties=` override is
+needed — the operator's paths remain intact and the Vault file is loaded on top:
 
 ```{"stage":"agent-injector", "runtime":"bash", "label":"deploy hashicorp broker"}
 kubectl apply -f - << EOF
@@ -273,8 +277,8 @@ spec:
     podSecurity:
       serviceAccountName: vault-broker-sa
   env:
-  - name: JAVA_ARGS_APPEND
-    value: "-Dbroker.properties=/amq/extra/secrets/hashicorp-broker-props/broker.properties,/vault/secrets/vault-broker.properties"
+  - name: EXTRA_BROKER_PROPERTIES
+    value: "/vault/secrets/vault-broker.properties"
 EOF
 ```
 ```shell markdown_runner
@@ -496,6 +500,7 @@ Both brokers successfully created the same `VAULT-TEST` queue and address from t
 - Supports secret rotation
 - Better for production environments
 - Properties injected at `/vault/secrets/vault-broker.properties`
+- Path added via `EXTRA_BROKER_PROPERTIES` — operator's own paths are preserved
 
 **Banzai Secret Injection Webhook (`banzai-broker`):**
 - Webhook intercepts pod creation
@@ -520,7 +525,9 @@ This tutorial demonstrates two approaches for injecting the **same Vault secret*
 2. **Vault Auth**: Kubernetes auth method with simple policy allowing read access to broker secrets
 3. **Vault Agent**: Sidecar container injected into broker pod via annotations
 4. **Template Processing**: Agent uses Go template to fetch `addressName` and construct complete broker properties
-5. **Artemis Broker**: Loads constructed properties from `/vault/secrets/vault-broker.properties` via `JAVA_ARGS_APPEND`
+5. **Artemis Broker**: Loads constructed properties from `/vault/secrets/vault-broker.properties`.
+   The path is appended to the operator's own search path via `EXTRA_BROKER_PROPERTIES`,
+   so the operator's required configuration remains intact and the Vault file is applied on top.
 
 #### Banzai Secret Injection Webhook (`banzai-broker`)
 
@@ -542,11 +549,20 @@ Both brokers create the same infrastructure from the Vault-injected address name
   - HashiCorp: Vault agent authenticates continuously during pod runtime (sidecar container)
   - Banzai: Webhook authenticates once during pod creation (mutating webhook)
 - **Secret injection method**:
-  - HashiCorp: Template-based construction using Go templates to build complete properties file
-  - Banzai: Injects Vault value into environment variable, Artemis resolves `${VAR}` placeholders at runtime
+  - HashiCorp: Template-based construction using Go templates to build complete properties file,
+    path registered via `EXTRA_BROKER_PROPERTIES`
+  - Banzai: Injects Vault value into environment variable, Artemis resolves `${VAR}` placeholders
+    at runtime; path registered via `extraMounts.secrets` with `-bp` suffix
 - **Resource usage**:
   - HashiCorp: Additional sidecar container per pod
   - Banzai: Single webhook deployment for all pods
+
+> **Why `EXTRA_BROKER_PROPERTIES` instead of `JAVA_ARGS_APPEND` for the HashiCorp approach?**
+> Setting `-Dbroker.properties=...` directly in `JAVA_ARGS_APPEND` **replaces** the operator's
+> own path list, losing the operator-managed configuration. `EXTRA_BROKER_PROPERTIES` is
+> designed for exactly this use case: it appends user-supplied paths to the operator's list via
+> Kubernetes env var substitution, so both the operator's paths and the Vault-injected file are
+> always active.
 
 This approach provides:
 - **Secure secret management**: Sensitive data never stored in Kubernetes

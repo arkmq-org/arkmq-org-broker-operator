@@ -2465,6 +2465,11 @@ func (reconciler *BrokerClusterReconcilerImpl) brokerPropertiesConfigSystemPropV
 		result = fmt.Sprintf("%s,%s%s/?filter=.*\\.%s${STATEFUL_SET_ORDINAL}%s", result, mountPoint, resourceName, OrdinalPropertiesSuffix, OrdinalPropertiesSuffixEnd)
 	}
 
+	// Append user-defined extra paths via Kubernetes env var substitution.
+	// The trailing comma is safe: Java String.split(",") strips trailing empty tokens,
+	// so Artemis parseProperties receives no empty path when the var is unset.
+	result = result + ",$(EXTRA_BROKER_PROPERTIES)"
+
 	return result
 }
 
@@ -3019,6 +3024,12 @@ func MakeEnvVarArrayForCR(customResource *v1beta2.BrokerCluster, namer common.Na
 
 	envVarArrayForMetricsPlugin := environments.AddEnvVarForMetricsPlugin(metricsPluginEnabled)
 	envVar = append(envVar, envVarArrayForMetricsPlugin...)
+
+	// Default empty value so that $(EXTRA_BROKER_PROPERTIES) in JDK_JAVA_OPTIONS
+	// always resolves via Kubernetes substitution. Must appear before ReplaceOrAppend
+	// so the user's Spec.Env entry can override it, and before JDK_JAVA_OPTIONS is
+	// appended by CreateOrAppend so the k8s substitution order is guaranteed.
+	envVar = append(envVar, environments.AddEnvVarForExtraBrokerProperties()...)
 
 	// Env from CR will override
 	envVar = environments.ReplaceOrAppend(envVar, customResource.Spec.Env...)
@@ -3841,9 +3852,10 @@ func (r *BrokerClusterReconcilerImpl) validateExposeModes(customResource *v1beta
 func (r *BrokerClusterReconcilerImpl) validateEnvVars(customResource *v1beta2.BrokerCluster) (*metav1.Condition, bool) {
 
 	internalVarNames := map[string]string{
-		debugArgsEnvVarName:      debugArgsEnvVarName,
-		javaOptsEnvVarName:       javaOptsEnvVarName,
-		javaArgsAppendEnvVarName: javaArgsAppendEnvVarName,
+		debugArgsEnvVarName:                          debugArgsEnvVarName,
+		javaOptsEnvVarName:                           javaOptsEnvVarName,
+		javaArgsAppendEnvVarName:                     javaArgsAppendEnvVarName,
+		environments.ExtraBrokerPropertiesEnvVar: environments.ExtraBrokerPropertiesEnvVar,
 	}
 
 	invalidVars := []string{}

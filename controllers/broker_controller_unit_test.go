@@ -16,10 +16,12 @@ package controllers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
 	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/environments"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -138,4 +140,90 @@ func TestValidateRestrictedNeedsSecret(t *testing.T) {
 	assert.True(t, valid)
 	assert.False(t, retry)
 	assert.True(t, meta.IsStatusConditionTrue(cr.Status.Conditions, brokerv1beta1.ValidConditionType))
+}
+
+func TestBrokerCR_ExtraBrokerPropertiesDefaultIsEmpty(t *testing.T) {
+
+	cr := &v1beta2.Broker{
+		ObjectMeta: v1.ObjectMeta{Name: "broker"},
+		Spec:       v1beta2.BrokerSpec{},
+	}
+
+	namer := MakeNamersForBroker(cr)
+	envVars := MakeEnvVarArrayForCRForBroker(cr, *namer)
+
+	// EXTRA_BROKER_PROPERTIES must be present with an empty default
+	extraPathsIdx := -1
+	for i, e := range envVars {
+		if e.Name == environments.ExtraBrokerPropertiesEnvVar {
+			assert.Equal(t, "", e.Value)
+			extraPathsIdx = i
+			break
+		}
+	}
+	assert.True(t, extraPathsIdx != -1, "EXTRA_BROKER_PROPERTIES must be in env array")
+
+	// brokerPropertiesConfigSystemPropValue must embed the token
+	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerReconcilerImpl(cr, r)
+	result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource",
+		map[string][]byte{"broker.properties": []byte("")})
+	assert.True(t, strings.HasSuffix(result, ",$(EXTRA_BROKER_PROPERTIES)"),
+		"brokerPropertiesConfigSystemPropValue must end with ,$(EXTRA_BROKER_PROPERTIES)")
+}
+
+func TestBrokerCR_ExtraBrokerPropertiesUserValueOverrides(t *testing.T) {
+
+	const extraPaths = "/my/extra/path/"
+
+	cr := &v1beta2.Broker{
+		ObjectMeta: v1.ObjectMeta{Name: "broker"},
+		Spec: v1beta2.BrokerSpec{
+			Env: []corev1.EnvVar{
+				{
+					Name:  environments.ExtraBrokerPropertiesEnvVar,
+					Value: extraPaths,
+				},
+			},
+		},
+	}
+
+	namer := MakeNamersForBroker(cr)
+	envVars := MakeEnvVarArrayForCRForBroker(cr, *namer)
+
+	// User's value must replace the operator default
+	found := false
+	for _, e := range envVars {
+		if e.Name == environments.ExtraBrokerPropertiesEnvVar {
+			assert.Equal(t, extraPaths, e.Value)
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "EXTRA_BROKER_PROPERTIES with user value must be in env array")
+}
+
+func TestBrokerCR_ExtraBrokerPropertiesValueFromIsRejected(t *testing.T) {
+
+	cr := &v1beta2.Broker{
+		ObjectMeta: v1.ObjectMeta{Name: "broker"},
+		Spec: v1beta2.BrokerSpec{
+			Env: []corev1.EnvVar{
+				{
+					Name: environments.ExtraBrokerPropertiesEnvVar,
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "some-secret"},
+							Key:                  "paths",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	condition, _ := validateEnvVarsForBroker(cr)
+	assert.NotNil(t, condition)
+	assert.Equal(t, brokerv1beta1.ValidConditionInvalidInternalVarUsage, condition.Reason)
+	assert.Contains(t, condition.Message, environments.ExtraBrokerPropertiesEnvVar)
 }

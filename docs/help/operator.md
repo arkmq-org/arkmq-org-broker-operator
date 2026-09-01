@@ -847,6 +847,7 @@ There are a few well-known environment variables that are used by the operator i
 * JAVA_ARGS_APPEND
 * JAVA_OPTS
 * DEBUG_ARGS
+* EXTRA_BROKER_PROPERTIES
 
 If you want to add some values to any of them, make sure you define it in **spec.env** using `value` field. If you use `valueFrom` for the env var you will get validation error condition in your CR's status.
 
@@ -897,6 +898,56 @@ For example:
 ```
 
 **Note: the broker pods must be restarted to apply the acceptor broker properties!**
+
+## Providing additional brokerProperties paths via environment variable
+
+When broker properties files are already available inside the container at runtime — for
+example written by a Vault agent sidecar, an init container, or any other injector — you
+can use the `EXTRA_BROKER_PROPERTIES` environment variable to tell the operator to
+append those paths to the broker properties search path it manages.
+
+Set `EXTRA_BROKER_PROPERTIES` in `spec.env` with a comma-separated list of paths.
+Each entry can be a file path or a directory path (ending with `/`), using the same
+format that Apache Artemis accepts for `broker.properties`:
+
+```yaml
+apiVersion: broker.arkmq.org/v1beta2
+kind: BrokerCluster
+metadata:
+  name: ex-aao
+spec:
+  env:
+    - name: EXTRA_BROKER_PROPERTIES
+      value: "/vault/secrets/my-broker.properties,/my/extra/config-dir/"
+```
+
+The operator appends this value to the end of the `-Dbroker.properties=` JVM system
+property it manages, using **Kubernetes environment variable substitution** — no
+reconcile-time parsing is needed. The operator's own paths are always present; the
+user's paths are appended last so any key defined in them overrides keys from earlier
+sources.
+
+> **NOTE**: `EXTRA_BROKER_PROPERTIES` must be set using a plain `value` string,
+> not `valueFrom`. If you need to source the path dynamically from a Secret, declare
+> a helper env var with `valueFrom` and reference it:
+>
+> ```yaml
+> spec:
+>   env:
+>     - name: MY_EXTRA_PATH
+>       valueFrom:
+>         secretKeyRef:
+>           name: my-secret
+>           key: props-path
+>     - name: EXTRA_BROKER_PROPERTIES
+>       value: "$(MY_EXTRA_PATH)"
+> ```
+
+This mechanism complements `extraMounts.secrets` with the `-bp` suffix. Use **`-bp`
+secrets** when you want Kubernetes to mount the properties files into the pod. Use
+**`EXTRA_BROKER_PROPERTIES`** when the files are already present in the container
+at runtime (e.g. written by a Vault agent sidecar as in the
+[Vault tutorial](../tutorials/vault_broker_properties.md)).
 
 ## Providing additional brokerProperties configuration from a secret
 In order to provide a way to split or organise these properties by file or by secret, an extra mount can be used to provide a secret that will be treated as an additional source of broker properties configuration.

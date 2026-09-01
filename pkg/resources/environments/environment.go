@@ -9,6 +9,12 @@ import (
 const (
 	NameEnvVar             = "AMQ_NAME"
 	NameEnvVarDefaultValue = "amq-broker"
+
+	// ExtraBrokerPropertiesEnvVar is an operator-consumed env var that the user
+	// can set in Spec.Env with a comma-separated list of extra broker.properties paths
+	// (files or directories). The operator appends it to its own -Dbroker.properties=
+	// value via Kubernetes $(VAR_NAME) substitution so no reconcile-time parsing is needed.
+	ExtraBrokerPropertiesEnvVar = "EXTRA_BROKER_PROPERTIES"
 )
 
 func ResolveBrokerNameFromEnvs(envs []corev1.EnvVar, defaultValue string) string {
@@ -20,6 +26,18 @@ func ResolveBrokerNameFromEnvs(envs []corev1.EnvVar, defaultValue string) string
 		}
 	}
 	return defaultValue
+}
+
+// AddEnvVarForExtraBrokerProperties returns an env var with an empty default
+// for EXTRA_BROKER_PROPERTIES. The empty default ensures the Kubernetes
+// $(EXTRA_BROKER_PROPERTIES) reference in JDK_JAVA_OPTIONS always resolves
+// (to an empty string) rather than being left as a literal token when the user
+// has not set a custom value.
+func AddEnvVarForExtraBrokerProperties() []corev1.EnvVar {
+	return []corev1.EnvVar{{
+		Name:  ExtraBrokerPropertiesEnvVar,
+		Value: "",
+	}}
 }
 
 func AddEnvVarForBasic(requireLogin string, journalType string, svcPingName string) []corev1.EnvVar {

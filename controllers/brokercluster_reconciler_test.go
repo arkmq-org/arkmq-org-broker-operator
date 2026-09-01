@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/environments"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -601,6 +602,122 @@ func Test_Respect_existing_JAVA_OPTS_properties_def(t *testing.T) {
 	assert.True(t, index != -1)
 	assert.True(t, strings.Contains(newSS.Spec.Template.Spec.InitContainers[0].Env[index].Value, "properties"))
 }
+
+
+func Test_ExtraBrokerPropertiesDefaultIsEmpty(t *testing.T) {
+
+	cr := &v1beta2.BrokerCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
+		Spec:       v1beta2.BrokerClusterSpec{},
+	}
+
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesDefaultIsEmpty"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+
+	newSS, err := reconciler.ProcessStatefulSet(cr, *MakeNamers(cr), nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, newSS)
+
+	containers := newSS.Spec.Template.Spec.Containers
+	assert.NotEmpty(t, containers)
+
+	env := containers[0].Env
+
+	// EXTRA_BROKER_PROPERTIES must be present with an empty default value
+	extraPathsIdx := -1
+	jdkOptsIdx := -1
+	for i, e := range env {
+		if e.Name == environments.ExtraBrokerPropertiesEnvVar {
+			assert.Equal(t, "", e.Value)
+			extraPathsIdx = i
+		}
+		if e.Name == jdkJavaOptionsEnvVarName {
+			jdkOptsIdx = i
+		}
+	}
+	assert.True(t, extraPathsIdx != -1, "EXTRA_BROKER_PROPERTIES must be present in container env")
+	assert.True(t, jdkOptsIdx != -1, "JDK_JAVA_OPTIONS must be present in container env")
+
+	// EXTRA_BROKER_PROPERTIES must be declared before JDK_JAVA_OPTIONS so that
+	// Kubernetes $(VAR_NAME) substitution resolves correctly
+	assert.True(t, extraPathsIdx < jdkOptsIdx, "EXTRA_BROKER_PROPERTIES must precede JDK_JAVA_OPTIONS in env list")
+
+	// JDK_JAVA_OPTIONS must contain the token so Kubernetes resolves it at pod start time
+	assert.True(t, strings.Contains(env[jdkOptsIdx].Value, ",$(EXTRA_BROKER_PROPERTIES)"),
+		"JDK_JAVA_OPTIONS must contain ,$(EXTRA_BROKER_PROPERTIES) token")
+}
+
+func Test_ExtraBrokerPropertiesUserValueAppearsInEnv(t *testing.T) {
+
+	const extraPaths = "/my/custom/path/,/my/other/path/"
+
+	cr := &v1beta2.BrokerCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
+		Spec: v1beta2.BrokerClusterSpec{
+			Env: []v1.EnvVar{
+				{
+					Name:  environments.ExtraBrokerPropertiesEnvVar,
+					Value: extraPaths,
+				},
+			},
+		},
+	}
+
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesUserValueAppearsInEnv"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+
+	newSS, err := reconciler.ProcessStatefulSet(cr, *MakeNamers(cr), nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, newSS)
+
+	env := newSS.Spec.Template.Spec.Containers[0].Env
+
+	// User's value must replace the operator default
+	extraPathsIdx := -1
+	jdkOptsIdx := -1
+	for i, e := range env {
+		if e.Name == environments.ExtraBrokerPropertiesEnvVar {
+			assert.Equal(t, extraPaths, e.Value)
+			extraPathsIdx = i
+		}
+		if e.Name == jdkJavaOptionsEnvVarName {
+			jdkOptsIdx = i
+		}
+	}
+	assert.True(t, extraPathsIdx != -1)
+	assert.True(t, jdkOptsIdx != -1)
+	assert.True(t, extraPathsIdx < jdkOptsIdx, "EXTRA_BROKER_PROPERTIES must precede JDK_JAVA_OPTIONS in env list")
+	assert.True(t, strings.Contains(env[jdkOptsIdx].Value, ",$(EXTRA_BROKER_PROPERTIES)"))
+}
+
+func Test_ExtraBrokerPropertiesValueFromIsRejected(t *testing.T) {
+
+	cr := &v1beta2.BrokerCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
+		Spec: v1beta2.BrokerClusterSpec{
+			Env: []v1.EnvVar{
+				{
+					Name: environments.ExtraBrokerPropertiesEnvVar,
+					ValueFrom: &v1.EnvVarSource{
+						SecretKeyRef: &v1.SecretKeySelector{
+							LocalObjectReference: v1.LocalObjectReference{Name: "some-secret"},
+							Key:                  "paths",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesValueFromIsRejected"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+
+	condition, _ := reconciler.validateEnvVars(cr)
+	assert.NotNil(t, condition, "validation condition must be set when valueFrom is used")
+	assert.Equal(t, v1beta2.ValidConditionInvalidInternalVarUsage, condition.Reason)
+	assert.Contains(t, condition.Message, environments.ExtraBrokerPropertiesEnvVar)
+}
+
 
 func TestProcess_TemplateKeyValue(t *testing.T) {
 

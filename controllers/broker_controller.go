@@ -1184,6 +1184,11 @@ func (reconciler *BrokerReconcilerImpl) brokerPropertiesConfigSystemPropValue(mo
 		}
 	}
 
+	// Append user-defined extra paths via Kubernetes env var substitution.
+	// The trailing comma is safe: Java String.split(",") strips trailing empty tokens,
+	// so Artemis parseProperties receives no empty path when the var is unset.
+	result = result + ",$(EXTRA_BROKER_PROPERTIES)"
+
 	return result
 }
 
@@ -1635,6 +1640,12 @@ func MakeEnvVarArrayForCRForBroker(customResource *v1beta2.Broker, namer common.
 
 	envVarArrayForMetricsPlugin := environments.AddEnvVarForMetricsPlugin(metricsPluginEnabled)
 	envVar = append(envVar, envVarArrayForMetricsPlugin...)
+
+	// Default empty value so that $(EXTRA_BROKER_PROPERTIES) in JDK_JAVA_OPTIONS
+	// always resolves via Kubernetes substitution. Must appear before ReplaceOrAppend
+	// so the user's Spec.Env entry can override it, and before JDK_JAVA_OPTIONS is
+	// appended by CreateOrAppend so the k8s substitution order is guaranteed.
+	envVar = append(envVar, environments.AddEnvVarForExtraBrokerProperties()...)
 
 	// Env from CR will override
 	envVar = environments.ReplaceOrAppend(envVar, customResource.Spec.Env...)
@@ -2102,9 +2113,10 @@ func validateReservedLabelsForBroker(customResource *v1beta2.Broker) *metav1.Con
 func validateEnvVarsForBroker(customResource *v1beta2.Broker) (*metav1.Condition, bool) {
 
 	internalVarNames := map[string]string{
-		debugArgsEnvVarName:      debugArgsEnvVarName,
-		javaOptsEnvVarName:       javaOptsEnvVarName,
-		javaArgsAppendEnvVarName: javaArgsAppendEnvVarName,
+		debugArgsEnvVarName:                          debugArgsEnvVarName,
+		javaOptsEnvVarName:                           javaOptsEnvVarName,
+		javaArgsAppendEnvVarName:                     javaArgsAppendEnvVarName,
+		environments.ExtraBrokerPropertiesEnvVar: environments.ExtraBrokerPropertiesEnvVar,
 	}
 
 	invalidVars := []string{}
