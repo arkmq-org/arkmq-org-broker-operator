@@ -915,6 +915,22 @@ var _ = BeforeSuite(func() {
 	}
 })
 
+func cleanUpOperatorCertSecrets() {
+	bundle := tm.Bundle{}
+	if k8sClient.Get(ctx, types.NamespacedName{Name: common.DefaultOperatorCASecretName}, &bundle) == nil {
+		err := k8sClient.Delete(ctx, &bundle)
+		Expect(err == nil || errors.IsNotFound(err)).To(BeTrue())
+	}
+	for _, secretName := range []string{common.DefaultOperatorCASecretName, common.DefaultOperatorCertSecretName} {
+		secret := corev1.Secret{}
+		key := types.NamespacedName{Name: secretName, Namespace: defaultNamespace}
+		if k8sClient.Get(ctx, key, &secret) == nil {
+			err := k8sClient.Delete(ctx, &secret)
+			Expect(err == nil || errors.IsNotFound(err)).To(BeTrue())
+		}
+	}
+}
+
 func cleanUpPVC() {
 	pvcs := &corev1.PersistentVolumeClaimList{}
 	opts := []client.ListOption{}
@@ -930,6 +946,7 @@ var _ = AfterSuite(func() {
 	if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
 		cleanUpPVC()
 		cleanUpTestProxy()
+		cleanUpOperatorCertSecrets()
 	}
 
 	os.Unsetenv("OPERATOR_WATCH_NAMESPACE")
