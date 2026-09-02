@@ -946,15 +946,12 @@ func (reconciler *BrokerServiceInstanceReconciler) getTrustStorePath(_ *broker.B
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) makePemCfgProps(service *broker.BrokerService) []byte {
-
-	buf := brokerproperties.NewPropsWithHeader()
-
-	certSecretName := certSecretName(service)
-
-	fmt.Fprintf(buf, "source.key=/amq/extra/secrets/%s/tls.key\n", certSecretName)
-	fmt.Fprintf(buf, "source.cert=/amq/extra/secrets/%s/tls.crt\n", certSecretName)
-
-	return buf.Bytes()
+	certSecret := certSecretName(service)
+	return brokerproperties.PemCfgData(
+		"",
+		fmt.Sprintf("/amq/extra/secrets/%s/tls.key", certSecret),
+		fmt.Sprintf("/amq/extra/secrets/%s/tls.crt", certSecret),
+	)
 }
 
 func jaasConfigRealmName(app *broker.BrokerApp) string {
@@ -1069,80 +1066,18 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]bool) []byte {
-	buf := brokerproperties.NewPropsWithHeader() // yaml
-
-	// HTTP server config with mTLS
-	var caSecret string
-	var caSecretKey string
+	var caSecret, caSecretKey string
 	if caCertSecret, err := common.GetOperatorCASecret(reconciler.Client); err == nil {
 		caSecret = caCertSecret.Name
 		if key, err := common.GetOperatorCASecretKey(reconciler.Client, caCertSecret); err == nil {
 			caSecretKey = key
 		}
 	}
-
-	// Broker reconciler creates broker properties secret with "-props" suffix
-	brokerPropsSecretName := reconciler.instance.Name + "-props"
-	mountPathRoot := fmt.Sprintf("%s%s", common.SecretPathBase, brokerPropsSecretName)
-
-	fmt.Fprintf(buf, "httpServer:\n")
-	fmt.Fprintf(buf, "  authentication:\n")
-	fmt.Fprintf(buf, "    plugin:\n")
-	fmt.Fprintf(buf, "      class: org.apache.activemq.artemis.spi.core.security.jaas.HttpServerAuthenticator\n")
-	fmt.Fprintf(buf, "      subjectAttributeName: org.jolokia.jaasSubject\n")
-	fmt.Fprintf(buf, "  ssl:\n")
-	fmt.Fprintf(buf, "    mutualTLS: true\n")
-	fmt.Fprintf(buf, "    keyStore:\n")
-	fmt.Fprintf(buf, "      filename: %s/_cert.pemcfg\n", mountPathRoot)
-	fmt.Fprintf(buf, "      type: PEMCFG\n")
-	fmt.Fprintf(buf, "    trustStore:\n")
-	fmt.Fprintf(buf, "      filename: %s%s/%s\n", common.SecretPathBase, caSecret, caSecretKey)
-	fmt.Fprintf(buf, "      type: PEMCA\n")
-	fmt.Fprintf(buf, "    certificate:\n")
-	fmt.Fprintf(buf, "      alias: alias\n")
-
-	// Collector/scraper config
-
-	fmt.Fprintf(buf, "attrNameSnakeCase: true\n")
-
-	// just queues, rbac will limit values returned
-	fmt.Fprintf(buf, "includeObjectNames:\n")
-	fmt.Fprintf(buf, "  - \"org.apache.activemq.artemis:broker=*,component=addresses,address=*,subcomponent=queues,routing-type=*,queue=*\"\n")
-
-	brokerName := reconciler.instance.Name // Use service name as broker name for restricted mode
-
-	// Add queue-level attributes for specific queues with exact ObjectNames (include quotes) for canonocial string match, this restricts the attribute load
-	if len(appQueues) > 0 {
-		fmt.Fprintf(buf, "includeObjectNameAttributes:\n")
-		for address := range appQueues {
-			fqqn := strings.SplitN(address, "::", 2)
-			if len(fqqn) > 1 {
-				fmt.Fprintf(buf, "  org.apache.activemq.artemis:broker=\"%s\",component=addresses,address=\"%s\",subcomponent=queues,routing-type=\"multicast\",queue=\"%s\":\n",
-					brokerName, fqqn[0], fqqn[1])
-			} else {
-				fmt.Fprintf(buf, "  org.apache.activemq.artemis:broker=\"%s\",component=addresses,address=\"%s\",subcomponent=queues,routing-type=\"anycast\",queue=\"%s\":\n",
-					brokerName, address, address)
-			}
-			fmt.Fprintf(buf, "    - MessageCount\n")
-			fmt.Fprintf(buf, "    - ConsumerCount\n")
-			fmt.Fprintf(buf, "    - DeliveringCount\n")
-			fmt.Fprintf(buf, "    - PersistentSize\n")
-		}
-	}
-
-	// regex for matchName='org.apache.activemq.artemis<broker="brokerservice617a", component=addresses, address="METRICS.QUEUE.TWO", subcomponent=queues, routing-type="anycast", queue="METRICS.QUEUE.TWO"><>MessageCount: 0'
-	// Rules for queue metrics generation
-	fmt.Fprintf(buf, "rules:\n")
-	fmt.Fprintf(buf, `  - pattern: "org.apache.activemq.artemis<broker=\"([^\"]+)\", component=addresses, address=\"([^\"]+)\", subcomponent=queues, routing-type=\"([^\"]+)\", queue=\"([^\"]+)\"><>([^:]+):"`+"\n")
-	fmt.Fprintf(buf, "    name: broker_queue_$5\n")
-	fmt.Fprintf(buf, "    help: $5\n") // non descriptive help - default contains too much unrelated info (TODO: potentially clean up and extract the help info, could have a rule per attribute)
-	fmt.Fprintf(buf, "    attrNameSnakeCase: true\n")
-	fmt.Fprintf(buf, "    type: GAUGE\n")
-	fmt.Fprintf(buf, "    labels:\n")
-	fmt.Fprintf(buf, "      broker: \"$1\"\n")
-	fmt.Fprintf(buf, "      address: \"$2\"\n")
-	fmt.Fprintf(buf, "      routing_type: \"$3\"\n")
-	fmt.Fprintf(buf, "      queue: \"$4\"\n")
-
-	return buf.Bytes()
+	mountPathRoot := fmt.Sprintf("%s%s", common.SecretPathBase, reconciler.instance.Name+"-props")
+	return brokerproperties.ServicePrometheusConfigData(
+		mountPathRoot+"/_cert.pemcfg",
+		fmt.Sprintf("%s%s/%s", common.SecretPathBase, caSecret, caSecretKey),
+		reconciler.instance.Name,
+		appQueues,
+	)
 }
