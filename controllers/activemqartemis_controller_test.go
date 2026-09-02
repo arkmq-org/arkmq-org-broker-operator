@@ -3459,6 +3459,9 @@ var _ = Describe("artemis controller", func() {
 	Context("SS delete recreate Test", func() {
 		It("deploy, delete ss, verify", func() {
 
+			if k8sClient == nil {
+				Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+			}
 			crd := generateArtemisSpec(defaultNamespace)
 			By("Deploying the CRD " + crd.ObjectMeta.Name)
 			Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
@@ -3629,6 +3632,9 @@ var _ = Describe("artemis controller", func() {
 
 	Context("PVC upgrade owner reference test", Label("pvc-owner-reference-upgrade"), func() {
 		It("faking a broker deployment with owned pvc", func() {
+			if k8sClient == nil {
+				Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+			}
 			crd := generateArtemisSpec(defaultNamespace)
 			crd.Spec.DeploymentPlan.PersistenceEnabled = true
 
@@ -3671,7 +3677,7 @@ var _ = Describe("artemis controller", func() {
 				Expect(k8sClient.Get(ctx, pvcKey, pvc)).Should(Succeed())
 				Expect(len(pvc.OwnerReferences)).To(BeEquivalentTo(1))
 
-				createControllerManager(true, defaultNamespace)
+				createControllerManager(defaultNamespace)
 
 				// Expect the owner reference gets removed
 				Eventually(func(g Gomega) {
@@ -4838,7 +4844,7 @@ var _ = Describe("artemis controller", func() {
 			Expect(k8sClient.Get(ctx, key, createdSs)).ShouldNot(Succeed())
 
 			By("By starting reconciler for this namespace")
-			createControllerManager(true, nonDefaultNamespace)
+			createControllerManager(nonDefaultNamespace)
 
 			key = types.NamespacedName{Name: createdCrd.Name, Namespace: nonDefaultNamespace}
 
@@ -5540,6 +5546,9 @@ var _ = Describe("artemis controller", func() {
 	Context("Status", func() {
 		It("Expect pod desc", func() {
 			By("By creating a new crd")
+			if k8sClient == nil {
+				Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+			}
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
 			crd.Spec.DeploymentPlan.Size = common.Int32ToPtr(0)
@@ -5753,6 +5762,9 @@ var _ = Describe("artemis controller", func() {
 	Context("Env var updates TRIGGERED_ROLL_COUNT checksum", func() {
 		It("Expect TRIGGERED_ROLL_COUNT count non 0", func() {
 			By("By creating a new crd")
+			if k8sClient == nil {
+				Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+			}
 			var checkSum string
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
@@ -6078,6 +6090,9 @@ var _ = Describe("artemis controller", func() {
 
 		It("Expect two crs to coexist", func() {
 			By("By creating two crds with BrokerProperties in the spec")
+			if k8sClient == nil {
+				Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+			}
 			ctx := context.Background()
 			crd1 := generateArtemisSpec(defaultNamespace)
 			crd2 := generateArtemisSpec(defaultNamespace)
@@ -6114,6 +6129,9 @@ var _ = Describe("artemis controller", func() {
 
 		It("expect error message on invalid property value", func() {
 			By("By creating a crd with BrokerProperties in the spec")
+			if k8sClient == nil {
+				Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+			}
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
 
@@ -6153,6 +6171,9 @@ var _ = Describe("artemis controller", func() {
 
 		It("expect version match when version is loosly specified", func() {
 			By("By creating a crd with a floating version")
+			if k8sClient == nil {
+				Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+			}
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
 
@@ -6190,6 +6211,9 @@ var _ = Describe("artemis controller", func() {
 
 		It("expect version match on latest version", func() {
 			By("By creating a crd with latest image and version")
+			if k8sClient == nil {
+				Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+			}
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
 
@@ -6747,6 +6771,9 @@ var _ = Describe("artemis controller", func() {
 	Context("With address settings via updated cr", func() {
 		It("Expect ok deploy", func() {
 			By("By creating a crd without address spec")
+			if k8sClient == nil {
+				Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+			}
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
 
@@ -6866,6 +6893,9 @@ var _ = Describe("artemis controller", func() {
 	Context("With address cr", func() {
 		It("Expect ok deploy", func() {
 			By("By creating a crd without  address spec")
+			if k8sClient == nil {
+				Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+			}
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
 			crd.Spec.DeploymentPlan.Size = common.Int32ToPtr(0)
@@ -6946,6 +6976,9 @@ var _ = Describe("artemis controller", func() {
 	Context("With toggle persistence=true", func() {
 		It("Expect ok redeploy", func() {
 			By("By creating a crd without persistence")
+			if k8sClient == nil {
+				Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+			}
 			ctx := context.Background()
 			crd := generateArtemisSpec(defaultNamespace)
 

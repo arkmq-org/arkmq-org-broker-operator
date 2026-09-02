@@ -1145,6 +1145,9 @@ var _ = Describe("security controller", func() {
 
 	It("reconcile after Broker CR deployed, verify force reconcile", func() {
 
+		if k8sClient == nil {
+			Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+		}
 		By("Creating Broker CR")
 		ctx := context.Background()
 		brokerCrd := generateArtemisSpec(defaultNamespace)

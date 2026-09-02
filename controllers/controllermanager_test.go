@@ -45,7 +45,7 @@ var _ = Describe("tests regarding controller manager", func() {
 
 	Context("operator namespaces test", func() {
 
-		It("test resolving watching namespace", func() {
+		It("test resolving watching namespace", Label(unitLabel), func() {
 
 			operatorNamespace := "default"
 			isLocal, watchList := common.ResolveWatchNamespaceForManager(operatorNamespace, operatorNamespace)
@@ -492,13 +492,13 @@ func testWatchNamespace(kind string, g Gomega, testFunc func(g Gomega)) {
 
 	switch kind {
 	case "single":
-		createControllerManager(true, defaultNamespace)
+		createControllerManager(defaultNamespace)
 	case "restricted":
-		createControllerManager(true, restrictedNamespace)
+		createControllerManager(restrictedNamespace)
 	case "all":
-		createControllerManager(true, "")
+		createControllerManager("")
 	default:
-		createControllerManager(true, namespace2+","+namespace3)
+		createControllerManager(namespace2+","+namespace3)
 	}
 
 	testFunc(g)
