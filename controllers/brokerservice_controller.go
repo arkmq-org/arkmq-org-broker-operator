@@ -18,6 +18,11 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"sort"
@@ -26,10 +31,12 @@ import (
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/appselector"
 	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
+	cot "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/chain-of-trust"
 	servicemetrics "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/metrics"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -44,6 +51,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	gopkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
 type BrokerServiceReconciler struct {
@@ -68,6 +76,7 @@ func NewBrokerServiceReconciler(client client.Client, scheme *runtime.Scheme, co
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps,verbs=get;list;watch
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps/status,verbs=get;list;watch
+//+kubebuilder:rbac:groups=cert-manager.io,namespace=arkmq-org-broker-operator,resources=issuers;certificates,verbs=get;list;watch;create;update;patch;delete
 
 func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
 	reqLogger := reconciler.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "BrokerService")
@@ -89,9 +98,11 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 	}
 
 	processor := BrokerServiceInstanceReconciler{
-		BrokerServiceReconciler: &BrokerServiceReconciler{ReconcilerLoop: localLoop},
-		instance:                instance,
-		status:                  instance.Status.DeepCopy(),
+		BrokerServiceReconciler: &BrokerServiceReconciler{
+			ReconcilerLoop: localLoop,
+		},
+		instance: instance,
+		status:   instance.Status.DeepCopy(),
 	}
 
 	reqLogger.V(2).Info("Reconciler Processing...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation)
@@ -107,7 +118,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 
 	reqLogger.V(2).Info("Reconciler Processed...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation, "error", err)
 
-	statusErr, retry := processor.processStatus(err)
+	statusErr := processor.processStatus(err)
 	if err != nil {
 		// Handle reconcile error based on type
 		if _, ok := err.(*ValidationError); ok {
@@ -121,25 +132,26 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 	if statusErr != nil {
 		return ctrl.Result{}, fmt.Errorf("Failed to update status: error %v", statusErr)
 	}
-	if retry {
-		return ctrl.Result{RequeueAfter: common.GetReconcileResyncPeriod()}, nil
-	}
 
-	// Success
+	// Success — pending AppsProvisioned is observed via Owns(Broker) after
+	// the sidecar signals config reload. Do not timer-requeue.
 	return ctrl.Result{}, nil
 }
 
 // instance specifics for a reconciler loop
 func (r *BrokerServiceReconciler) getOwned() []client.ObjectList {
 	return []client.ObjectList{
+		&cmv1.IssuerList{},
+		&cmv1.CertificateList{},
 		&corev1.SecretList{},
 		&broker.BrokerList{},
 		&corev1.ServiceList{}}
 }
 
 func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
-	// we want to create/update in this order
 	return []reflect.Type{
+		reflect.TypeOf(cmv1.Issuer{}),
+		reflect.TypeOf(cmv1.Certificate{}),
 		reflect.TypeOf(corev1.Secret{}),
 		reflect.TypeOf(broker.Broker{}),
 		reflect.TypeOf(corev1.Service{})}
@@ -149,6 +161,19 @@ func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
 	// Validate resource name
 	if err := ValidateResourceName(reconciler.instance.Name); err != nil {
 		return err
+	}
+
+	if common.CertManagerDegraded() {
+		return NewValidationError(
+			broker.ValidConditionCertManagerUnavailable,
+			"cert-manager CRDs no longer available; certificate renewal disabled")
+	}
+
+	if clashes := cot.DetectPKIClash(context.TODO(), reconciler.Client,
+		reconciler.instance.Name, reconciler.instance.Namespace); len(clashes) > 0 {
+		return NewValidationError(
+			broker.ValidConditionPKINameClash,
+			"%s", cot.FormatPKIClashMessage(clashes))
 	}
 
 	// Validate CEL expression if provided
@@ -164,12 +189,54 @@ func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processSpec() (err error) {
+	if err = reconciler.ensurePKI(); err != nil {
+		return err
+	}
 	if err = reconciler.processBroker(); err != nil {
 		return err
 	}
-
-	// Process service
 	return reconciler.processService()
+}
+
+func (reconciler *BrokerServiceInstanceReconciler) ensurePKI() error {
+	opCfg := &cot.PKIConfig{
+		ServiceName:      reconciler.instance.Name,
+		ServiceNamespace: reconciler.instance.Namespace,
+		Owner:            reconciler.instance,
+	}
+	for _, obj := range cot.EnsureOperatorPKI(opCfg, common.GetClusterDomain()) {
+		reconciler.TrackDesired(obj)
+	}
+
+	metCfg := reconciler.metricsConfig()
+	objects, err := cot.EnsureMetricsPKI(context.TODO(), reconciler.Client, metCfg)
+	if err != nil {
+		return err
+	}
+	for _, obj := range objects {
+		reconciler.TrackDesired(obj)
+	}
+	return nil
+}
+
+func (reconciler *BrokerServiceInstanceReconciler) metricsConfig() *cot.MetricsPKIConfig {
+	svcOwnerGVK := metav1.GroupVersionKind{
+		Group:   broker.GroupVersion.Group,
+		Version: broker.GroupVersion.Version,
+		Kind:    "BrokerService",
+	}
+	cfg := &cot.MetricsPKIConfig{
+		ServiceName:      reconciler.instance.Name,
+		ServiceNamespace: reconciler.instance.Namespace,
+		ClusterDomain:    common.GetClusterDomain(),
+		Owner:            reconciler.instance,
+		OwnerGVK:         svcOwnerGVK,
+	}
+	if pki := reconciler.instance.Spec.PKI; pki != nil && pki.Metrics != nil {
+		cfg.CATemplate = pki.Metrics.CA
+		cfg.LeafTemplate = pki.Metrics.Leaf
+	}
+	return cfg
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
@@ -200,6 +267,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 
 	desired.Spec.ExtraMounts.Secrets = []string{
 		reconciler.appPropertiesSecretName(),
+		reconciler.appCertsSecretName(),
 	}
 
 	err = reconciler.processAppSecrets()
@@ -212,18 +280,29 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (err error) {
 	// avoid restart for app onboarding with existing mount points
 	// TODO potentially N app-secrets to overcome 1Mb size limit
-	resourceName := types.NamespacedName{
+	propsName := types.NamespacedName{
 		Namespace: reconciler.instance.Namespace,
 		Name:      reconciler.appPropertiesSecretName(),
 	}
+	certsName := types.NamespacedName{
+		Namespace: reconciler.instance.Namespace,
+		Name:      reconciler.appCertsSecretName(),
+	}
 
-	var desired *corev1.Secret
-
-	obj := reconciler.CloneOfDeployed(reflect.TypeOf(corev1.Secret{}), resourceName.Name)
+	var propsSecret *corev1.Secret
+	obj := reconciler.CloneOfDeployed(reflect.TypeOf(corev1.Secret{}), propsName.Name)
 	if obj != nil {
-		desired = obj.(*corev1.Secret)
+		propsSecret = obj.(*corev1.Secret)
 	} else {
-		desired = secrets.NewSecret(resourceName, nil, nil)
+		propsSecret = secrets.NewSecret(propsName, nil, nil)
+	}
+
+	var certsSecret *corev1.Secret
+	obj = reconciler.CloneOfDeployed(reflect.TypeOf(corev1.Secret{}), certsName.Name)
+	if obj != nil {
+		certsSecret = obj.(*corev1.Secret)
+	} else {
+		certsSecret = secrets.NewSecret(certsName, nil, nil)
 	}
 
 	// find all apps that select this service
@@ -233,16 +312,36 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (err erro
 		return err
 	}
 
+	// Preserve stable PKCS12 data across resets to avoid non-deterministic
+	// regeneration (PKCS12 uses random salts/IVs on each encode).
+	savedP12 := propsSecret.Data["_prometheus-cert.p12"]
+	savedP12FP := propsSecret.Data["_prometheus-cert.p12.fp"]
+
 	// reset data
-	desired.Data = make(map[string][]byte)
+	propsSecret.Data = make(map[string][]byte)
+	certsSecret.Data = make(map[string][]byte)
+
+	if savedP12 != nil {
+		propsSecret.Data["_prometheus-cert.p12"] = savedP12
+		propsSecret.Data["_prometheus-cert.p12.fp"] = savedP12FP
+	}
 	appIdentities := make([]string, 0, len(apps.Items))
 	rejectedApps := make([]broker.RejectedApp, 0)
 	validApps := make([]broker.BrokerApp, 0, len(apps.Items))
 
 	for _, app := range apps.Items {
+		// Phase gate: only pack apps that have completed cert provisioning.
+		// The BrokerApp reconciler is the sole Phase writer; by the time Phase
+		// reaches Provisioning all cross-ns secret copies are confirmed.
+		if app.Status.Phase != broker.BrokerAppPhaseProvisioning &&
+			app.Status.Phase != broker.BrokerAppPhaseProvisioned {
+			reconciler.log.V(1).Info("skipping app not in Provisioning/Provisioned phase",
+				"app", appName(&app), "phase", app.Status.Phase)
+			continue
+		}
+
 		valid, rejectionReason := reconciler.validateAppForProvisioning(&app, key)
 		if !valid {
-			// App failed validation - track it for user visibility
 			rejectedApps = append(rejectedApps, broker.RejectedApp{
 				Name:      app.Name,
 				Namespace: app.Namespace,
@@ -251,35 +350,45 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (err erro
 			continue
 		}
 
-		// Validate app name for safe file path construction
 		if err = common.ValidateResourceName(app.Name); err != nil {
 			reconciler.log.Error(err, "invalid app name", "app", app.Name)
 			break
 		}
-		if err = reconciler.processCapabilities(desired, &app); err != nil {
+		if err = reconciler.processCapabilities(propsSecret, &app); err != nil {
 			reconciler.log.Error(err, "failed to process capabilities for app", "app", app.Name)
 			break
 		}
-		if err = reconciler.processAcceptor(desired, &app); err != nil {
+		if err = reconciler.processAcceptor(propsSecret, &app); err != nil {
 			reconciler.log.Error(err, "failed to process acceptor for app", "app", app.Name)
 			break
+		}
+		if err = reconciler.packAppCertData(certsSecret, &app); err != nil {
+			// Phase guarantees secrets exist, so this should not happen.
+			// Log as error for visibility and skip the app defensively.
+			reconciler.log.Error(err, "BUG: cert data unavailable for app in Provisioning phase", "app", app.Name)
+			err = nil
+			continue
 		}
 		appIdentities = append(appIdentities, AppIdentity(&app))
 		validApps = append(validApps, app)
 	}
 
-	sort.Strings(appIdentities)
-	if desired.Annotations == nil {
-		desired.Annotations = make(map[string]string)
-	}
-	desired.Annotations[common.ProvisionedAppsAnnotation] = strings.Join(appIdentities, ",")
+	// Pack prometheus cert data into the props secret (not certs) to keep the
+	// PEMCFG file in the same mount that the JMX exporter reads, matching the
+	// original layout that the SSLFactory expects.
+	reconciler.packPrometheusCertData(propsSecret)
 
-	// Track rejected apps in status for user visibility
+	sort.Strings(appIdentities)
+	if propsSecret.Annotations == nil {
+		propsSecret.Annotations = make(map[string]string)
+	}
+	propsSecret.Annotations[common.ProvisionedAppsAnnotation] = strings.Join(appIdentities, ",")
+
 	reconciler.status.RejectedApps = rejectedApps
 
-	reconciler.TrackDesired(desired)
+	reconciler.TrackDesired(propsSecret)
+	reconciler.TrackDesired(certsSecret)
 
-	// Update prometheus config in control-plane-override secret with queue-level metrics
 	if err == nil {
 		err = reconciler.processControlPlaneOverrideSecret(validApps)
 	}
@@ -287,8 +396,148 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (err erro
 	return err
 }
 
+func (reconciler *BrokerServiceInstanceReconciler) packAppCertData(certsSecret *corev1.Secret, app *broker.BrokerApp) error {
+	ns := app.Namespace
+	name := app.Name
+	svcNs := reconciler.instance.Namespace
+
+	serverCertKey := types.NamespacedName{Name: cot.AppServerCertName(name), Namespace: svcNs}
+	serverCert := &corev1.Secret{}
+	if err := reconciler.Get(context.TODO(), serverCertKey, serverCert); err != nil {
+		if errors.IsNotFound(err) {
+			return fmt.Errorf("server cert %s not yet available", serverCertKey)
+		}
+		return err
+	}
+
+	caTrustKey := types.NamespacedName{Name: cot.AppCATrustSecretName(name), Namespace: svcNs}
+	caTrust := &corev1.Secret{}
+	if err := reconciler.Get(context.TODO(), caTrustKey, caTrust); err != nil {
+		if errors.IsNotFound(err) {
+			return fmt.Errorf("CA trust %s not yet available", caTrustKey)
+		}
+		return err
+	}
+
+	prefix := fmt.Sprintf("%s--%s", ns, name)
+	certsSecret.Data[prefix+"--ca--tls.crt"] = caTrust.Data["tls.crt"]
+	certsSecret.Data[prefix+"--broker-cert--tls.key"] = serverCert.Data["tls.key"]
+	certsSecret.Data[prefix+"--broker-cert--tls.crt"] = serverCert.Data["tls.crt"]
+
+	certsMount := fmt.Sprintf("/amq/extra/secrets/%s", reconciler.appCertsSecretName())
+	pemcfg := fmt.Sprintf("source.key=%s/%s--broker-cert--tls.key\nsource.cert=%s/%s--broker-cert--tls.crt\n",
+		certsMount, prefix, certsMount, prefix)
+	certsSecret.Data[prefix+"--broker-cert--tls.pemcfg"] = []byte(pemcfg)
+
+	return nil
+}
+
+func (reconciler *BrokerServiceInstanceReconciler) packPrometheusCertData(propsSecret *corev1.Secret) {
+	svcName := reconciler.instance.Name
+	svcNs := reconciler.instance.Namespace
+
+	metricsCAKey := types.NamespacedName{Name: cot.MetricsRootCertSecretName(svcName), Namespace: svcNs}
+	metricsCASec := &corev1.Secret{}
+	if err := reconciler.Get(context.TODO(), metricsCAKey, metricsCASec); err != nil {
+		reconciler.log.V(1).Info("metrics CA not yet available, falling back to operator CA", "error", err)
+		reconciler.packPrometheusLegacyFallback(propsSecret)
+		return
+	}
+
+	promCertKey := types.NamespacedName{Name: cot.PrometheusCertName(svcName), Namespace: svcNs}
+	promSec := &corev1.Secret{}
+	if err := reconciler.Get(context.TODO(), promCertKey, promSec); err != nil {
+		reconciler.log.V(1).Info("prometheus cert not yet available, falling back to operator CA", "error", err)
+		reconciler.packPrometheusLegacyFallback(propsSecret)
+		return
+	}
+
+	propsSecret.Data["_prometheus-ca-tls.crt"] = metricsCASec.Data["tls.crt"]
+
+	p12, err := stableP12(propsSecret, "_prometheus-cert.p12",
+		promSec.Data["tls.crt"], promSec.Data["tls.key"], prometheusP12Password)
+	if err != nil {
+		reconciler.log.Error(err, "failed to convert prometheus cert to PKCS12, falling back")
+		reconciler.packPrometheusLegacyFallback(propsSecret)
+		return
+	}
+	propsSecret.Data["_prometheus-cert.p12"] = p12
+}
+
+func (reconciler *BrokerServiceInstanceReconciler) packPrometheusLegacyFallback(propsSecret *corev1.Secret) {
+	svcName := reconciler.instance.Name
+	svcNs := reconciler.instance.Namespace
+
+	opCAKey := types.NamespacedName{Name: cot.RootCertSecretName(svcName), Namespace: svcNs}
+	opCASec := &corev1.Secret{}
+	if err := reconciler.Get(context.TODO(), opCAKey, opCASec); err != nil {
+		return
+	}
+
+	brokerCertKey := types.NamespacedName{Name: cot.BrokerCertName(svcName), Namespace: svcNs}
+	brokerSec := &corev1.Secret{}
+	if err := reconciler.Get(context.TODO(), brokerCertKey, brokerSec); err != nil {
+		return
+	}
+
+	propsSecret.Data["_prometheus-ca-tls.crt"] = opCASec.Data["tls.crt"]
+
+	p12, err := stableP12(propsSecret, "_prometheus-cert.p12",
+		brokerSec.Data["tls.crt"], brokerSec.Data["tls.key"], prometheusP12Password)
+	if err != nil {
+		return
+	}
+	propsSecret.Data["_prometheus-cert.p12"] = p12
+}
+
+const prometheusP12Password = "changeit"
+
+func pemFingerprint(certPEM, keyPEM []byte) string {
+	h := sha256.New()
+	h.Write(certPEM)
+	h.Write(keyPEM)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// stableP12 returns the existing PKCS12 bytes from the secret if the source
+// PEM hasn't changed, avoiding non-deterministic regeneration that would cause
+// an infinite reconcile loop (PKCS12 encryption uses random salts/IVs).
+func stableP12(secret *corev1.Secret, p12Key string, certPEM, keyPEM []byte, password string) ([]byte, error) {
+	fp := pemFingerprint(certPEM, keyPEM)
+	fpKey := p12Key + ".fp"
+
+	if existing, ok := secret.Data[p12Key]; ok {
+		if string(secret.Data[fpKey]) == fp {
+			return existing, nil
+		}
+	}
+
+	p12, err := pemToP12(certPEM, keyPEM, password)
+	if err != nil {
+		return nil, err
+	}
+	secret.Data[fpKey] = []byte(fp)
+	return p12, nil
+}
+
+func pemToP12(certPEM, keyPEM []byte, password string) ([]byte, error) {
+	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("parse cert/key: %w", err)
+	}
+	leaf, err := x509.ParseCertificate(tlsCert.Certificate[0])
+	if err != nil {
+		return nil, fmt.Errorf("parse leaf cert: %w", err)
+	}
+	return gopkcs12.Modern.Encode(tlsCert.PrivateKey, leaf, nil, password)
+}
+
 func (reconciler *BrokerServiceInstanceReconciler) appPropertiesSecretName() string {
 	return AppPropertiesSecretName(reconciler.instance.Name)
+}
+
+func (reconciler *BrokerServiceInstanceReconciler) appCertsSecretName() string {
+	return cot.AppCertsSecretName(reconciler.instance.Name)
 }
 
 func AppPropertiesSecretName(name string) string {
@@ -297,10 +546,6 @@ func AppPropertiesSecretName(name string) string {
 
 func PropertiesSecretName(name string) string {
 	return fmt.Sprintf("%s%s", name, common.BrokerPropsSuffix)
-}
-
-func certSecretName(cr *broker.BrokerService) string {
-	return fmt.Sprintf("%s-%s", cr.Name, common.DefaultOperandCertSecretName)
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) setValidCondition(err error) {
@@ -319,7 +564,7 @@ func (reconciler *BrokerServiceInstanceReconciler) setValidCondition(err error) 
 	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
 }
 
-func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError error) (err error, retry bool) {
+func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError error) (err error) {
 	// Set Valid condition (always updated)
 	reconciler.setValidCondition(reconcilerError)
 
@@ -413,7 +658,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 		len(reconciler.status.ProvisionedApps),
 	)
 
-	return err, retry
+	return err
 }
 
 // appName returns the formatted name of an app for logging (namespace/name).
@@ -598,6 +843,8 @@ func (r *BrokerServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&broker.BrokerService{}).
 		Owns(&broker.Broker{}).
+		Owns(&cmv1.Issuer{}).
+		Owns(&cmv1.Certificate{}).
 		Watches(&broker.BrokerApp{}, &appToServiceHandler{}).
 		Complete(r)
 }
@@ -831,18 +1078,12 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigPropertiesSecret *corev1.Secret, app *broker.BrokerApp) (err error) {
-
-	// TODO: need data plane trust store, this is access to the control plane trust store
-	// they could be the same but we need two accessors
-	trustStorePath, err := reconciler.getTrustStorePath(reconciler.instance)
-	if err != nil {
-		return err
-	}
+	certsPath := fmt.Sprintf("/amq/extra/secrets/%s", reconciler.appCertsSecretName())
+	appPrefix := fmt.Sprintf("%s--%s", app.Namespace, app.Name)
+	trustStorePath := fmt.Sprintf("%s/%s--ca--tls.crt", certsPath, appPrefix)
+	keyStorePath := fmt.Sprintf("%s/%s--broker-cert--tls.pemcfg", certsPath, appPrefix)
 
 	namespacedName := AppIdentity(app)
-
-	pemCfgkey := UnderscoreAppIdentityPrefixed(app, "tls.pemcfg")
-	serverConfigPropertiesSecret.Data[pemCfgkey] = reconciler.makePemCfgProps(reconciler.instance)
 
 	realmName := jaasConfigRealmName(app)
 
@@ -916,7 +1157,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.saslMechanisms=EXTERNAL\n", name)
 
 	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.keyStoreType=PEMCFG\n", name)
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.keyStorePath=/amq/extra/secrets/%s/%s\n", name, AppPropertiesSecretName(reconciler.instance.Name), pemCfgkey)
+	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.keyStorePath=%s\n", name, keyStorePath)
 	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.trustStoreType=PEMCA\n", name)
 	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.trustStorePath=%s\n", name, trustStorePath)
 
@@ -930,31 +1171,6 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 	serverConfigPropertiesSecret.Data[acceptorCfgKey] = buf.Bytes()
 
 	return err
-}
-
-func (reconciler *BrokerServiceInstanceReconciler) getTrustStorePath(_ *broker.BrokerService) (string, error) {
-
-	var caCertSecret *corev1.Secret
-	var caSecretKey string
-	var err error
-	if caCertSecret, err = common.GetOperatorCASecret(reconciler.Client); err == nil {
-		if caSecretKey, err = common.GetOperatorCASecretKey(reconciler.Client, caCertSecret); err == nil {
-			return fmt.Sprintf("/amq/extra/secrets/%s/%s", caCertSecret.Name, caSecretKey), nil
-		}
-	}
-	return "", err
-}
-
-func (reconciler *BrokerServiceInstanceReconciler) makePemCfgProps(service *broker.BrokerService) []byte {
-
-	buf := brokerproperties.NewPropsWithHeader()
-
-	certSecretName := certSecretName(service)
-
-	fmt.Fprintf(buf, "source.key=/amq/extra/secrets/%s/tls.key\n", certSecretName)
-	fmt.Fprintf(buf, "source.cert=/amq/extra/secrets/%s/tls.crt\n", certSecretName)
-
-	return buf.Bytes()
 }
 
 func jaasConfigRealmName(app *broker.BrokerApp) string {
@@ -1008,41 +1224,45 @@ func (reconciler *BrokerServiceInstanceReconciler) controlPlaneOverrideSecretNam
 	return reconciler.instance.Name + "-control-plane-override"
 }
 
+// appQueueSet collects the queues for a specific app.
+type appQueueSet struct {
+	appName     string
+	appIdentity string // namespace-prefixed, matches metricsRole in capabilities.properties
+	queues      map[string]bool
+}
+
 func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSecret(validApps []broker.BrokerApp) error {
-	// Collect all unique ConsumerOf and ProducerOf addresses from validated apps only
-	appQueues := make(map[string]bool)
+	allQueues := make(map[string]bool)
+	perAppQueues := make([]appQueueSet, 0, len(validApps))
+
 	for _, app := range validApps {
+		aqs := appQueueSet{appName: app.Name, appIdentity: AppIdentity(&app), queues: make(map[string]bool)}
 		for _, capability := range app.Spec.Capabilities {
-			// Collect ConsumerOf addresses for metrics
 			for _, addressRef := range capability.ConsumerOf {
 				if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-					// ANYCAST - direct queue address
-					appQueues[addressRef.Address] = true
+					aqs.queues[addressRef.Address] = true
 				} else {
-					// MULTICAST - generate FQQN for each multicast queue
 					for _, queueName := range addressRef.Subscriptions {
-						fqqn := addressRef.Address + FQQNSeparator + queueName
-						appQueues[fqqn] = true
+						aqs.queues[addressRef.Address+FQQNSeparator+queueName] = true
 					}
 				}
 			}
-			// Also collect ProducerOf addresses for metrics
 			for _, addressRef := range capability.ProducerOf {
 				if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-					// ANYCAST - direct queue address
-					appQueues[addressRef.Address] = true
+					aqs.queues[addressRef.Address] = true
 				} else {
-					// MULTICAST - generate FQQN for each multicast queue
 					for _, queueName := range addressRef.Subscriptions {
-						fqqn := addressRef.Address + FQQNSeparator + queueName
-						appQueues[fqqn] = true
+						aqs.queues[addressRef.Address+FQQNSeparator+queueName] = true
 					}
 				}
 			}
 		}
+		perAppQueues = append(perAppQueues, aqs)
+		for q := range aqs.queues {
+			allQueues[q] = true
+		}
 	}
 
-	// Get or create the control-plane-override secret
 	resourceName := types.NamespacedName{
 		Namespace: reconciler.instance.Namespace,
 		Name:      reconciler.controlPlaneOverrideSecretName(),
@@ -1060,30 +1280,135 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 		desired.Data = make(map[string][]byte)
 	}
 
-	// Generate prometheus exporter yaml with queue-level metrics
-	prometheusConfig := reconciler.generatePrometheusConfig(appQueues)
-	desired.Data[PrometheusConfigFileName] = prometheusConfig
+	desired.Data[PrometheusConfigFileName] = reconciler.generatePrometheusConfig(allQueues)
+	desired.Data[common.GetCertUsersKey(common.HttpAuthenticatorRealm)] = reconciler.generateCertUsersOverride(perAppQueues)
+	desired.Data[common.GetCertRolesKey(common.HttpAuthenticatorRealm)] = reconciler.generateCertRolesOverride(perAppQueues)
+	desired.Data["aa_rbac.properties"] = reconciler.generateRbacOverride(perAppQueues)
 
 	reconciler.TrackDesired(desired)
 	return nil
 }
 
-func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]bool) []byte {
-	buf := brokerproperties.NewPropsWithHeader() // yaml
+// generateCertUsersOverride builds the full cert_users.properties file for the
+// control-plane override, mapping CNs to roles for all planes (operator, probe,
+// prometheus, per-app metrics).
+func (reconciler *BrokerServiceInstanceReconciler) generateCertUsersOverride(perAppQueues []appQueueSet) []byte {
+	svcName := reconciler.instance.Name
+	svcNs := reconciler.instance.Namespace
 
-	// HTTP server config with mTLS
-	var caSecret string
-	var caSecretKey string
-	if caCertSecret, err := common.GetOperatorCASecret(reconciler.Client); err == nil {
-		caSecret = caCertSecret.Name
-		if key, err := common.GetOperatorCASecretKey(reconciler.Client, caCertSecret); err == nil {
-			caSecretKey = key
+	buf := brokerproperties.NewPropsWithHeader()
+	fmt.Fprintln(buf, "hawtio=/CN = hawtio-online\\.hawtio\\.svc.*/")
+
+	if subject := resolveSubjectFromSecret(reconciler.Client, cot.OperatorCertName(svcName), svcNs); subject != nil {
+		fmt.Fprintf(buf, "operator=/.*%s.*/\n", subject.CommonName)
+	}
+	if subject := resolveSubjectFromSecret(reconciler.Client, cot.BrokerCertName(svcName), svcNs); subject != nil {
+		fmt.Fprintf(buf, "probe=/.*%s.*/\n", subject.CommonName)
+	}
+	if subject := resolveSubjectFromSecret(reconciler.Client, cot.PrometheusCertName(svcName), svcNs); subject != nil {
+		fmt.Fprintf(buf, "prometheus=/.*%s.*/\n", subject.CommonName)
+	}
+
+	for _, aqs := range perAppQueues {
+		roleName := appMetricsRole(aqs.appName)
+		if subject := resolveSubjectFromSecret(reconciler.Client, cot.MetricsCertName(aqs.appName), svcNs); subject != nil {
+			fmt.Fprintf(buf, "%s=/.*%s.*/\n", roleName, subject.CommonName)
 		}
 	}
 
-	// Broker reconciler creates broker properties secret with "-props" suffix
-	brokerPropsSecretName := reconciler.instance.Name + "-props"
-	mountPathRoot := fmt.Sprintf("%s%s", common.SecretPathBase, brokerPropsSecretName)
+	return buf.Bytes()
+}
+
+// generateCertRolesOverride builds cert_roles.properties mapping groups to
+// their members. Format: group=member1,member2,...
+//
+// Per-app cert roles need membership in TWO groups:
+//   - their own group (for queryMBeans from aa_rbac.properties)
+//   - the capabilities group (namespace-prefixed, for per-queue RBAC
+//     from capabilities.properties)
+func (reconciler *BrokerServiceInstanceReconciler) generateCertRolesOverride(perAppQueues []appQueueSet) []byte {
+	buf := brokerproperties.NewPropsWithHeader()
+	fmt.Fprintln(buf, "status=operator,probe")
+	fmt.Fprintln(buf, "metrics=operator,prometheus")
+	fmt.Fprintln(buf, "hawtio=hawtio")
+
+	for _, aqs := range perAppQueues {
+		certRole := appMetricsRole(aqs.appName)
+		capabilitiesGroup := metricsRole(aqs.appIdentity)
+		fmt.Fprintf(buf, "%s=%s\n", certRole, certRole)
+		fmt.Fprintf(buf, "%s=%s\n", capabilitiesGroup, certRole)
+	}
+
+	return buf.Bytes()
+}
+
+// generateRbacOverride builds aa_rbac.properties with global RBAC grants.
+// Per-queue MBean access is handled by capabilities.properties (generated
+// in processAppCapabilities), which grants per-app groups explicit VIEW
+// on each queue MBean + its attributes. This file only needs to provide:
+//   - status check for operator/probe
+//   - broad metrics access for operator/prometheus
+//   - queryMBeans gate for per-app cert roles
+func (reconciler *BrokerServiceInstanceReconciler) generateRbacOverride(perAppQueues []appQueueSet) []byte {
+	buf := brokerproperties.NewPropsWithHeader()
+
+	// operator status
+	fmt.Fprintln(buf, "securityRoles.\"mops.broker.getStatus\".status.view=true")
+
+	// full metrics access for operator and prometheus (via "metrics" group)
+	fmt.Fprintln(buf, "securityRoles.\"mops.mbeanserver.queryMBeans\".metrics.view=true")
+	fmt.Fprintln(buf, "securityRoles.\"mops.broker\".metrics.view=true")
+	fmt.Fprintln(buf, "securityRoles.\"mops.broker.getTotalMessageCount\".metrics.view=true")
+	fmt.Fprintln(buf, "securityRoles.\"mops.broker.getTotalMessagesAcknowledged\".metrics.view=true")
+	fmt.Fprintln(buf, "securityRoles.\"mops.broker.getTotalMessagesAdded\".metrics.view=true")
+
+	for _, aqs := range perAppQueues {
+		certRole := appMetricsRole(aqs.appName)
+		capabilitiesGroup := metricsRole(aqs.appIdentity)
+
+		// queryMBeans gate — required for the JMX exporter to call queryMBeans.
+		// Grant to both the cert role's own group and the capabilities group.
+		// Role names are quoted to prevent dots being parsed as path separators.
+		fmt.Fprintf(buf, "securityRoles.\"mops.mbeanserver.queryMBeans\".\"%s\".view=true\n", certRole)
+		fmt.Fprintf(buf, "securityRoles.\"mops.mbeanserver.queryMBeans\".\"%s\".view=true\n", capabilitiesGroup)
+	}
+
+	return buf.Bytes()
+}
+
+func appMetricsRole(appName string) string {
+	return appName + "-metrics"
+}
+
+func resolveSubjectFromSecret(cl client.Client, secretName, namespace string) *pkix.Name {
+	secret, err := common.GetNamespacedSecret(cl, secretName, namespace)
+	if err != nil {
+		return nil
+	}
+	subject, err := common.ExtractCertSubjectFromSecret(secret)
+	if err != nil {
+		return nil
+	}
+	return subject
+}
+
+// generatePrometheusConfig builds the JMX exporter YAML that configures the
+// broker's metrics endpoint (port 8888).
+//
+// The server identity and trust anchor use the metrics plane PKI:
+//   - keyStore  → prometheus cert (PKCS12, packed into the app-props secret)
+//   - trustStore → metrics root CA (packed into the app-props secret)
+//
+// Per-app metrics isolation is enforced via cert_users/cert_roles/RBAC in the
+// control-plane override — each app's metrics cert CN maps to a per-app role
+// with scoped MBean access. The trustStore accepts any cert signed by the
+// metrics CA (all per-app certs use the same CA).
+func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]bool) []byte {
+	buf := brokerproperties.NewPropsWithHeader() // yaml
+
+	propsPath := fmt.Sprintf("%s%s", common.SecretPathBase, reconciler.appPropertiesSecretName())
+	keyStorePath := propsPath + "/_prometheus-cert.p12"
+	trustStorePath := propsPath + "/_prometheus-ca-tls.crt"
 
 	fmt.Fprintf(buf, "httpServer:\n")
 	fmt.Fprintf(buf, "  authentication:\n")
@@ -1093,13 +1418,14 @@ func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQ
 	fmt.Fprintf(buf, "  ssl:\n")
 	fmt.Fprintf(buf, "    mutualTLS: true\n")
 	fmt.Fprintf(buf, "    keyStore:\n")
-	fmt.Fprintf(buf, "      filename: %s/_cert.pemcfg\n", mountPathRoot)
-	fmt.Fprintf(buf, "      type: PEMCFG\n")
+	fmt.Fprintf(buf, "      filename: %s\n", keyStorePath)
+	fmt.Fprintf(buf, "      type: PKCS12\n")
+	fmt.Fprintf(buf, "      password: %s\n", prometheusP12Password)
 	fmt.Fprintf(buf, "    trustStore:\n")
-	fmt.Fprintf(buf, "      filename: %s%s/%s\n", common.SecretPathBase, caSecret, caSecretKey)
+	fmt.Fprintf(buf, "      filename: %s\n", trustStorePath)
 	fmt.Fprintf(buf, "      type: PEMCA\n")
 	fmt.Fprintf(buf, "    certificate:\n")
-	fmt.Fprintf(buf, "      alias: alias\n")
+	fmt.Fprintf(buf, "      alias: \"1\"\n")
 
 	// Collector/scraper config
 
@@ -1111,10 +1437,19 @@ func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQ
 
 	brokerName := reconciler.instance.Name // Use service name as broker name for restricted mode
 
-	// Add queue-level attributes for specific queues with exact ObjectNames (include quotes) for canonocial string match, this restricts the attribute load
+	// Add queue-level attributes for specific queues with exact ObjectNames (include quotes) for canonical string match, this restricts the attribute load.
+	// Keys are sorted to ensure deterministic output — without this, map iteration
+	// order randomness causes the comparator to detect "changes" on every cycle,
+	// thrashing the override secret and triggering continuous broker config reloads.
 	if len(appQueues) > 0 {
-		fmt.Fprintf(buf, "includeObjectNameAttributes:\n")
+		sortedQueues := make([]string, 0, len(appQueues))
 		for address := range appQueues {
+			sortedQueues = append(sortedQueues, address)
+		}
+		sort.Strings(sortedQueues)
+
+		fmt.Fprintf(buf, "includeObjectNameAttributes:\n")
+		for _, address := range sortedQueues {
 			fqqn := strings.SplitN(address, "::", 2)
 			if len(fqqn) > 1 {
 				fmt.Fprintf(buf, "  org.apache.activemq.artemis:broker=\"%s\",component=addresses,address=\"%s\",subcomponent=queues,routing-type=\"multicast\",queue=\"%s\":\n",

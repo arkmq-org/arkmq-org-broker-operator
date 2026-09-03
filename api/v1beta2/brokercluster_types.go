@@ -838,6 +838,8 @@ const (
 	ValidConditionInvalidCertSecretReason            = "InvalidCertSecret"
 	ValidConditionFailedDuplicateBrokerPropertiesKey = "DuplicateBrokerPropertiesKey"
 	ValidConditionInvalidInternalVarUsage            = "InvalidInternalVarUsage"
+	ValidConditionCertManagerUnavailable             = "CertManagerUnavailable"
+	ValidConditionPKINameClash                       = "PKINameClash"
 
 	ReadyConditionType      = "Ready"
 	ReadyConditionReason    = "ResourceReady"

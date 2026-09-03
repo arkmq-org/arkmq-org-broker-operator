@@ -24,6 +24,7 @@ import (
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
@@ -46,6 +47,7 @@ func TestBrokerServiceReconcileWithAppMove(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Data
 	ns := "default"
@@ -97,6 +99,7 @@ func TestBrokerServiceReconcileWithAppMove(t *testing.T) {
 		},
 		Spec: v1beta2.BrokerAppSpec{},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{
 				Name:         s1Name,
 				Namespace:    ns,
@@ -178,6 +181,7 @@ func TestBrokerServiceReconcileErrorPropagation(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	s1Name := "service1"
 	ns := "default"
@@ -241,6 +245,7 @@ func TestBrokerServiceReconcileStatusUpdateFailure(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	s1Name := "service1"
 	ns := "default"
@@ -283,6 +288,7 @@ func TestBrokerServiceReconcileRequiresIndex(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Data
 	ns := "default"
@@ -327,6 +333,7 @@ func TestReconcileDeployedConditionTransition(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 	_ = appsv1.AddToScheme(scheme)
 
 	// Data
@@ -433,6 +440,7 @@ func TestBrokerServiceReconcileStatusAppliedApps(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Data
 	ns := "default"
@@ -479,6 +487,7 @@ func TestBrokerServiceReconcileStatusAppliedApps(t *testing.T) {
 		},
 		Spec: v1beta2.BrokerAppSpec{},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{
 				Name:         svcName,
 				Namespace:    ns,
@@ -488,10 +497,12 @@ func TestBrokerServiceReconcileStatusAppliedApps(t *testing.T) {
 		},
 	}
 
-	// Setup fake client
+	// Setup fake client — include cert secrets so packAppCertData succeeds
+	objs := []client.Object{namespace, oc, svc, app}
+	objs = append(objs, FakeAppCertSecrets(appName, ns)...)
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(namespace, oc, svc, app).
+		WithObjects(objs...).
 		WithStatusSubresource(svc, &v1beta2.Broker{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
@@ -561,6 +572,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Data
 	ns := "default"
@@ -608,6 +620,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 		},
 		Spec: v1beta2.BrokerAppSpec{},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{
 				Name:         svcName,
 				Namespace:    ns,
@@ -617,10 +630,12 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 		},
 	}
 
-	// Setup fake client
+	// Setup fake client — include cert secrets so packAppCertData succeeds
+	objs := []client.Object{namespace, oc, svc, app1}
+	objs = append(objs, FakeAppCertSecrets(app1Name, ns)...)
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(namespace, oc, svc, app1).
+		WithObjects(objs...).
 		WithStatusSubresource(svc, &v1beta2.Broker{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
@@ -683,6 +698,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 		},
 		Spec: v1beta2.BrokerAppSpec{},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{
 				Name:         svcName,
 				Namespace:    ns,
@@ -693,6 +709,9 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 	}
 	err = cl.Create(context.TODO(), app2)
 	assert.NoError(t, err)
+	for _, s := range FakeAppCertSecrets(app2Name, ns) {
+		assert.NoError(t, cl.Create(context.TODO(), s))
+	}
 
 	// Reconcile to pick up App2. This updates the Secret to v2.
 	_, err = r.Reconcile(context.TODO(), req)
@@ -741,6 +760,7 @@ func TestBrokerServiceReconcileAppsProvisionedCondition(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Data
 	ns := "default"
@@ -844,6 +864,7 @@ func TestBrokerServiceReconcilePrometheusOverrideSecret(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Data
 	ns := "default"
@@ -902,6 +923,7 @@ func TestBrokerServiceReconcilePrometheusOverrideSecret(t *testing.T) {
 			},
 		},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{
 				Name:         svcName,
 				Namespace:    ns,
@@ -911,10 +933,12 @@ func TestBrokerServiceReconcilePrometheusOverrideSecret(t *testing.T) {
 		},
 	}
 
-	// Setup fake client
+	// Setup fake client — include cert secrets so packAppCertData succeeds
+	objs := []client.Object{namespace, oc, svc, app}
+	objs = append(objs, FakeAppCertSecrets(appName, ns)...)
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(namespace, oc, svc, app).
+		WithObjects(objs...).
 		WithStatusSubresource(svc, &v1beta2.Broker{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
@@ -964,6 +988,7 @@ func TestBrokerServiceReconcilePrometheusOverrideNoApps(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Data
 	ns := "default"
@@ -1045,6 +1070,7 @@ func TestBrokerServiceValidCondition(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	svcName := "my-broker-service"
@@ -1188,6 +1214,7 @@ func TestBrokerServiceIdempotentStatus(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	svcName := "test-service"
@@ -1247,6 +1274,7 @@ func TestBrokerServiceConditionIndependence(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	svcName := "test-service"
@@ -1311,6 +1339,7 @@ func TestBrokerServiceValidPersistsThroughRuntimeErrors(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	svcName := "test-service"
@@ -1373,6 +1402,7 @@ func TestBrokerServiceConditionTransitionsOnRecovery(t *testing.T) {
 	_ = v1beta2.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 	_ = appsv1.AddToScheme(scheme)
 
 	ns := "default"
@@ -1471,4 +1501,84 @@ func TestBrokerServiceConditionTransitionsOnRecovery(t *testing.T) {
 	assert.NotNil(t, deployedCond)
 	assert.Equal(t, metav1.ConditionTrue, deployedCond.Status)
 	assert.Equal(t, v1beta2.ReadyConditionReason, deployedCond.Reason)
+}
+
+func TestProcessAppSecretsFiltersPhase(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta2.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
+
+	ns := "default"
+	svcName := "my-service"
+
+	common.SetOperatorCASecretName("op_ca")
+	t.Cleanup(common.UnsetOperatorCASecretName)
+	common.SetOperatorNameSpace(ns)
+	t.Cleanup(common.UnsetOperatorNameSpace)
+
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+	oc := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "op_ca", Namespace: ns},
+		Data:       map[string][]byte{"ca.pem": []byte("bla")},
+	}
+
+	svc := &v1beta2.BrokerService{
+		ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
+		Spec:       v1beta2.BrokerServiceSpec{Image: StringToPtr("placeholder")},
+	}
+
+	// App in Matched phase (should be skipped)
+	matchedApp := &v1beta2.BrokerApp{
+		ObjectMeta: metav1.ObjectMeta{Name: "matched-app", Namespace: ns},
+		Spec:       v1beta2.BrokerAppSpec{},
+		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseMatched,
+			Service: &v1beta2.BrokerServiceBindingStatus{
+				Name: svcName, Namespace: ns, Secret: "s", AssignedPort: 61616,
+			},
+		},
+	}
+
+	// App in Provisioning phase (should be packed)
+	provApp := &v1beta2.BrokerApp{
+		ObjectMeta: metav1.ObjectMeta{Name: "prov-app", Namespace: ns},
+		Spec:       v1beta2.BrokerAppSpec{},
+		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
+			Service: &v1beta2.BrokerServiceBindingStatus{
+				Name: svcName, Namespace: ns, Secret: "s", AssignedPort: 61617,
+			},
+		},
+	}
+
+	objs := []client.Object{namespace, oc, svc, matchedApp, provApp}
+	objs = append(objs, FakeAppCertSecrets("prov-app", ns)...)
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(objs...).
+		WithStatusSubresource(svc, &v1beta2.Broker{}).
+		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
+			a := rawObj.(*v1beta2.BrokerApp)
+			if a.Status.Service != nil {
+				return []string{a.Status.Service.Key()}
+			}
+			return nil
+		}).Build()
+
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+
+	_, err := r.Reconcile(context.TODO(), req)
+	assert.NoError(t, err)
+
+	// Verify that only prov-app is provisioned (matched-app is skipped)
+	secret := &corev1.Secret{}
+	err = cl.Get(context.TODO(), types.NamespacedName{Name: AppPropertiesSecretName(svcName), Namespace: ns}, secret)
+	assert.NoError(t, err)
+
+	// prov-app should have config
+	assert.True(t, hasKeyContaining(secret.Data, "prov-app"), "Provisioning app should be packed")
+	// matched-app should NOT have config
+	assert.False(t, hasKeyContaining(secret.Data, "matched-app"), "Matched app should be skipped")
 }

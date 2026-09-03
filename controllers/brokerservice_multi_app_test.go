@@ -20,8 +20,6 @@ import (
 	"os"
 	"time"
 
-	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -43,66 +41,15 @@ import (
 
 var _ = Describe("broker-service multi-app scenarios", func() {
 
-	var installedCertManager bool = false
-
 	BeforeEach(func() {
 		BeforeEachSpec()
 
 		if verbose {
 			fmt.Println("Time with MicroSeconds: ", time.Now().Format("2006-01-02 15:04:05.000000"), " test:", CurrentSpecReport())
 		}
-
-		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			if !CertManagerInstalled() {
-				Expect(InstallCertManager()).To(Succeed())
-				installedCertManager = true
-			}
-
-			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
-
-			rootCert = InstallCert(rootCertName, rootCertNamespce, func(candidate *cmv1.Certificate) {
-				candidate.Spec.IsCA = true
-				candidate.Spec.CommonName = "artemis.root.ca"
-				candidate.Spec.SecretName = rootCertSecretName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: rootIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			caIssuer = InstallClusteredIssuer(caIssuerName, func(candidate *cmv1.ClusterIssuer) {
-				candidate.Spec.SelfSigned = nil
-				candidate.Spec.CA = &cmv1.CAIssuer{
-					SecretName: rootCertSecretName,
-				}
-			})
-			InstallCaBundle(common.DefaultOperatorCASecretName, rootCertSecretName, caPemTrustStoreName)
-
-			By("installing operator cert")
-			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-				candidate.Spec.CommonName = "arkmq-org-broker-operator"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-		}
 	})
 
 	AfterEach(func() {
-		if false && os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			UnInstallCaBundle(common.DefaultOperatorCASecretName)
-			UninstallClusteredIssuer(caIssuerName)
-			UninstallCert(rootCert.Name, rootCert.Namespace)
-			UninstallCert(common.DefaultOperatorCertSecretName, defaultNamespace)
-			UninstallClusteredIssuer(rootIssuerName)
-
-			if installedCertManager {
-				Expect(UninstallCertManager()).To(Succeed())
-				installedCertManager = false
-			}
-		}
 		AfterEachSpec()
 	})
 
@@ -116,29 +63,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			ctx := context.Background()
 			serviceName := NextSpecResourceName()
-
-			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
-			By("installing broker cert")
-			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sharedOperandCertName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			By("installing prometheus cert")
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating BrokerService with label selector")
 			crd := broker.BrokerService{
@@ -195,18 +119,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				},
 			}
 
-			app1CertName := app1.Name + common.AppCertSecretSuffix
-			InstallCert(app1CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app1CertName
-				candidate.Spec.CommonName = app1.Name
-				candidate.Spec.Subject.Organizations = nil
-				candidate.Spec.Subject.OrganizationalUnits = []string{defaultNamespace}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			Expect(k8sClient.Create(ctx, &app1)).Should(Succeed())
 
 			By("creating second app with topic capabilities")
@@ -237,18 +149,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 				},
 			}
-
-			app2CertName := app2.Name + common.AppCertSecretSuffix
-			InstallCert(app2CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app2CertName
-				candidate.Spec.CommonName = app2.Name
-				candidate.Spec.Subject.Organizations = nil
-				candidate.Spec.Subject.OrganizationalUnits = []string{defaultNamespace}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			Expect(k8sClient.Create(ctx, &app2)).Should(Succeed())
 
@@ -327,10 +227,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			By("cleanup")
 			Expect(k8sClient.Delete(ctx, createdApp2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdCrd)).Should(Succeed())
-			UninstallCert(app1CertName, defaultNamespace)
-			UninstallCert(app2CertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
 		})
 	})
 
@@ -345,30 +241,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			ctx := context.Background()
 			service1Name := NextSpecResourceName()
 			service2Name := NextSpecResourceName()
-
-			By("setting up certificates for both services")
-			for _, svcName := range []string{service1Name, service2Name} {
-				certName := svcName + "-" + common.DefaultOperandCertSecretName
-				InstallCert(certName, defaultNamespace, func(candidate *cmv1.Certificate) {
-					candidate.Spec.SecretName = certName
-					candidate.Spec.CommonName = svcName
-					candidate.Spec.DNSNames = []string{svcName, fmt.Sprintf("%s.%s", svcName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", svcName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(svcName, defaultNamespace)}
-					candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-						Name: caIssuer.Name,
-						Kind: "ClusterIssuer",
-					}
-				})
-			}
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating first service with label env=dev")
 			service1 := broker.BrokerService{
@@ -451,18 +323,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				},
 			}
 
-			appCertName := app.Name + common.AppCertSecretSuffix
-			InstallCert(appCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = appCertName
-				candidate.Spec.CommonName = app.Name
-				candidate.Spec.Subject.Organizations = nil
-				candidate.Spec.Subject.OrganizationalUnits = []string{defaultNamespace}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
 			By("verifying app is ready and bound to service1")
@@ -530,10 +390,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			Expect(k8sClient.Delete(ctx, createdApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdService1)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdService2)).Should(Succeed())
-			UninstallCert(appCertName, defaultNamespace)
-			UninstallCert(service1Name+"-"+common.DefaultOperandCertSecretName, defaultNamespace)
-			UninstallCert(service2Name+"-"+common.DefaultOperandCertSecretName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
 		})
 	})
 
@@ -544,6 +400,10 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
 			}
+
+			// 3-app sequential provisioning with cross-namespace cert copies
+			// and projected volume refreshes; needs much more than 180s.
+			slowTimeout := existingClusterVerySlowTimeout
 
 			ctx := context.Background()
 			serviceName := NextSpecResourceName()
@@ -558,28 +418,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			if err != nil && !errors.IsAlreadyExists(err) {
 				Fail(fmt.Sprintf("Failed to create other namespace: %v", err))
 			}
-
-			By("setting up certificates")
-			certName := serviceName + "-" + common.DefaultOperandCertSecretName
-			InstallCert(certName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = certName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating service with 2Gi memory limit")
 			service := broker.BrokerService{
@@ -610,20 +448,12 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, serviceKey, createdService)).Should(Succeed())
 				g.Expect(meta.IsStatusConditionTrue(createdService.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			}, slowTimeout, existingClusterInterval).Should(Succeed())
 
 			By("creating app in default namespace with 512Mi memory request")
 			app1Name := "app-ns-test"
 			var app1Port int32
-			app1CertName := "app1-tls-cert"
-			InstallCert(app1CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app1CertName
-				candidate.Spec.CommonName = app1Name
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
+			app1CertName := app1Name + common.AppCertSecretSuffix
 
 			app1 := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -682,20 +512,12 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				if verbose {
 					fmt.Printf("App1 Ready, binding: %v\n", createdApp1.Status.Service)
 				}
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			}, slowTimeout, existingClusterInterval).Should(Succeed())
 
 			By("creating app in other namespace with 1Gi memory request")
 			app2Name := "app-ns-other"
 			var app2Port int32
-			app2CertName := "app2-tls-cert"
-			InstallCert(app2CertName, otherNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app2CertName
-				candidate.Spec.CommonName = app2Name
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
+			app2CertName := app2Name + common.AppCertSecretSuffix
 
 			app2 := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -755,7 +577,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				if verbose {
 					fmt.Printf("App2 Ready, binding: %v\n", createdApp2.Status.Service)
 				}
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			}, slowTimeout, existingClusterInterval).Should(Succeed())
 
 			By("verifying both apps are provisioned on the service")
 			Eventually(func(g Gomega) {
@@ -766,7 +588,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(2))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(app1Name)))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(app2Name)))
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			}, slowTimeout, existingClusterInterval).Should(Succeed())
 
 			By("verifying both apps have correct status bindings")
 			expectedBinding := fmt.Sprintf("%s:%s", defaultNamespace, serviceName)
@@ -782,15 +604,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			By("verifying capacity tracking across namespaces - third app should fail")
 			app3Name := "app-ns-test-too-big"
 			var app3Port int32
-			app3CertName := "app3-tls-cert"
-			InstallCert(app3CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app3CertName
-				candidate.Spec.CommonName = app3Name
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
+			app3CertName := app3Name + common.AppCertSecretSuffix
 
 			app3 := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -870,7 +684,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 				}
 				g.Expect(k8sClient.Update(ctx, createdApp3)).Should(Succeed())
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			}, slowTimeout, existingClusterInterval).Should(Succeed())
 
 			By("verifying app3 becomes ready after modification")
 			Eventually(func(g Gomega) {
@@ -889,7 +703,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				if verbose {
 					fmt.Printf("App3 now ready, binding: %v\n", createdApp3.Status.Service)
 				}
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			}, slowTimeout, existingClusterInterval).Should(Succeed())
 
 			By("verifying all three apps are provisioned on the service")
 			Eventually(func(g Gomega) {
@@ -898,7 +712,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					fmt.Printf("Service ProvisionedApps with app3: %v\n", createdService.Status.ProvisionedApps)
 				}
 				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(3))
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			}, slowTimeout, existingClusterInterval).Should(Succeed())
 
 			By("verify an app1 and app2 client can consume a message produced by app3")
 
@@ -919,7 +733,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			clientPemcfgSecret.ResourceVersion = ""
 			Expect(k8sClient.Create(ctx, clientPemcfgSecret, &client.CreateOptions{})).Should(Succeed())
 
-			jobTemplate := func(name string, ns string, bindingSecretName string, appCertName string, command []string) batchv1.Job {
+			jobTemplate := func(name string, ns string, bindingSecretName string, appCertName string, caTrustName string, command []string) batchv1.Job {
 				appLabels := map[string]string{"app": name}
 				return batchv1.Job{
 					TypeMeta:   metav1.TypeMeta{Kind: "Job", APIVersion: "batch/v1"},
@@ -973,7 +787,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 										Name: "trust",
 										VolumeSource: corev1.VolumeSource{
 											Secret: &corev1.SecretVolumeSource{
-												SecretName: common.DefaultOperatorCASecretName,
+												SecretName: caTrustName,
 											},
 										},
 									},
@@ -1002,7 +816,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			}
 
 			By("deploying consumers for app1 and app2 shared queues")
-			serviceUrlTemplate := fmt.Sprintf("amqps://${%s}:%%d?transport.trustStoreType=PEMCA\\&transport.trustStoreLocation=/app/tls/ca/ca.pem\\&transport.keyStoreType=PEMCFG\\&transport.keyStoreLocation=/app/tls/pem/tls.pemcfg", serviceHostEnvVar)
+			serviceUrlTemplate := fmt.Sprintf("amqps://${%s}:%%d?transport.trustStoreType=PEMCA\\&transport.trustStoreLocation=/app/tls/ca/tls.crt\\&transport.keyStoreType=PEMCFG\\&transport.keyStoreLocation=/app/tls/pem/tls.pemcfg", serviceHostEnvVar)
 
 			app1ServiceUrl := fmt.Sprintf(serviceUrlTemplate, app1Port)
 			app1Consumer := jobTemplate(
@@ -1010,6 +824,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				defaultNamespace,
 				createdApp1.Status.Service.Secret,
 				app1CertName,
+				app1Name+"-ca-trust",
 				[]string{"/bin/sh", "-c", "exec java -classpath /opt/amq/lib/*:/opt/amq/lib/extra/* org.apache.activemq.artemis.cli.Artemis consumer --protocol=AMQP --url " + app1ServiceUrl + " --message-count=1 --durable --clientID=app1-client --subscriptionName=app1-shared-queue --destination topic://shared.address;"},
 			)
 			Expect(k8sClient.Create(ctx, &app1Consumer)).Should(Succeed())
@@ -1020,6 +835,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				otherNamespace,
 				createdApp2.Status.Service.Secret,
 				app2CertName,
+				app2Name+"-ca-trust",
 				[]string{"/bin/sh", "-c", "exec java -classpath /opt/amq/lib/*:/opt/amq/lib/extra/* org.apache.activemq.artemis.cli.Artemis consumer --protocol=AMQP --url " + app2ServiceUrl + " --message-count=1 --durable --clientID=app2-client --subscriptionName=app2-shared-queue --destination topic://shared.address;"},
 			)
 			Expect(k8sClient.Create(ctx, &app2Consumer)).Should(Succeed())
@@ -1031,6 +847,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				defaultNamespace,
 				createdApp3.Status.Service.Secret,
 				app3CertName,
+				app3Name+"-ca-trust",
 				[]string{"/bin/sh", "-c", "exec java -classpath /opt/amq/lib/*:/opt/amq/lib/extra/* org.apache.activemq.artemis.cli.Artemis producer --protocol=AMQP --url " + app3ServiceUrl + " --message-count=1 --destination topic://shared.address;"},
 			)
 			Expect(k8sClient.Create(ctx, &app3Producer)).Should(Succeed())
@@ -1044,7 +861,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					fmt.Printf("Producer job STATUS: %v\n", producerJob.Status)
 				}
 				g.Expect(producerJob.Status.Succeeded).Should(BeNumerically("==", 1))
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			}, slowTimeout, existingClusterInterval).Should(Succeed())
 
 			By("verifying both consumers received the message")
 			app1ConsumerKey := types.NamespacedName{Name: app1Consumer.Name, Namespace: defaultNamespace}
@@ -1055,7 +872,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					fmt.Printf("App1 consumer job STATUS: %v\n", app1ConsumerJob.Status)
 				}
 				g.Expect(app1ConsumerJob.Status.Succeeded).Should(BeNumerically("==", 1))
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			}, slowTimeout, existingClusterInterval).Should(Succeed())
 
 			app2ConsumerKey := types.NamespacedName{Name: app2Consumer.Name, Namespace: otherNamespace}
 			app2ConsumerJob := &batchv1.Job{}
@@ -1065,7 +882,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					fmt.Printf("App2 consumer job STATUS: %v\n", app2ConsumerJob.Status)
 				}
 				g.Expect(app2ConsumerJob.Status.Succeeded).Should(BeNumerically("==", 1))
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			}, slowTimeout, existingClusterInterval).Should(Succeed())
 
 			By("cleanup")
 			cascade_foreground_policy := metav1.DeletePropagationForeground
@@ -1076,16 +893,27 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			clientPemcfgSecret.Namespace = defaultNamespace
 			Expect(k8sClient.Delete(ctx, clientPemcfgSecret)).Should(Succeed())
 
-			By("cleanup")
+			By("deleting apps and waiting for finalizers")
 			Expect(k8sClient.Delete(ctx, createdApp1)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdApp2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdApp3)).Should(Succeed())
+			for _, key := range []types.NamespacedName{
+				{Name: createdApp1.Name, Namespace: createdApp1.Namespace},
+				{Name: createdApp2.Name, Namespace: createdApp2.Namespace},
+				{Name: createdApp3.Name, Namespace: createdApp3.Namespace},
+			} {
+				Eventually(func() bool {
+					return errors.IsNotFound(k8sClient.Get(ctx, key, &broker.BrokerApp{}))
+				}, slowTimeout, existingClusterInterval).Should(BeTrue())
+			}
+
+			By("deleting service and waiting for finalizer")
 			Expect(k8sClient.Delete(ctx, createdService)).Should(Succeed())
-			UninstallCert(app1CertName, defaultNamespace)
-			UninstallCert(app2CertName, otherNamespace)
-			UninstallCert(app3CertName, defaultNamespace)
-			UninstallCert(certName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{
+					Name: createdService.Name, Namespace: createdService.Namespace,
+				}, &broker.BrokerService{}))
+			}, slowTimeout, existingClusterInterval).Should(BeTrue())
 		})
 	})
 
@@ -1151,18 +979,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 				},
 			}
 
-			appCertName := app.Name + common.AppCertSecretSuffix
-			InstallCert(appCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = appCertName
-				candidate.Spec.CommonName = app.Name
-				candidate.Spec.Subject.Organizations = nil
-				candidate.Spec.Subject.OrganizationalUnits = []string{defaultNamespace}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
 			By("verifying app condition reflects no matching service")
@@ -1185,7 +1001,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			By("cleanup")
 			Expect(k8sClient.Delete(ctx, createdApp)).Should(Succeed())
-			UninstallCert(appCertName, defaultNamespace)
 		})
 
 		It("should auto-assign unique ports to apps and handle pool exhaustion", func() {
@@ -1196,28 +1011,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			ctx := context.Background()
 			serviceName := NextSpecResourceName()
-
-			By("setting up certificates for service")
-			certName := serviceName + "-" + common.DefaultOperandCertSecretName
-			InstallCert(certName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = certName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating BrokerService")
 			service := broker.BrokerService{
@@ -1246,17 +1039,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			By("creating first app - should get auto-assigned port")
 			app1Name := "app1-auto-port"
-			app1CertName := app1Name + common.AppCertSecretSuffix
-			InstallCert(app1CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app1CertName
-				candidate.Spec.CommonName = app1Name
-				candidate.Spec.Subject.Organizations = nil
-				candidate.Spec.Subject.OrganizationalUnits = []string{defaultNamespace}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			app1 := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -1300,17 +1082,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			By("creating second app - should get different auto-assigned port")
 			app2Name := "app2-auto-port"
-			app2CertName := app2Name + common.AppCertSecretSuffix
-			InstallCert(app2CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app2CertName
-				candidate.Spec.CommonName = app2Name
-				candidate.Spec.Subject.Organizations = nil
-				candidate.Spec.Subject.OrganizationalUnits = []string{defaultNamespace}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			app2 := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -1386,10 +1157,6 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			Expect(k8sClient.Delete(ctx, createdApp1)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdApp2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdService)).Should(Succeed())
-			UninstallCert(app1CertName, defaultNamespace)
-			UninstallCert(app2CertName, defaultNamespace)
-			UninstallCert(certName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
 		})
 	})
 

@@ -24,9 +24,11 @@ import (
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/appselector"
+	cot "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/chain-of-trust"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -39,6 +41,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -89,7 +92,13 @@ func extractBaseAddress(address string) string {
 //   - spec.addresses (private addresses - cannot be referenced by other apps)
 //   - spec.sharedAddresses (public addresses - can be referenced by other apps)
 //   - addresses declared inline in capabilities (local addresses only)
-//
+func appLeafTemplate(app *broker.BrokerApp) *broker.CertificateTemplate {
+	if app.Spec.PKI != nil {
+		return app.Spec.PKI.Leaf
+	}
+	return nil
+}
+
 // Sharing validation: checkAddressRefCapacity() checks spec.sharedAddresses (only explicit shared addresses are referenceable)
 func collectOwnedAddresses(app *broker.BrokerApp) map[string]bool {
 	addresses := make(map[string]bool)
@@ -145,6 +154,12 @@ func (reconciler BrokerAppInstanceReconciler) validateSpec() error {
 		return err
 	}
 
+	if common.CertManagerDegraded() {
+		return NewValidationError(
+			broker.ValidConditionCertManagerUnavailable,
+			"cert-manager CRDs no longer available; certificate renewal disabled")
+	}
+
 	// Validate capability address types (structural checks only)
 	if err := reconciler.verifyCapabilityAddressType(); err != nil {
 		return err
@@ -195,16 +210,147 @@ func (reconciler BrokerAppInstanceReconciler) processBindingSecret() error {
 	return nil
 }
 
+// localPKIReady returns true when the cert-manager-issued app-plane Secrets
+// (root CA, client cert) exist in the app namespace. The ca-trust Secret is
+// omitted because it's built by the reconciler itself during sync, not by
+// cert-manager. It will exist after the first successful sync.
+func (reconciler BrokerAppInstanceReconciler) localPKIReady(ctx context.Context) bool {
+	appName := reconciler.instance.Name
+	ns := reconciler.instance.Namespace
+
+	secretNames := []string{
+		cot.AppRootCertSecretName(appName),
+		cot.AppCertName(appName),
+	}
+
+	for _, name := range secretNames {
+		secret := &corev1.Secret{}
+		key := types.NamespacedName{Name: name, Namespace: ns}
+		if err := reconciler.Client.Get(ctx, key, secret); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// provisioningCertsReady returns true when the provisioning-time cert-manager
+// Secrets (server cert, metrics cert) exist. These are created by
+// ensureAppCert as Certificate CRs; cert-manager issues the Secrets
+// asynchronously. For same-namespace apps both Secrets are in the app
+// namespace. For cross-namespace apps the server cert is in app-ns and
+// the metrics cert is in svc-ns.
+func (reconciler BrokerAppInstanceReconciler) provisioningCertsReady(ctx context.Context) bool {
+	appName := reconciler.instance.Name
+	svc := reconciler.status.Service
+	if svc == nil {
+		return false
+	}
+
+	serverCertNs := reconciler.instance.Namespace
+	metricsCertNs := svc.Namespace
+
+	checks := []types.NamespacedName{
+		{Name: cot.AppServerCertName(appName), Namespace: serverCertNs},
+		{Name: cot.MetricsCertName(appName), Namespace: metricsCertNs},
+	}
+
+	for _, key := range checks {
+		secret := &corev1.Secret{}
+		if err := reconciler.Client.Get(ctx, key, secret); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func (reconciler BrokerAppInstanceReconciler) ensureAppPKI(ctx context.Context) error {
+	appOwnerGVK := metav1.GroupVersionKind{
+		Group:   broker.GroupVersion.Group,
+		Version: broker.GroupVersion.Version,
+		Kind:    "BrokerApp",
+	}
+
+	cfg := &cot.AppPKIConfig{
+		AppName:      reconciler.instance.Name,
+		AppNamespace: reconciler.instance.Namespace,
+		Owner:        reconciler.instance,
+		OwnerGVK:     appOwnerGVK,
+	}
+	if pki := reconciler.instance.Spec.PKI; pki != nil {
+		cfg.CATemplate = pki.CA
+		cfg.LeafTemplate = pki.Leaf
+	}
+
+	objects, err := cot.EnsureAppPKI(ctx, reconciler.Client, cfg)
+	if err != nil {
+		return err
+	}
+	for _, obj := range objects {
+		reconciler.TrackDesired(obj)
+	}
+	return nil
+}
+
+func (reconciler BrokerAppInstanceReconciler) ensureAppCert(ctx context.Context) error {
+	if reconciler.status.Service == nil {
+		return nil
+	}
+
+	sameNamespace := reconciler.instance.Namespace == reconciler.status.Service.Namespace
+
+	appOwnerGVK := metav1.GroupVersionKind{
+		Group:   broker.GroupVersion.Group,
+		Version: broker.GroupVersion.Version,
+		Kind:    "BrokerApp",
+	}
+
+	cfg := &cot.AppCertConfig{
+		AppName:          reconciler.instance.Name,
+		AppNamespace:     reconciler.instance.Namespace,
+		ServiceName:      reconciler.status.Service.Name,
+		ServiceNamespace: reconciler.status.Service.Namespace,
+		ClusterDomain:    common.GetClusterDomain(),
+		AppOwner:         reconciler.instance,
+		AppOwnerGVK:      appOwnerGVK,
+		SameNamespace:    sameNamespace,
+		Template:         appLeafTemplate(reconciler.instance),
+	}
+
+	objects, err := cot.EnsureAppCert(ctx, reconciler.Client, cfg)
+	if err != nil {
+		return err
+	}
+
+	for _, obj := range objects {
+		reconciler.TrackDesired(obj)
+	}
+
+	// For cross-namespace, add finalizer so we can clean up provisioning
+	// secrets from both the service and app namespace on deletion
+	if !sameNamespace && !controllerutil.ContainsFinalizer(reconciler.instance, cot.FinalizerName) {
+		controllerutil.AddFinalizer(reconciler.instance, cot.FinalizerName)
+		if err := reconciler.Update(ctx, reconciler.instance); err != nil {
+			return fmt.Errorf("failed to add chain-of-trust finalizer: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func NewBrokerAppReconciler(client client.Client, scheme *runtime.Scheme, config *rest.Config, logger logr.Logger) *BrokerAppReconciler {
-	reconciler := BrokerAppReconciler{ReconcilerLoop: &ReconcilerLoop{KubeBits: &KubeBits{
-		Client: client, Scheme: scheme, Config: config, log: logger}}}
+	reconciler := BrokerAppReconciler{
+		ReconcilerLoop: &ReconcilerLoop{KubeBits: &KubeBits{
+			Client: client, Scheme: scheme, Config: config, log: logger}},
+	}
 	reconciler.ReconcilerLoopType = &reconciler
 	return &reconciler
 }
 
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps/finalizers,verbs=update
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices,verbs=get;list;watch;update
+//+kubebuilder:rbac:groups=cert-manager.io,namespace=arkmq-org-broker-operator,resources=issuers;certificates,verbs=get;list;watch;create;update;patch;delete
 
 func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
 	reqLogger := reconciler.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "BrokerApp")
@@ -218,23 +364,64 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 		return ctrl.Result{}, err
 	}
 
+	// Handle finalizer for cross-namespace cert cleanup
+	if instance.DeletionTimestamp != nil {
+		if controllerutil.ContainsFinalizer(instance, cot.FinalizerName) {
+			if err := reconciler.handleChainOfTrustCleanup(ctx, instance); err != nil {
+				return ctrl.Result{}, err
+			}
+			controllerutil.RemoveFinalizer(instance, cot.FinalizerName)
+			if err := reconciler.Update(ctx, instance); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
 	localLoop := &ReconcilerLoop{
 		KubeBits:           reconciler.KubeBits,
 		ReconcilerLoopType: reconciler,
 	}
 
 	processor := BrokerAppInstanceReconciler{
-		BrokerAppReconciler: &BrokerAppReconciler{ReconcilerLoop: localLoop},
-		instance:            instance,
-		status:              instance.Status.DeepCopy(),
+		BrokerAppReconciler: &BrokerAppReconciler{
+			ReconcilerLoop: localLoop,
+		},
+		instance: instance,
+		status:   instance.Status.DeepCopy(),
 	}
 
 	reqLogger.V(2).Info("Reconciler Processing...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation)
 	if err = processor.validateSpec(); err == nil {
-		if err = processor.resolveBrokerService(); err == nil {
-			if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
-				if err = processor.processBindingSecret(); err == nil {
+		if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
+			if err = processor.ensureAppPKI(ctx); err == nil {
+				if !processor.localPKIReady(ctx) {
+					// Certificate CRs created but cert-manager has not issued secrets yet.
+					// Sync tracked resources and return — Owns(Certificate) will re-trigger.
+					processor.status.Phase = broker.BrokerAppPhaseCreated
 					err = processor.SyncDesiredWithDeployed(processor.instance)
+				} else {
+					processor.status.Phase = broker.BrokerAppPhaseCertsIssued
+					if err = processor.resolveBrokerService(); err == nil {
+						processor.status.Phase = broker.BrokerAppPhaseMatched
+						if err = processor.processBindingSecret(); err == nil {
+							certErr := processor.ensureAppCert(ctx)
+							// Always sync so tracked PKI resources are materialized
+							// even when cross-namespace cert copies aren't ready yet.
+							if syncErr := processor.SyncDesiredWithDeployed(processor.instance); syncErr != nil {
+								err = syncErr
+							} else if certErr != nil {
+								err = certErr
+							} else if processor.provisioningCertsReady(ctx) {
+								// Only advance to Provisioning when the Secrets
+								// for server-cert and metrics-cert actually exist.
+								// ensureAppCert creates Certificate CRs; cert-manager
+								// issues the Secrets asynchronously. Owns(Certificate)
+								// re-triggers when they appear.
+								processor.status.Phase = broker.BrokerAppPhaseProvisioning
+							}
+						}
+					}
 				}
 			}
 		}
@@ -261,15 +448,38 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 	return ctrl.Result{}, nil
 }
 
+func (reconciler *BrokerAppReconciler) handleChainOfTrustCleanup(ctx context.Context, instance *broker.BrokerApp) error {
+	if instance.Status.Service == nil {
+		return nil
+	}
+	svcName := instance.Status.Service.Name
+	svcNamespace := instance.Status.Service.Namespace
+	if svcNamespace == instance.Namespace {
+		return nil
+	}
+
+	if err := cot.CleanupAppCert(ctx, reconciler.Client, instance.Name, svcNamespace); err != nil {
+		return err
+	}
+	return cot.CleanupAppProvisioningSecrets(ctx, reconciler.Client,
+		instance.Name, instance.Namespace, svcName, svcNamespace)
+}
+
 // instance specifics for a reconciler loop
 func (r *BrokerAppReconciler) getOwned() []client.ObjectList {
-	return []client.ObjectList{&corev1.SecretList{}}
+	return []client.ObjectList{
+		&cmv1.IssuerList{},
+		&cmv1.CertificateList{},
+		&corev1.SecretList{},
+	}
 }
 
 func (r *BrokerAppReconciler) getOrderedTypeList() []reflect.Type {
-	types := make([]reflect.Type, 1)
-	types[0] = reflect.TypeOf(corev1.Secret{})
-	return types
+	return []reflect.Type{
+		reflect.TypeOf(cmv1.Issuer{}),
+		reflect.TypeOf(cmv1.Certificate{}),
+		reflect.TypeOf(corev1.Secret{}),
+	}
 }
 
 func (reconciler *BrokerAppInstanceReconciler) resolveBrokerService() error {
@@ -1348,6 +1558,7 @@ func (reconciler *BrokerAppInstanceReconciler) setDeployedCondition(err error) {
 			condition.Status = metav1.ConditionTrue
 			condition.Reason = broker.DeployedConditionProvisionedReason
 			condition.Message = "Application provisioned to broker"
+			reconciler.status.Phase = broker.BrokerAppPhaseProvisioned
 		} else {
 			condition.Status = metav1.ConditionFalse
 			condition.Reason = broker.DeployedConditionProvisioningPendingReason
@@ -1508,11 +1719,30 @@ func (r *BrokerAppReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&broker.BrokerApp{}).
 		Owns(&corev1.Secret{}).
+		Owns(&cmv1.Issuer{}).
+		Owns(&cmv1.Certificate{}).
 		Watches(&broker.BrokerService{}, r.enqueueAppsForService()).
 		Watches(&broker.BrokerApp{}, r.enqueueAppsForReferencedApp()).
+		Watches(&cmv1.Certificate{}, handler.EnqueueRequestsFromMapFunc(r.crossNsCertToApp)).
 		WithOptions(controller.Options{
-			// capacity allocation requires serial processing
 			MaxConcurrentReconciles: 1,
 		}).
 		Complete(r)
+}
+
+// crossNsCertToApp maps cross-namespace Certificate events to their owning
+// BrokerApp. Cross-ns Certificates are identified by labels since ownerRefs
+// cannot span namespaces.
+func (r *BrokerAppReconciler) crossNsCertToApp(ctx context.Context, obj client.Object) []reconcile.Request {
+	appName := obj.GetLabels()[cot.LabelAppName]
+	appNamespace := obj.GetLabels()[cot.LabelAppNamespace]
+	if appName == "" || appNamespace == "" {
+		return nil
+	}
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Name:      appName,
+			Namespace: appNamespace,
+		},
+	}}
 }

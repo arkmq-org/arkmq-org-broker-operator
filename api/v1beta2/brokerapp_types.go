@@ -47,6 +47,12 @@ type BrokerAppSpec struct {
 
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Resources"
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// PKI configures the app's data plane certificate properties.
+	// When omitted, sensible defaults are used (10-year CA, 90-day leaf certs).
+	//+optional
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="PKI Configuration"
+	PKI *AppPKISpec `json:"pki,omitempty"`
 }
 
 // AddressType defines a messaging address
@@ -113,12 +119,45 @@ func (s *BrokerServiceBindingStatus) Key() string {
 	return s.Namespace + ":" + s.Name
 }
 
+// BrokerAppPhase represents the current provisioning phase of a BrokerApp.
+// The phase progresses linearly: Created -> CertsIssued -> Matched ->
+// Provisioning -> Provisioned. BrokerApp is the sole writer.
+type BrokerAppPhase string
+
+const (
+	// BrokerAppPhaseCreated indicates the CR exists and ensureAppPKI has
+	// created Certificate CRs, but cert-manager has not yet issued the Secrets.
+	BrokerAppPhaseCreated BrokerAppPhase = "Created"
+
+	// BrokerAppPhaseCertsIssued indicates that local PKI Secrets (root CA,
+	// client cert, ca-trust) exist in the app namespace.
+	BrokerAppPhaseCertsIssued BrokerAppPhase = "CertsIssued"
+
+	// BrokerAppPhaseMatched indicates that a BrokerService has been resolved
+	// via the selector. Cross-namespace copies may be in progress.
+	BrokerAppPhaseMatched BrokerAppPhase = "Matched"
+
+	// BrokerAppPhaseProvisioning indicates that all provisioning-time
+	// certificates and cross-namespace copies are confirmed. BrokerService
+	// can pack certs. Waiting for broker config reload.
+	BrokerAppPhaseProvisioning BrokerAppPhase = "Provisioning"
+
+	// BrokerAppPhaseProvisioned indicates the app appears in the
+	// BrokerService ProvisionedApps list — broker has applied the config.
+	BrokerAppPhaseProvisioned BrokerAppPhase = "Provisioned"
+)
+
 type BrokerAppStatus struct {
 
 	// ObservedGeneration is the most recent generation observed for this BrokerApp.
 	// It corresponds to the BrokerApp's generation, which is updated on mutation by the API Server.
 	//+optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Phase is the current provisioning phase of this BrokerApp.
+	//+optional
+	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Provisioning Phase"
+	Phase BrokerAppPhase `json:"phase,omitempty"`
 
 	// Current state of the resource
 	// Conditions represent the latest available observations of an object's state
@@ -137,6 +176,7 @@ type BrokerAppStatus struct {
 //+kubebuilder:storageversion
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:path=brokerapps,shortName=bapp
+//+kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 //+operator-sdk:csv:customresourcedefinitions:resources={{"Secret", "v1"}}
 
 // Describes the messaging requirements of an application

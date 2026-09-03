@@ -22,6 +22,7 @@ import (
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
@@ -50,6 +51,7 @@ func TestPodLabels_StandardKubernetesLabels(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = appsv1.AddToScheme(scheme)
 
@@ -105,6 +107,7 @@ func TestPodLabels_NetworkPolicyMatchingBrokerService(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = appsv1.AddToScheme(scheme)
 
@@ -228,6 +231,7 @@ func TestPodLabels_NetworkPolicyMatchingComponentLabel(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 	_ = appsv1.AddToScheme(scheme)
 

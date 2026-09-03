@@ -6583,7 +6583,7 @@ var _ = Describe("artemis controller", func() {
 				g.Expect(validCondition.Reason).To(Equal(brokerv1beta1.ValidConditionFailedExtraMountReason))
 				g.Expect(validCondition.Message).To(ContainSubstring("once"))
 
-			}, timeout, interval).Should(Succeed())
+			}, existingClusterTimeout, interval).Should(Succeed())
 
 			By("Updating CR to make valid")
 			Eventually(func(g Gomega) {

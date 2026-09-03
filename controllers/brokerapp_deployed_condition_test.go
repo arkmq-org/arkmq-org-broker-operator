@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -38,6 +39,7 @@ func TestDeployedCondition_ValidationError_WithPreviousDeployment(t *testing.T) 
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Create a service
 	service := &v1beta2.BrokerService{
@@ -162,6 +164,7 @@ func TestDeployedCondition_ValidationError_WithoutPreviousDeployment(t *testing.
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Create a service
 	service := &v1beta2.BrokerService{
@@ -262,6 +265,7 @@ func TestDeployedCondition_ValidationError_WithPreviousDeployedFalse(t *testing.
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Create a service
 	service := &v1beta2.BrokerService{

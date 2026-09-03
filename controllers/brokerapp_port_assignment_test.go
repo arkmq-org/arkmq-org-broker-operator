@@ -20,6 +20,7 @@ import (
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -36,6 +37,7 @@ func TestBrokerAppPortAssignment_DefaultPool(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	svcName := "my-broker-service"
@@ -79,7 +81,7 @@ func TestBrokerAppPortAssignment_DefaultPool(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, app, nsObj).
+		WithObjects(append([]client.Object{svc, app, nsObj}, FakeLocalPKISecrets(appName, ns)...)...).
 		WithStatusSubresource(app, svc).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -109,6 +111,7 @@ func TestBrokerAppPortAssignment_ExistingPortPreserved(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	svcName := "my-broker-service"
@@ -159,7 +162,7 @@ func TestBrokerAppPortAssignment_ExistingPortPreserved(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, app, nsObj).
+		WithObjects(append([]client.Object{svc, app, nsObj}, FakeLocalPKISecrets(appName, ns)...)...).
 		WithStatusSubresource(app, svc).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -188,6 +191,7 @@ func TestBrokerAppPortAssignment_MultipleApps(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	svcName := "my-broker-service"
@@ -239,9 +243,13 @@ func TestBrokerAppPortAssignment_MultipleApps(t *testing.T) {
 		},
 	}
 
+	objs := []client.Object{svc, app1, app2, nsObj}
+	objs = append(objs, FakeLocalPKISecrets("app1", ns)...)
+	objs = append(objs, FakeLocalPKISecrets("app2", ns)...)
+
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, app1, app2, nsObj).
+		WithObjects(objs...).
 		WithStatusSubresource(app1, app2, svc).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)

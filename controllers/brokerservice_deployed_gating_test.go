@@ -20,6 +20,7 @@ import (
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
@@ -29,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -39,6 +41,7 @@ func TestBrokerServiceDeployed_WhenBrokerNotReady(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 	_ = appsv1.AddToScheme(scheme)
 
 	ns := "default"
@@ -84,6 +87,7 @@ func TestBrokerServiceDeployed_AfterPortDiscovery(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 	_ = appsv1.AddToScheme(scheme)
 
 	ns := "default"
@@ -163,6 +167,7 @@ func TestBrokerAppRejectsNonDeployedService(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	svcName := "my-broker-service"
@@ -204,9 +209,11 @@ func TestBrokerAppRejectsNonDeployedService(t *testing.T) {
 		},
 	}
 
+	objs := []client.Object{svc, app, nsObj}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, app, nsObj).
+		WithObjects(objs...).
 		WithStatusSubresource(app, svc)).
 		Build()
 
@@ -235,6 +242,7 @@ func TestBrokerAppBindsToDeployedService(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	svcName := "my-broker-service"
@@ -275,9 +283,11 @@ func TestBrokerAppBindsToDeployedService(t *testing.T) {
 		},
 	}
 
+	objs := []client.Object{svc, app, nsObj}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, app, nsObj).
+		WithObjects(objs...).
 		WithStatusSubresource(app, svc)).
 		Build()
 

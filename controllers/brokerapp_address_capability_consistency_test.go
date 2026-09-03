@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -23,6 +24,7 @@ func TestValidation_SharedAddress_Multicast_UsedAsAnycast(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "inconsistent-app"
@@ -88,6 +90,7 @@ func TestValidation_SharedAddress_Anycast_UsedAsMulticast(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "mismatch-app"
@@ -152,6 +155,7 @@ func TestValidation_PrivateAddress_Multicast_UsedAsAnycast(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "private-mismatch"
@@ -217,6 +221,7 @@ func TestValidation_SharedAddress_Consistent_Multicast_Valid(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "valid-multicast"
@@ -291,6 +296,7 @@ func TestValidation_SharedAddress_Consistent_Anycast_Valid(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "valid-anycast"
@@ -361,6 +367,7 @@ func TestValidation_MultipleAddresses_MixedTypes(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "mixed-addresses"
@@ -423,6 +430,7 @@ func TestValidation_AddressNotDeclared_OnlyInCapability(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "implicit-address"
@@ -472,6 +480,7 @@ func TestValidation_Address_PubSubFalse_WithSubscriptions(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "invalid-declaration"

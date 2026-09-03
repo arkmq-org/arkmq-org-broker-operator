@@ -16,7 +16,11 @@ spec:
     singular: brokerapp
   scope: Namespaced
   versions:
-  - name: v1beta2
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    name: v1beta2
     schema:
       openAPIV3Schema:
         description: Describes the messaging requirements of an application
@@ -132,6 +136,117 @@ spec:
                       type: array
                   type: object
                 type: array
+              pki:
+                description: |-
+                  PKI configures the app's data plane certificate properties.
+                  When omitted, sensible defaults are used (10-year CA, 90-day leaf certs).
+                properties:
+                  ca:
+                    description: CA overrides for the app's root CA certificate.
+                    properties:
+                      additionalDNSNames:
+                        description: |-
+                          AdditionalDNSNames appends extra SANs to the certificate.
+                          The operator always generates the base set of cluster-internal DNS names;
+                          this field allows adding external hostnames (e.g. ingress hosts) without
+                          overriding the base set.
+                          Each entry must be a valid DNS name (RFC 1123 subdomain).
+                        items:
+                          pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$
+                          type: string
+                        type: array
+                      duration:
+                        description: |-
+                          Duration is the requested lifetime of the certificate.
+                          Defaults differ by context: 10 years for CA certificates, 90 days for
+                          leaf certificates.
+                        type: string
+                      privateKey:
+                        description: |-
+                          PrivateKey controls the algorithm, size, and rotation policy of the
+                          certificate's private key.
+                        properties:
+                          algorithm:
+                            description: 'Algorithm is the private key algorithm.
+                              Allowed: RSA, ECDSA, Ed25519.'
+                            enum:
+                            - RSA
+                            - ECDSA
+                            - Ed25519
+                            type: string
+                          rotationPolicy:
+                            description: |-
+                              RotationPolicy controls whether private keys are regenerated on renewal.
+                              Allowed: Never, Always. Default: Never.
+                            enum:
+                            - Never
+                            - Always
+                            type: string
+                          size:
+                            description: Size is the key bit size (e.g. 2048, 4096
+                              for RSA; 256, 384 for ECDSA).
+                            type: integer
+                        type: object
+                      renewBefore:
+                        description: |-
+                          RenewBefore is the amount of time before expiry to trigger renewal.
+                          Defaults differ by context: 1 year for CA, 30 days for leaf certificates.
+                        type: string
+                    type: object
+                  leaf:
+                    description: Leaf overrides for app leaf certificates (client
+                      cert, server cert).
+                    properties:
+                      additionalDNSNames:
+                        description: |-
+                          AdditionalDNSNames appends extra SANs to the certificate.
+                          The operator always generates the base set of cluster-internal DNS names;
+                          this field allows adding external hostnames (e.g. ingress hosts) without
+                          overriding the base set.
+                          Each entry must be a valid DNS name (RFC 1123 subdomain).
+                        items:
+                          pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$
+                          type: string
+                        type: array
+                      duration:
+                        description: |-
+                          Duration is the requested lifetime of the certificate.
+                          Defaults differ by context: 10 years for CA certificates, 90 days for
+                          leaf certificates.
+                        type: string
+                      privateKey:
+                        description: |-
+                          PrivateKey controls the algorithm, size, and rotation policy of the
+                          certificate's private key.
+                        properties:
+                          algorithm:
+                            description: 'Algorithm is the private key algorithm.
+                              Allowed: RSA, ECDSA, Ed25519.'
+                            enum:
+                            - RSA
+                            - ECDSA
+                            - Ed25519
+                            type: string
+                          rotationPolicy:
+                            description: |-
+                              RotationPolicy controls whether private keys are regenerated on renewal.
+                              Allowed: Never, Always. Default: Never.
+                            enum:
+                            - Never
+                            - Always
+                            type: string
+                          size:
+                            description: Size is the key bit size (e.g. 2048, 4096
+                              for RSA; 256, 384 for ECDSA).
+                            type: integer
+                        type: object
+                      renewBefore:
+                        description: |-
+                          RenewBefore is the amount of time before expiry to trigger renewal.
+                          Defaults differ by context: 1 year for CA, 30 days for leaf certificates.
+                        type: string
+                    type: object
+                type: object
               resources:
                 description: ResourceRequirements describes the compute resource requirements.
                 properties:
@@ -328,6 +443,9 @@ spec:
                   It corresponds to the BrokerApp's generation, which is updated on mutation by the API Server.
                 format: int64
                 type: integer
+              phase:
+                description: Phase is the current provisioning phase of this BrokerApp.
+                type: string
               service:
                 description: Service references the BrokerService this app is bound
                   to and its binding secret

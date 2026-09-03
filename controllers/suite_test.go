@@ -94,6 +94,7 @@ const (
 	duration                           = time.Second * 20
 	interval                           = time.Millisecond * 500
 	existingClusterTimeout             = time.Second * 300
+	existingClusterVerySlowTimeout     = time.Minute * 10
 	existingClusterConsistentlyTimeout = time.Second * 20
 	existingClusterInterval            = time.Second * 2
 	namespace1                         = "namespace1"
@@ -155,6 +156,7 @@ var (
 	defaultUid                                = int64(185)
 	watchClientList                *list.List = nil
 	testProxyLog                   logr.Logger
+	suiteInstalledCertManager      = false
 )
 
 func init() {
@@ -186,6 +188,9 @@ func setUpEnvTest() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
+		CRDInstallOptions: envtest.CRDInstallOptions{
+			MaxTime: 60 * time.Second,
+		},
 	}
 
 	var err error
@@ -219,6 +224,11 @@ func setUpEnvTest() {
 	setUpNamespace()
 
 	setUpTestProxy()
+
+	if !CertManagerInstalled() {
+		Expect(InstallCertManager()).To(Succeed())
+		suiteInstalledCertManager = true
+	}
 
 	createControllerManagerForSuite()
 }
@@ -947,6 +957,11 @@ var _ = AfterSuite(func() {
 		cleanUpPVC()
 		cleanUpTestProxy()
 		cleanUpOperatorCertSecrets()
+
+		if suiteInstalledCertManager {
+			Expect(UninstallCertManager()).To(Succeed())
+			suiteInstalledCertManager = false
+		}
 	}
 
 	os.Unsetenv("OPERATOR_WATCH_NAMESPACE")

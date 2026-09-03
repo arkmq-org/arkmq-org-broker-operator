@@ -5651,6 +5651,11 @@ spec:
         path: addresses
       - displayName: Messaging Capabilities
         path: capabilities
+      - description: |-
+          PKI configures the app's data plane certificate properties.
+          When omitted, sensible defaults are used (10-year CA, 90-day leaf certs).
+        displayName: PKI Configuration
+        path: pki
       - displayName: Resources
         path: resources
       - displayName: ServiceSelector
@@ -6834,6 +6839,11 @@ spec:
         path: env
       - displayName: Broker image
         path: image
+      - description: |-
+          PKI configures the chain-of-trust certificate properties.
+          When omitted, sensible defaults are used (10-year CA, 90-day leaf certs).
+        displayName: PKI Configuration
+        path: pki
       - displayName: Resources
         path: resources
       statusDescriptors:
@@ -7227,6 +7237,14 @@ spec:
         - apiGroups:
           - broker.arkmq.org
           resources:
+          - brokerapps/finalizers
+          - brokerclusters/finalizers
+          - brokers/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - broker.arkmq.org
+          resources:
           - brokerapps/status
           verbs:
           - get
@@ -7237,13 +7255,6 @@ spec:
         - apiGroups:
           - broker.arkmq.org
           resources:
-          - brokerclusters/finalizers
-          - brokers/finalizers
-          verbs:
-          - update
-        - apiGroups:
-          - broker.arkmq.org
-          resources:
           - brokerclusters/status
           - brokers/status
           - brokerservices/status
@@ -7251,6 +7262,19 @@ spec:
           - get
           - patch
           - update
+        - apiGroups:
+          - cert-manager.io
+          resources:
+          - certificates
+          - issuers
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
         - apiGroups:
           - monitoring.coreos.com
           resources:

@@ -112,6 +112,14 @@ rules:
 - apiGroups:
   - broker.arkmq.org
   resources:
+  - brokerapps/finalizers
+  - brokerclusters/finalizers
+  - brokers/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - broker.arkmq.org
+  resources:
   - brokerapps/status
   verbs:
   - get
@@ -122,13 +130,6 @@ rules:
 - apiGroups:
   - broker.arkmq.org
   resources:
-  - brokerclusters/finalizers
-  - brokers/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - broker.arkmq.org
-  resources:
   - brokerclusters/status
   - brokers/status
   - brokerservices/status
@@ -136,6 +137,19 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  - issuers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - monitoring.coreos.com
   resources:
