@@ -20,6 +20,7 @@ import (
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -41,6 +42,7 @@ func TestBrokerServiceRejectsManuallyAnnotatedApp(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 
 	// Data
@@ -63,6 +65,7 @@ func TestBrokerServiceRejectsManuallyAnnotatedApp(t *testing.T) {
 
 	// Create BrokerApp from UNTRUSTED namespace with MANUALLY SET annotation
 	// (simulating an attacker trying to bypass access control)
+	// Phase is set to Provisioning to simulate worst-case: attacker bypassed Phase gate too.
 	attackerApp := &v1beta2.BrokerApp{
 		ObjectMeta: v1.ObjectMeta{
 			Name:      appName,
@@ -74,6 +77,7 @@ func TestBrokerServiceRejectsManuallyAnnotatedApp(t *testing.T) {
 			},
 		},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{
 				Name:      svcName,
 				Namespace: svcNs,
@@ -171,6 +175,7 @@ func TestBrokerServiceAllowsMatchingApp(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 
 	// Data
@@ -219,6 +224,7 @@ func TestBrokerServiceAllowsMatchingApp(t *testing.T) {
 			},
 		},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{
 				Name:         svcName,
 				Namespace:    svcNs,
@@ -228,10 +234,12 @@ func TestBrokerServiceAllowsMatchingApp(t *testing.T) {
 		},
 	}
 
-	// Setup fake client
+	// Setup fake client — include cert secrets so packAppCertData succeeds
+	objs := []client.Object{svc, legitimateApp, opCASecret}
+	objs = append(objs, FakeAppCertSecrets(appName, svcNs)...)
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, legitimateApp, opCASecret).
+		WithObjects(objs...).
 		WithStatusSubresource(svc, legitimateApp).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -288,6 +296,7 @@ func TestBrokerServiceRejectsLabelMismatch(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 
 	// Data
@@ -340,6 +349,7 @@ func TestBrokerServiceRejectsLabelMismatch(t *testing.T) {
 			},
 		},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{
 				Name:      svcName,
 				Namespace: svcNs,
@@ -419,6 +429,7 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 
 	// Data
@@ -460,6 +471,7 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 		},
 		Spec: v1beta2.BrokerAppSpec{},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{
 				Name:         svcName,
 				Namespace:    svcNs,
@@ -476,6 +488,7 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 		},
 		Spec: v1beta2.BrokerAppSpec{},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{
 				Name:         svcName,
 				Namespace:    svcNs,
@@ -491,6 +504,7 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 			Namespace: "other-namespace", // Does NOT match
 		},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{ // Manually set!
 				Name:      svcName,
 				Namespace: svcNs,
@@ -500,10 +514,13 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 		Spec: v1beta2.BrokerAppSpec{},
 	}
 
-	// Setup fake client
+	// Setup fake client — include cert secrets for matching apps
+	objs := []client.Object{svc, matchingApp1, matchingApp2, attackerApp, opCASecret}
+	objs = append(objs, FakeAppCertSecrets("app1", svcNs)...)
+	objs = append(objs, FakeAppCertSecrets("app2", svcNs)...)
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, matchingApp1, matchingApp2, attackerApp, opCASecret).
+		WithObjects(objs...).
 		WithStatusSubresource(svc, matchingApp1, matchingApp2, attackerApp).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -578,6 +595,7 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 	_ = networkingv1.AddToScheme(scheme)
 
 	// Data
@@ -630,6 +648,7 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 			},
 		},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{
 				Name:         svcName,
 				Namespace:    svcNs,
@@ -647,6 +666,7 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 			Namespace: attackerNs,
 		},
 		Status: v1beta2.BrokerAppStatus{
+			Phase: v1beta2.BrokerAppPhaseProvisioning,
 			Service: &v1beta2.BrokerServiceBindingStatus{ // SECURITY: Manually set to bypass selector
 				Name:      svcName,
 				Namespace: svcNs,
@@ -666,10 +686,12 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 		},
 	}
 
-	// Setup fake client
+	// Setup fake client — include cert secrets for the valid app only
+	objs := []client.Object{svc, validApp, attackerApp, opCASecret}
+	objs = append(objs, FakeAppCertSecrets("valid-app", svcNs)...)
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, validApp, attackerApp, opCASecret).
+		WithObjects(objs...).
 		WithStatusSubresource(svc, validApp, attackerApp).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)

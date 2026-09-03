@@ -6410,6 +6410,11 @@ spec:
         path: addresses
       - displayName: Messaging Capabilities
         path: capabilities
+      - description: |-
+          PKI configures the app's data plane certificate properties.
+          When omitted, sensible defaults are used (10-year CA, 90-day leaf certs).
+        displayName: PKI Configuration
+        path: pki
       - displayName: Resources
         path: resources
       - displayName: ServiceSelector
@@ -7527,6 +7532,11 @@ spec:
         path: env
       - displayName: Broker image
         path: image
+      - description: |-
+          PKI configures the chain-of-trust certificate properties.
+          When omitted, sensible defaults are used (10-year CA, 90-day leaf certs).
+        displayName: PKI Configuration
+        path: pki
       - displayName: Resources
         path: resources
       statusDescriptors:
@@ -7580,7 +7590,7 @@ spec:
   - email: info@arkmq.org
     name: ArkMQ
   maturity: beta
-  minKubeVersion: 1.22.0
+  minKubeVersion: 1.33.0
   provider:
     name: ArkMQ
     url: https://arkmq.org

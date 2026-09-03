@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,6 +30,7 @@ func TestResolveBrokerService_MultipleServices_OneNotDeployed(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	app := &broker.BrokerApp{
 		ObjectMeta: metav1.ObjectMeta{

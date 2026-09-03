@@ -18,21 +18,17 @@ package controllers
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"time"
 
-	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,70 +42,15 @@ import (
 
 var _ = Describe("broker-service-poc", func() {
 
-	var installedCertManager bool = false
-
 	BeforeEach(func() {
 		BeforeEachSpec()
 
 		if verbose {
 			fmt.Println("Time with MicroSeconds: ", time.Now().Format("2006-01-02 15:04:05.000000"), " test:", CurrentSpecReport())
 		}
-
-		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			//if cert manager/trust manager is not installed, install it
-			if !CertManagerInstalled() {
-				Expect(InstallCertManager()).To(Succeed())
-				installedCertManager = true
-			}
-
-			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
-
-			rootCert = InstallCert(rootCertName, rootCertNamespce, func(candidate *cmv1.Certificate) {
-				candidate.Spec.IsCA = true
-				candidate.Spec.CommonName = "artemis.root.ca"
-				candidate.Spec.SecretName = rootCertSecretName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: rootIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			caIssuer = InstallClusteredIssuer(caIssuerName, func(candidate *cmv1.ClusterIssuer) {
-				candidate.Spec.SelfSigned = nil
-				candidate.Spec.CA = &cmv1.CAIssuer{
-					SecretName: rootCertSecretName,
-				}
-			})
-			InstallCaBundle(common.DefaultOperatorCASecretName, rootCertSecretName, caPemTrustStoreName)
-
-			By("installing operator cert")
-			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-				candidate.Spec.CommonName = "arkmq-org-broker-operator"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-		}
-
 	})
 
 	AfterEach(func() {
-
-		if false && os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			UnInstallCaBundle(common.DefaultOperatorCASecretName)
-			UninstallClusteredIssuer(caIssuerName)
-			UninstallCert(rootCert.Name, rootCert.Namespace)
-			UninstallCert(common.DefaultOperatorCertSecretName, defaultNamespace)
-			UninstallClusteredIssuer(rootIssuerName)
-
-			if installedCertManager {
-				Expect(UninstallCertManager()).To(Succeed())
-				installedCertManager = false
-			}
-		}
 		AfterEachSpec()
 	})
 
@@ -124,29 +65,6 @@ var _ = Describe("broker-service-poc", func() {
 			ctx := context.Background()
 
 			serviceName := NextSpecResourceName()
-
-			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
-			By("installing broker cert")
-			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sharedOperandCertName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			By("installing prometheus cert")
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			brokerImage := version.LatestKubeImage
 			jvmRemoteDebug := false
@@ -294,17 +212,7 @@ var _ = Describe("broker-service-poc", func() {
 			}
 
 			appCertName := app.Name + common.AppCertSecretSuffix
-			By("installing app client cert")
-			InstallCert(appCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = appCertName
-				candidate.Spec.CommonName = app.Name
-				candidate.Spec.Subject.Organizations = nil
-				candidate.Spec.Subject.OrganizationalUnits = []string{defaultNamespace}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
+			caTrustName := app.Name + "-ca-trust"
 
 			By("Deploying the App " + app.ObjectMeta.Name)
 			Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
@@ -435,7 +343,7 @@ var _ = Describe("broker-service-poc", func() {
 										Name: "trust",
 										VolumeSource: corev1.VolumeSource{
 											Secret: &corev1.SecretVolumeSource{
-												SecretName: common.DefaultOperatorCASecretName,
+												SecretName: caTrustName,
 											},
 										},
 									},
@@ -465,7 +373,7 @@ var _ = Describe("broker-service-poc", func() {
 
 			buf := &bytes.Buffer{}
 			fmt.Fprintf(buf, "amqps://${%s}:${%s}", serviceHostEnvVar, servicePortEnvVar)
-			fmt.Fprintf(buf, "?transport.trustStoreType=PEMCA\\&transport.trustStoreLocation=/app/tls/ca/ca.pem")
+			fmt.Fprintf(buf, "?transport.trustStoreType=PEMCA\\&transport.trustStoreLocation=/app/tls/ca/tls.crt")
 			fmt.Fprintf(buf, "\\&transport.keyStoreType=PEMCFG\\&transport.keyStoreLocation=/app/tls/pem/tls.pemcfg")
 
 			serviceUrl := buf.String()
@@ -611,14 +519,18 @@ var _ = Describe("broker-service-poc", func() {
 			Expect(k8sClient.Delete(ctx, &publisher, &client.DeleteOptions{PropagationPolicy: &cascade_foreground_policy})).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, appClientPemcfgSecret)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, createdCrd)).Should(Succeed())
+
+			By("waiting for service deletion to complete")
+			Expect(k8sClient.Delete(ctx, createdCrd, &client.DeleteOptions{PropagationPolicy: &cascade_foreground_policy})).Should(Succeed())
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{
+					Name: createdCrd.Name, Namespace: createdCrd.Namespace,
+				}, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
 
 			if jvmRemoteDebug {
 				Expect(k8sClient.Delete(ctx, debugService)).Should(Succeed())
 			}
-
-			UninstallCert(appCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
 		})
 	})
 
@@ -633,29 +545,6 @@ var _ = Describe("broker-service-poc", func() {
 			ctx := context.Background()
 
 			serviceName := NextSpecResourceName()
-
-			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
-			By("installing broker cert")
-			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sharedOperandCertName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			By("installing prometheus cert")
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			brokerImage := version.LatestKubeImage
 			crd := broker.BrokerService{
@@ -730,19 +619,6 @@ var _ = Describe("broker-service-poc", func() {
 				},
 			}
 
-			appCertName := app.Name + common.AppCertSecretSuffix
-			By("installing app client cert")
-			InstallCert(appCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = appCertName
-				candidate.Spec.CommonName = app.Name
-				candidate.Spec.Subject.Organizations = nil
-				candidate.Spec.Subject.OrganizationalUnits = []string{defaultNamespace}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			By("Deploying the App " + app.ObjectMeta.Name)
 			Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
@@ -808,127 +684,43 @@ var _ = Describe("broker-service-poc", func() {
 			serverName := common.OrdinalFQDNS(serviceName, defaultNamespace, 0)
 
 			Eventually(func(g Gomega) {
-				transport := http.DefaultTransport.(*http.Transport).Clone()
-				httpClient := http.Client{
-					Transport: transport,
-					Timeout:   time.Second * 5,
-				}
+				bodyStr := scrapeMetrics(g, serviceName, serverName, defaultNamespace)
 
-				httpClientTransport := httpClient.Transport.(*http.Transport)
-				httpClientTransport.TLSClientConfig = &tls.Config{
-					ServerName:         serverName,
-					InsecureSkipVerify: false,
-				}
-				httpClientTransport.TLSClientConfig.GetClientCertificate =
-					func(cri *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-						return common.GetOperatorClientCertificate(k8sClient, cri)
-					}
+				g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.ONE"`), "should have MessageCount for METRICS.QUEUE.ONE")
+				g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.TWO"`), "should have MessageCount for METRICS.QUEUE.TWO")
+				g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.ONE"`), "should have ConsumerCount for METRICS.QUEUE.ONE")
+				g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.TWO"`), "should have ConsumerCount for METRICS.QUEUE.TWO")
+				g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.CONSUMER"`), "should have MessageCount for consumer queue")
+				g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.CONSUMER"`), "should have ConsumerCount for consumer queue")
 
-				if rootCas, err := common.GetRootCAs(k8sClient); err == nil {
-					httpClientTransport.TLSClientConfig.RootCAs = rootCas
-				}
-
-				resp, err := httpClient.Get("https://" + serverName + ":8888/metrics")
-				g.Expect(err).Should(Succeed())
-
-				if resp != nil {
-					fmt.Printf("Prometheus metrics scrape: status=%d\n", resp.StatusCode)
-					g.Expect(resp.StatusCode).Should(Equal(200))
-
-					defer resp.Body.Close()
-					body, err := io.ReadAll(resp.Body)
-					g.Expect(err).Should(Succeed())
-
-					bodyStr := string(body)
-					if verbose {
-						fmt.Printf("Metrics response (first 20000 chars):\n%s\n", bodyStr[:min(20000, len(bodyStr))])
-					}
-
-					// Verify queue-level metrics for app queues are present
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.ONE"`), "should have MessageCount for METRICS.QUEUE.ONE")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.TWO"`), "should have MessageCount for METRICS.QUEUE.TWO")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.ONE"`), "should have ConsumerCount for METRICS.QUEUE.ONE")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.TWO"`), "should have ConsumerCount for METRICS.QUEUE.TWO")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.CONSUMER"`), "should have MessageCount for consumer queue")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.CONSUMER"`), "should have ConsumerCount for consumer queue")
-
-					// Producer-only queue metrics
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.PRODUCER\.ONLY"`), "should have MessageCount for producer-only queue")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.PRODUCER\.ONLY"`), "should have ConsumerCount for producer-only queue")
-				}
-
+				g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.PRODUCER\.ONLY"`), "should have MessageCount for producer-only queue")
+				g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.PRODUCER\.ONLY"`), "should have ConsumerCount for producer-only queue")
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("scraping prometheus metrics with app client cert and verifying access")
+			By("scraping prometheus metrics with per-app metrics cert")
 			Eventually(func(g Gomega) {
-				transport := http.DefaultTransport.(*http.Transport).Clone()
-				httpClient := http.Client{
-					Transport: transport,
-					Timeout:   time.Second * 5,
-				}
+				bodyStr := scrapeMetricsWithAppCert(g, serviceName, serverName, defaultNamespace, appName)
 
-				httpClientTransport := httpClient.Transport.(*http.Transport)
-				httpClientTransport.TLSClientConfig = &tls.Config{
-					ServerName:         serverName,
-					InsecureSkipVerify: false,
-				}
-
-				// Get app client certificate from secret
-				appCertSecret := &corev1.Secret{}
-				appCertSecretKey := types.NamespacedName{Name: appCertName, Namespace: defaultNamespace}
-				g.Expect(k8sClient.Get(ctx, appCertSecretKey, appCertSecret)).Should(Succeed())
-
-				certPEM := appCertSecret.Data["tls.crt"]
-				keyPEM := appCertSecret.Data["tls.key"]
-				g.Expect(certPEM).ShouldNot(BeEmpty())
-				g.Expect(keyPEM).ShouldNot(BeEmpty())
-
-				cert, err := tls.X509KeyPair(certPEM, keyPEM)
-				g.Expect(err).Should(Succeed())
-
-				httpClientTransport.TLSClientConfig.Certificates = []tls.Certificate{cert}
-
-				if rootCas, err := common.GetRootCAs(k8sClient); err == nil {
-					httpClientTransport.TLSClientConfig.RootCAs = rootCas
-				}
-
-				resp, err := httpClient.Get("https://" + serverName + ":8888/metrics")
-				g.Expect(err).Should(Succeed())
-
-				if resp != nil {
-					fmt.Printf("Prometheus metrics scrape with app cert: status=%d\n", resp.StatusCode)
-					g.Expect(resp.StatusCode).Should(Equal(401))
-
-					// need to update the control plane cert users/roles -
-					// will avoid this by using ou's in generated control plane common.
-					// needs: https://issues.apache.org/jira/browse/ARTEMIS-5959
-					// then we can work the 200 ok
-					/*
-						defer resp.Body.Close()
-						body, err := io.ReadAll(resp.Body)
-						g.Expect(err).Should(Succeed())
-
-						bodyStr := string(body)
-						if verbose {
-							fmt.Printf("Metrics response with app cert (first 20000 chars):\n%s\n", bodyStr[:min(20000, len(bodyStr))])
-						}
-
-						// Verify queue-level metrics for app queues are present with app cert too
-						g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.ONE"`), "should have MessageCount for METRICS.QUEUE.ONE")
-						g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.ONE"`), "should have ConsumerCount for METRICS.QUEUE.ONE")
-					*/
-				}
-
+				g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.ONE"`), "should have MessageCount for METRICS.QUEUE.ONE")
+				g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.ONE"`), "should have ConsumerCount for METRICS.QUEUE.ONE")
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("tidy up")
+			By("tidy up app and waiting for finalizer")
 			cascade_foreground_policy := metav1.DeletePropagationForeground
 			Expect(k8sClient.Delete(ctx, createdApp, &client.DeleteOptions{PropagationPolicy: &cascade_foreground_policy})).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, createdCrd, &client.DeleteOptions{PropagationPolicy: &cascade_foreground_policy})).Should(Succeed())
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{
+					Name: createdApp.Name, Namespace: createdApp.Namespace,
+				}, &broker.BrokerApp{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
 
-			UninstallCert(appCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			By("tidy up service and waiting for finalizer")
+			Expect(k8sClient.Delete(ctx, createdCrd, &client.DeleteOptions{PropagationPolicy: &cascade_foreground_policy})).Should(Succeed())
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{
+					Name: createdCrd.Name, Namespace: createdCrd.Namespace,
+				}, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
 		})
 	})
 

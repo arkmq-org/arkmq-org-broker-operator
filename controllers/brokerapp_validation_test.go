@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -22,6 +23,7 @@ func TestValidation_ConsumerOf_EmptySubscriptionsArray(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "invalid-app"
@@ -79,6 +81,7 @@ func TestValidation_ProducerOf_NonEmptySubscriptionsArray(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "invalid-producer"
@@ -135,6 +138,7 @@ func TestValidation_QueueName_FQQN(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "invalid-queue-name"
@@ -191,6 +195,7 @@ func TestValidation_QueueName_Empty(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "empty-queue-name"
@@ -245,6 +250,7 @@ func TestValidation_ProducerOf_FQQN(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = broker.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	ns := "default"
 	appName := "producer-fqqn"

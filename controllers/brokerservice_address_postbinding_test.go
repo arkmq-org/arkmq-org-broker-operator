@@ -20,8 +20,6 @@ import (
 	"os"
 	"time"
 
-	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -32,12 +30,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
-	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
 var _ = Describe("broker-service address post-binding validation", func() {
-
-	var installedCertManager bool = false
 
 	BeforeEach(func() {
 		BeforeEachSpec()
@@ -45,58 +40,9 @@ var _ = Describe("broker-service address post-binding validation", func() {
 		if verbose {
 			fmt.Println("Time with MicroSeconds: ", time.Now().Format("2006-01-02 15:04:05.000000"), " test:", CurrentSpecReport())
 		}
-
-		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			if !CertManagerInstalled() {
-				Expect(InstallCertManager()).To(Succeed())
-				installedCertManager = true
-			}
-
-			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
-
-			rootCert = InstallCert(rootCertName, rootCertNamespce, func(candidate *cmv1.Certificate) {
-				candidate.Spec.IsCA = true
-				candidate.Spec.CommonName = "artemis.root.ca"
-				candidate.Spec.SecretName = rootCertSecretName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: rootIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			caIssuer = InstallClusteredIssuer(caIssuerName, func(candidate *cmv1.ClusterIssuer) {
-				candidate.Spec.SelfSigned = nil
-				candidate.Spec.CA = &cmv1.CAIssuer{
-					SecretName: rootCertSecretName,
-				}
-			})
-			InstallCaBundle(common.DefaultOperatorCASecretName, rootCertSecretName, caPemTrustStoreName)
-
-			By("installing operator cert")
-			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-				candidate.Spec.CommonName = "activemq-artemis-operator"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-		}
 	})
 
 	AfterEach(func() {
-		if false && os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			UnInstallCaBundle(common.DefaultOperatorCASecretName)
-			UninstallClusteredIssuer(caIssuerName)
-			UninstallCert(rootCert.Name, rootCert.Namespace)
-			UninstallCert(common.DefaultOperatorCertSecretName, defaultNamespace)
-			UninstallClusteredIssuer(rootIssuerName)
-
-			if installedCertManager {
-				Expect(UninstallCertManager()).To(Succeed())
-				installedCertManager = false
-			}
-		}
 		AfterEachSpec()
 	})
 
@@ -110,29 +56,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 
 			ctx := context.Background()
 			serviceName := NextSpecResourceName()
-
-			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
-			By("installing broker cert")
-			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sharedOperandCertName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			By("installing prometheus cert")
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating BrokerService")
 			service := broker.BrokerService{
@@ -158,16 +81,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			ownerAppName := NextSpecResourceName()
-			ownerCertName := ownerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing owner app cert")
-			InstallCert(ownerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = ownerCertName
-				candidate.Spec.CommonName = ownerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating owner app that shares 'orders' address")
 			ownerApp := broker.BrokerApp{
@@ -203,16 +116,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
 
 			consumerAppName := NextSpecResourceName()
-			consumerCertName := consumerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing consumer app cert")
-			InstallCert(consumerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = consumerCertName
-				candidate.Spec.CommonName = consumerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating consumer app that references owner's 'orders'")
 			consumerApp := broker.BrokerApp{
@@ -313,10 +216,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
 		})
 
 		It("Scenario 2: should detect when sharedAddresses is modified to remove referenced address", func() {
@@ -327,29 +226,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 
 			ctx := context.Background()
 			serviceName := NextSpecResourceName()
-
-			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
-			By("installing broker cert")
-			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sharedOperandCertName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			By("installing prometheus cert")
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating BrokerService")
 			service := broker.BrokerService{
@@ -375,16 +251,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			ownerAppName := NextSpecResourceName() + "-owner"
-			ownerCertName := ownerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing owner app cert")
-			InstallCert(ownerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = ownerCertName
-				candidate.Spec.CommonName = ownerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating owner app that shares 'orders' and 'shipments'")
 			ownerApp := broker.BrokerApp{
@@ -424,16 +290,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
 
 			consumerAppName := NextSpecResourceName() + "-ref"
-			consumerCertName := consumerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing consumer app cert")
-			InstallCert(consumerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = consumerCertName
-				candidate.Spec.CommonName = consumerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating consumer app that references owner's 'orders'")
 			consumerApp := broker.BrokerApp{
@@ -528,10 +384,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
 		})
 
 		It("Scenario 3: should detect routing type conflict after binding", func() {
@@ -542,29 +394,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 
 			ctx := context.Background()
 			serviceName := NextSpecResourceName()
-
-			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
-			By("installing broker cert")
-			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sharedOperandCertName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			By("installing prometheus cert")
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating BrokerService")
 			service := broker.BrokerService{
@@ -590,16 +419,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			ownerAppName := NextSpecResourceName() + "-ow"
-			ownerCertName := ownerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing owner app cert")
-			InstallCert(ownerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = ownerCertName
-				candidate.Spec.CommonName = ownerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating owner app sharing 'events' as anycast (no subscriptions)")
 			ownerApp := broker.BrokerApp{
@@ -637,16 +456,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
 
 			consumerAppName := NextSpecResourceName() + "-ref"
-			consumerCertName := consumerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing consumer app cert")
-			InstallCert(consumerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = consumerCertName
-				candidate.Spec.CommonName = consumerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating consumer app that uses 'events' as anycast")
 			consumerApp := broker.BrokerApp{
@@ -831,10 +640,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
 		})
 
 		It("Scenario 4: should detect new address clash introduced post-binding", func() {
@@ -845,29 +650,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 
 			ctx := context.Background()
 			serviceName := NextSpecResourceName()
-
-			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
-			By("installing broker cert")
-			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sharedOperandCertName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			By("installing prometheus cert")
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating BrokerService")
 			service := broker.BrokerService{
@@ -893,16 +675,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			app1Name := NextSpecResourceName()
-			app1CertName := app1Name + "-" + common.DefaultOperandCertSecretName
-			By("installing app1 cert")
-			InstallCert(app1CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app1CertName
-				candidate.Spec.CommonName = app1Name
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating app1 with address 'orders'")
 			app1 := broker.BrokerApp{
@@ -940,16 +712,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Create(ctx, &app1)).Should(Succeed())
 
 			app2Name := NextSpecResourceName()
-			app2CertName := app2Name + "-" + common.DefaultOperandCertSecretName
-			By("installing app2 cert")
-			InstallCert(app2CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app2CertName
-				candidate.Spec.CommonName = app2Name
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating app2 with address 'shipments' (no clash yet)")
 			app2 := broker.BrokerApp{
@@ -1041,10 +803,6 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Delete(ctx, &app2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &app1)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(app2CertName, defaultNamespace)
-			UninstallCert(app1CertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
 		})
 	})
 })

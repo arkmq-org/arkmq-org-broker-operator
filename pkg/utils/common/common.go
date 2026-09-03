@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	osruntime "runtime"
@@ -773,6 +774,66 @@ func DetectOpenshiftWith(config *rest.Config) (bool, error) {
 	return *isOpenshift, nil
 }
 
+func DetectCertManagerWith(config *rest.Config) bool {
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
+	if err != nil {
+		ctrl.Log.V(1).Info("cert-manager detection: cannot create discovery client", "error", err)
+		return false
+	}
+	found, err := discovery.IsResourceEnabled(discoveryClient,
+		schema.GroupVersionResource{
+			Group:    "cert-manager.io",
+			Version:  "v1",
+			Resource: "certificates",
+		})
+	if err != nil {
+		ctrl.Log.V(1).Info("cert-manager detection: discovery failed", "error", err)
+		return false
+	}
+	ctrl.Log.Info("cert-manager CRDs detected", "available", found)
+	return found
+}
+
+var certManagerDegraded atomic.Bool
+
+// CertManagerDegraded returns true when cert-manager CRDs have been removed
+// from a cluster where they were present at operator startup.
+func CertManagerDegraded() bool {
+	return certManagerDegraded.Load()
+}
+
+// SetCertManagerDegraded sets the degraded state. Exported for testing.
+func SetCertManagerDegraded(v bool) {
+	certManagerDegraded.Store(v)
+}
+
+// CertManagerWatcher periodically checks whether cert-manager CRDs are still
+// available. It is intended to be registered as a manager.Runnable via
+// mgr.Add(). The watcher blocks until ctx is cancelled.
+func CertManagerWatcher(config *rest.Config) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				available := DetectCertManagerWith(config)
+				wasDegraded := certManagerDegraded.Load()
+				if !available && !wasDegraded {
+					ctrl.Log.Info("cert-manager CRDs are no longer available; marking degraded")
+					certManagerDegraded.Store(true)
+				} else if available && wasDegraded {
+					ctrl.Log.Info("cert-manager CRDs are available again; clearing degraded state")
+					certManagerDegraded.Store(false)
+				}
+			}
+		}
+	}
+}
+
 func GetOperandCertSecretName(cr *v1beta2.Broker, client rtclient.Client) string {
 
 	secret, _ := ResolveSecret(cr.Name, cr.Namespace, DefaultOperandCertSecretName, client)
@@ -800,6 +861,10 @@ func GetOperatorCertSecretName() string {
 
 func SetOperatorCertSecretName(name string) {
 	operatorCertSecretName = &name
+}
+
+func UnsetOperatorCertSecretName() {
+	operatorCertSecretName = nil
 }
 
 func GetOperatorCASecretName() string {
@@ -892,16 +957,18 @@ func GetOperatorCASecretKey(client rtclient.Client, bundleSecret *corev1.Secret)
 }
 
 func FindFirstDotPemKey(secret *corev1.Secret) (string, error) {
-	//extract the bundle target secret key that ends with .pem
-	//the bundle target secret could include keys for additional formats jks/pkcs12
 	for key := range secret.Data {
-		//the bundle target secret key must ends with .pem
 		if strings.HasSuffix(key, ".pem") {
 			return key, nil
 		}
 	}
+	for _, fallback := range []string{"ca.crt", "tls.crt"} {
+		if _, ok := secret.Data[fallback]; ok {
+			return fallback, nil
+		}
+	}
 
-	return "", fmt.Errorf("no keys with the suffix .pem found in the secret %s", secret.Name)
+	return "", fmt.Errorf("no CA key (.pem, ca.crt, or tls.crt) found in the secret %s", secret.Name)
 }
 
 func fromEnv(envVarName, defaultValue string) *string {
@@ -1037,6 +1104,10 @@ func GetNamespacedSecret(client rtclient.Client, secretName string, secretNamesp
 }
 
 var operatorHasCertAndTrustBundle *bool
+
+func ResetOperatorCertCache() {
+	operatorHasCertAndTrustBundle = nil
+}
 
 func OperatorHasCertAndTrustBundle(client rtclient.Client) bool {
 	if operatorHasCertAndTrustBundle == nil {

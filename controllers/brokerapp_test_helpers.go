@@ -3,6 +3,7 @@ package controllers
 import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -39,6 +40,7 @@ func NewTestEnvironment(namespace string, objects ...client.Object) *TestEnviron
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Add namespace object if not already included
 	hasNamespace := false
@@ -218,6 +220,11 @@ func (b *BrokerAppBuilder) WithServiceBinding(name, namespace, secret string, po
 	return b
 }
 
+func (b *BrokerAppBuilder) WithPhase(phase v1beta2.BrokerAppPhase) *BrokerAppBuilder {
+	b.app.Status.Phase = phase
+	return b
+}
+
 func (b *BrokerAppBuilder) WithCapabilities(capabilities ...v1beta2.AppCapabilityType) *BrokerAppBuilder {
 	b.app.Spec.Capabilities = capabilities
 	return b
@@ -302,6 +309,92 @@ func CreateSecret(name, namespace string) *corev1.Secret {
 		},
 		Data: make(map[string][]byte),
 	}
+}
+
+// FakeAppCertSecrets returns the TLS secrets that packAppCertData expects to
+// find in the service namespace when provisioning an app. Unit tests using a
+// fake client must include these objects for the app to be considered
+// provisioned.
+func FakeAppCertSecrets(appName, svcNamespace string) []client.Object {
+	return []client.Object{
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      appName + "-server-cert",
+				Namespace: svcNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("fake-server-cert"),
+				"tls.key": []byte("fake-server-key"),
+			},
+		},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      appName + "-ca-trust",
+				Namespace: svcNamespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("fake-ca-cert"),
+			},
+		},
+	}
+}
+
+// FakeLocalPKISecrets returns the two cert-manager-issued app-plane PKI secrets
+// that localPKIReady checks for in the app namespace. The ca-trust Secret is
+// omitted because it's built by the reconciler during sync, not by cert-manager.
+func FakeLocalPKISecrets(appName, namespace string) []client.Object {
+	return []client.Object{
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      appName + "-root-cert-secret",
+				Namespace: namespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("fake-root-ca"),
+				"tls.key": []byte("fake-root-key"),
+			},
+		},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      appName + "-app-cert",
+				Namespace: namespace,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("fake-app-cert"),
+				"tls.key": []byte("fake-app-key"),
+			},
+		},
+	}
+}
+
+// FakeProvisioningCertSecrets returns the provisioning-time cert-manager
+// Secrets that provisioningCertsReady checks for: server-cert (in appNs)
+// and metrics-cert (in svcNs). For same-namespace apps, pass the same ns
+// for both parameters.
+func FakeProvisioningCertSecrets(appName, appNs, svcNs string) []client.Object {
+	objs := []client.Object{
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      appName + "-server-cert",
+				Namespace: appNs,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("fake-server-cert"),
+				"tls.key": []byte("fake-server-key"),
+			},
+		},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      appName + "-metrics-cert",
+				Namespace: svcNs,
+			},
+			Data: map[string][]byte{
+				"tls.crt": []byte("fake-metrics-cert"),
+				"tls.key": []byte("fake-metrics-key"),
+			},
+		},
+	}
+	return objs
 }
 
 // BrokerServiceInstanceReconcilerForTest creates a reconciler for testing processCapabilities

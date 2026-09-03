@@ -22,6 +22,7 @@ import (
 
 	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
 	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
@@ -367,6 +368,7 @@ func TestReconcileRequeuesOnNotReady(t *testing.T) {
 	s := runtime.NewScheme()
 	_ = brokerv1beta1.AddToScheme(s)
 	_ = corev1.AddToScheme(s)
+	_ = cmv1.AddToScheme(s)
 	_ = appsv1.AddToScheme(s)
 
 	crd := &brokerv1beta1.ActiveMQArtemis{

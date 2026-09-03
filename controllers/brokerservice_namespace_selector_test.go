@@ -20,8 +20,6 @@ import (
 	"os"
 	"time"
 
-	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -33,15 +31,11 @@ import (
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/appselector"
-	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
 var _ = Describe("broker-service namespace-based CEL selection", func() {
 
-	var installedCertManager bool = false
-
 	BeforeEach(func() {
-		// Enable namespace permission for tests
 		appselector.SetNamespacePermission(true)
 
 		BeforeEachSpec()
@@ -49,60 +43,10 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 		if verbose {
 			fmt.Println("Time with MicroSeconds: ", time.Now().Format("2006-01-02 15:04:05.000000"), " test:", CurrentSpecReport())
 		}
-
-		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			if !CertManagerInstalled() {
-				Expect(InstallCertManager()).To(Succeed())
-				installedCertManager = true
-			}
-
-			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
-
-			rootCert = InstallCert(rootCertName, rootCertNamespce, func(candidate *cmv1.Certificate) {
-				candidate.Spec.IsCA = true
-				candidate.Spec.CommonName = "artemis.root.ca"
-				candidate.Spec.SecretName = rootCertSecretName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: rootIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			caIssuer = InstallClusteredIssuer(caIssuerName, func(candidate *cmv1.ClusterIssuer) {
-				candidate.Spec.SelfSigned = nil
-				candidate.Spec.CA = &cmv1.CAIssuer{
-					SecretName: rootCertSecretName,
-				}
-			})
-			InstallCaBundle(common.DefaultOperatorCASecretName, rootCertSecretName, caPemTrustStoreName)
-
-			By("installing operator cert")
-			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-				candidate.Spec.CommonName = "arkmq-org-broker-operator"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-		}
 	})
 
 	AfterEach(func() {
 		appselector.SetNamespacePermission(false)
-
-		if false && os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			UnInstallCaBundle(common.DefaultOperatorCASecretName)
-			UninstallClusteredIssuer(caIssuerName)
-			UninstallCert(rootCert.Name, rootCert.Namespace)
-			UninstallCert(common.DefaultOperatorCertSecretName, defaultNamespace)
-			UninstallClusteredIssuer(rootIssuerName)
-
-			if installedCertManager {
-				Expect(UninstallCertManager()).To(Succeed())
-				installedCertManager = false
-			}
-		}
 		AfterEachSpec()
 	})
 
@@ -165,43 +109,6 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 			defer func() {
 				_ = k8sClient.Delete(ctx, qaNs)
 			}()
-
-			// Install certificates for apps in each namespace
-			for _, ns := range []string{prodNamespace, devNamespace, qaNamespace} {
-				appCertName := "app-cert"
-				By(fmt.Sprintf("installing app cert in namespace %s", ns))
-				InstallCert(appCertName, ns, func(candidate *cmv1.Certificate) {
-					candidate.Spec.SecretName = appCertName
-					candidate.Spec.CommonName = fmt.Sprintf("app-%s", ns)
-					candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-						Name: caIssuer.Name,
-						Kind: "ClusterIssuer",
-					}
-				})
-			}
-
-			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
-			By("installing broker cert")
-			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sharedOperandCertName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			By("installing prometheus cert")
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating BrokerService with namespace CEL selector - production only")
 			crd := broker.BrokerService{
@@ -444,40 +351,6 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 			defer func() {
 				_ = k8sClient.Delete(ctx, ordersNs)
 			}()
-
-			// Install certificates
-			for _, ns := range []string{paymentsNamespace, ordersNamespace} {
-				appCertName := "app-cert"
-				InstallCert(appCertName, ns, func(candidate *cmv1.Certificate) {
-					candidate.Spec.SecretName = appCertName
-					candidate.Spec.CommonName = fmt.Sprintf("app-%s", ns)
-					candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-						Name: caIssuer.Name,
-						Kind: "ClusterIssuer",
-					}
-				})
-			}
-
-			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
-			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = sharedOperandCertName
-				candidate.Spec.CommonName = serviceName
-				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
-			prometheusCertName := common.DefaultPrometheusCertSecretName
-			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = prometheusCertName
-				candidate.Spec.CommonName = "prometheus"
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating BrokerService for premium tier teams only")
 			crd := broker.BrokerService{

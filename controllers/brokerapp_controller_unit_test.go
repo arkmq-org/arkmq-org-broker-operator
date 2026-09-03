@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,7 +46,10 @@ func TestSimpleReconcile(t *testing.T) {
 	svc := NewBrokerService(svcName, ns).Build()
 	app := NewBrokerApp(appName, ns).Build()
 
-	env := NewTestEnvironment(ns, svc, app)
+	objs := []client.Object{svc, app}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
+	objs = append(objs, FakeProvisioningCertSecrets(appName, ns, ns)...)
+	env := NewTestEnvironment(ns, objs...)
 	r := env.Reconciler
 	cl := env.Client
 
@@ -64,6 +68,9 @@ func TestSimpleReconcile(t *testing.T) {
 	assert.Equal(t, svcName, updatedApp.Status.Service.Name)
 	assert.Equal(t, ns, updatedApp.Status.Service.Namespace)
 	assert.NotEmpty(t, updatedApp.Status.Service.Secret)
+
+	// Verify Phase (same-ns, ensureAppCert succeeds → Provisioning)
+	assert.Equal(t, v1beta2.BrokerAppPhaseProvisioning, updatedApp.Status.Phase)
 
 	// Verify Status
 	assert.False(t, meta.IsStatusConditionTrue(updatedApp.Status.Conditions, v1beta2.DeployedConditionType))
@@ -92,6 +99,8 @@ func TestSimpleReconcile(t *testing.T) {
 	assert.True(t, meta.IsStatusConditionTrue(updatedApp.Status.Conditions, v1beta2.ReadyConditionType))
 	assert.NotNil(t, updatedApp.Status.Service)
 
+	// Verify Phase progressed to Provisioned
+	assert.Equal(t, v1beta2.BrokerAppPhaseProvisioned, updatedApp.Status.Phase)
 }
 
 func TestReconcileNoMatchingService(t *testing.T) {
@@ -104,7 +113,9 @@ func TestReconcileNoMatchingService(t *testing.T) {
 		}).
 		Build()
 
-	env := NewTestEnvironment(ns, app)
+	objs := []client.Object{app}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
+	env := NewTestEnvironment(ns, objs...)
 	r := env.Reconciler
 	cl := env.Client
 
@@ -144,7 +155,9 @@ func TestReconcileValidConditionTransition(t *testing.T) {
 		}).
 		Build()
 
-	env := NewTestEnvironment(ns, svc, app)
+	objs := []client.Object{svc, app}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
+	env := NewTestEnvironment(ns, objs...)
 	r := env.Reconciler
 	cl := env.Client
 
@@ -201,6 +214,7 @@ func TestReconcileStatusUpdateFailure(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Data
 	ns := "default"
@@ -252,9 +266,12 @@ func TestReconcileStatusUpdateFailure(t *testing.T) {
 		},
 	}
 
+	objs := []client.Object{namespace, svc, app}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
+
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(namespace, svc, app).
+		WithObjects(objs...).
 		WithStatusSubresource(app).
 		WithInterceptorFuncs(interceptorFuncs)).
 		Build()
@@ -311,7 +328,10 @@ func TestReconcileDeployedConditionFromBrokerServiceStatus(t *testing.T) {
 	svc := NewBrokerService(svcName, ns).Build()
 	app := NewBrokerApp(appName, ns).Build()
 
-	env := NewTestEnvironment(ns, svc, app)
+	objs := []client.Object{svc, app}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
+	objs = append(objs, FakeProvisioningCertSecrets(appName, ns, ns)...)
+	env := NewTestEnvironment(ns, objs...)
 	r := env.Reconciler
 	cl := env.Client
 
@@ -330,6 +350,9 @@ func TestReconcileDeployedConditionFromBrokerServiceStatus(t *testing.T) {
 	assert.NotNil(t, deployedCond)
 	assert.Equal(t, v1.ConditionFalse, deployedCond.Status)
 	assert.Equal(t, v1beta2.DeployedConditionProvisioningPendingReason, deployedCond.Reason)
+
+	// Verify Phase is Provisioning (same-ns, certs succeed)
+	assert.Equal(t, v1beta2.BrokerAppPhaseProvisioning, updatedApp.Status.Phase)
 
 	// 2. Update BrokerService status to include the app
 	updatedSvc := &v1beta2.BrokerService{}
@@ -353,6 +376,9 @@ func TestReconcileDeployedConditionFromBrokerServiceStatus(t *testing.T) {
 	assert.NotNil(t, deployedCond)
 	assert.Equal(t, v1.ConditionTrue, deployedCond.Status)
 	assert.Equal(t, v1beta2.DeployedConditionProvisionedReason, deployedCond.Reason)
+
+	// Verify Phase is Provisioned
+	assert.Equal(t, v1beta2.BrokerAppPhaseProvisioned, updatedApp.Status.Phase)
 }
 
 func TestReconcileIdempotentStatus(t *testing.T) {
@@ -360,6 +386,7 @@ func TestReconcileIdempotentStatus(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = v1beta2.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
+	_ = cmv1.AddToScheme(scheme)
 
 	// Data
 	ns := "default"
@@ -405,7 +432,9 @@ func TestReconcileIdempotentStatus(t *testing.T) {
 	}
 
 	// Setup fake client for first reconcile
-	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().WithScheme(scheme).WithObjects(namespace, svc, app).WithStatusSubresource(app, svc)).Build()
+	objs := []client.Object{namespace, svc, app}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).WithStatusSubresource(app, svc)).Build()
 
 	// Create Reconciler
 	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
@@ -432,9 +461,11 @@ func TestReconcileIdempotentStatus(t *testing.T) {
 		},
 	}
 
+	objs2 := []client.Object{namespace, svc, updatedApp}
+	objs2 = append(objs2, FakeLocalPKISecrets(appName, ns)...)
 	cl2 := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(namespace, svc, updatedApp).
+		WithObjects(objs2...).
 		WithStatusSubresource(updatedApp, svc).
 		WithInterceptorFuncs(interceptorFuncs)).
 		Build()
@@ -491,7 +522,9 @@ func TestReconcileInvalidSelectorSyntax(t *testing.T) {
 		}).
 		Build()
 
-	env := NewTestEnvironment(ns, app)
+	objs := []client.Object{app}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
+	env := NewTestEnvironment(ns, objs...)
 	r := env.Reconciler
 	cl := env.Client
 
@@ -524,7 +557,9 @@ func TestReconcileMatchedServiceNotFound(t *testing.T) {
 		WithServiceBinding(svcName, ns, "binding-secret", 61616).
 		Build()
 
-	env := NewTestEnvironment(ns, svc, app)
+	objs := []client.Object{svc, app}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
+	env := NewTestEnvironment(ns, objs...)
 	r := env.Reconciler
 	cl := env.Client
 
@@ -584,7 +619,9 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 			WithConsumerOf(NewAddressRef("events").WithAppRef(ns, "owner-app").Build()).
 			Build()
 
-		env := NewTestEnvironment(ns, svc, ownerApp, consumerApp)
+		objs := []client.Object{svc, ownerApp, consumerApp}
+		objs = append(objs, FakeLocalPKISecrets("consumer-app", ns)...)
+		env := NewTestEnvironment(ns, objs...)
 		r := env.Reconciler
 		cl := env.Client
 
@@ -625,7 +662,9 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 				Build()).
 			Build()
 
-		env := NewTestEnvironment(ns, svc, ownerApp, subscriberApp)
+		objs := []client.Object{svc, ownerApp, subscriberApp}
+		objs = append(objs, FakeLocalPKISecrets("subscriber-app", ns)...)
+		env := NewTestEnvironment(ns, objs...)
 		r := env.Reconciler
 		cl := env.Client
 
@@ -665,7 +704,9 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 				Build()).
 			Build()
 
-		env := NewTestEnvironment(ns, svc, ownerApp, subscriberApp)
+		objs := []client.Object{svc, ownerApp, subscriberApp}
+		objs = append(objs, FakeLocalPKISecrets("subscriber-app-2", ns)...)
+		env := NewTestEnvironment(ns, objs...)
 		r := env.Reconciler
 		cl := env.Client
 
@@ -701,7 +742,9 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 			WithConsumerOf(NewAddressRef("queue").WithAppRef(ns, "owner-app-4").Build()).
 			Build()
 
-		env := NewTestEnvironment(ns, svc, ownerApp, consumerApp)
+		objs := []client.Object{svc, ownerApp, consumerApp}
+		objs = append(objs, FakeLocalPKISecrets("consumer-app-2", ns)...)
+		env := NewTestEnvironment(ns, objs...)
 		r := env.Reconciler
 		cl := env.Client
 
@@ -719,4 +762,120 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 		assert.NotNil(t, validCondition)
 		assert.Equal(t, v1.ConditionTrue, validCondition.Status)
 	})
+}
+
+// --- Phase state machine tests ---
+
+func TestPhaseCreatedWhenPKINotReady(t *testing.T) {
+	ns := "default"
+	svcName := "my-broker-service"
+	appName := "my-app"
+
+	svc := NewBrokerService(svcName, ns).Build()
+	app := NewBrokerApp(appName, ns).Build()
+
+	// No FakeLocalPKISecrets — cert-manager hasn't issued secrets yet
+	env := NewTestEnvironment(ns, svc, app)
+	r := env.Reconciler
+	cl := env.Client
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+	_, err := r.Reconcile(context.TODO(), req)
+	assert.NoError(t, err)
+
+	updatedApp := &v1beta2.BrokerApp{}
+	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+	assert.NoError(t, err)
+
+	// Phase should be Created — waiting for cert-manager
+	assert.Equal(t, v1beta2.BrokerAppPhaseCreated, updatedApp.Status.Phase)
+
+	// Service binding should NOT be set (pipeline stopped early)
+	assert.Nil(t, updatedApp.Status.Service)
+}
+
+func TestPhaseCertsIssuedWhenServiceNotAvailable(t *testing.T) {
+	ns := "default"
+	appName := "my-app"
+
+	app := NewBrokerApp(appName, ns).
+		WithServiceSelector(&v1.LabelSelector{
+			MatchLabels: map[string]string{"type": "non-existent"},
+		}).
+		Build()
+
+	objs := []client.Object{app}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
+	env := NewTestEnvironment(ns, objs...)
+	r := env.Reconciler
+	cl := env.Client
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+	_, err := r.Reconcile(context.TODO(), req)
+	// TransientError (no matching service) triggers requeue
+	assert.Error(t, err)
+
+	updatedApp := &v1beta2.BrokerApp{}
+	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+	assert.NoError(t, err)
+
+	// Phase should be CertsIssued — local PKI ready but no service found
+	assert.Equal(t, v1beta2.BrokerAppPhaseCertsIssued, updatedApp.Status.Phase)
+}
+
+func TestPhaseMatchedWhenProvisioningCertsNotReady(t *testing.T) {
+	ns := "default"
+	svcName := "my-broker-service"
+	appName := "my-app"
+
+	svc := NewBrokerService(svcName, ns).Build()
+	app := NewBrokerApp(appName, ns).Build()
+
+	// Local PKI present, but NO provisioning cert secrets (server-cert, metrics-cert)
+	objs := []client.Object{svc, app}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
+	env := NewTestEnvironment(ns, objs...)
+	r := env.Reconciler
+	cl := env.Client
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+	_, err := r.Reconcile(context.TODO(), req)
+	assert.NoError(t, err)
+
+	updatedApp := &v1beta2.BrokerApp{}
+	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+	assert.NoError(t, err)
+
+	// Service resolved, certs created but not yet issued → Phase stays Matched
+	assert.Equal(t, v1beta2.BrokerAppPhaseMatched, updatedApp.Status.Phase)
+	assert.NotNil(t, updatedApp.Status.Service, "Service binding should be set")
+}
+
+func TestPhaseProvisioningInSameNamespace(t *testing.T) {
+	ns := "default"
+	svcName := "my-broker-service"
+	appName := "my-app"
+
+	svc := NewBrokerService(svcName, ns).Build()
+	app := NewBrokerApp(appName, ns).Build()
+
+	objs := []client.Object{svc, app}
+	objs = append(objs, FakeLocalPKISecrets(appName, ns)...)
+	objs = append(objs, FakeProvisioningCertSecrets(appName, ns, ns)...)
+	env := NewTestEnvironment(ns, objs...)
+	r := env.Reconciler
+	cl := env.Client
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+	_, err := r.Reconcile(context.TODO(), req)
+	assert.NoError(t, err)
+
+	updatedApp := &v1beta2.BrokerApp{}
+	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+	assert.NoError(t, err)
+
+	// Same-ns: ensureAppCert succeeds → Phase = Provisioning
+	assert.Equal(t, v1beta2.BrokerAppPhaseProvisioning, updatedApp.Status.Phase)
+	assert.NotNil(t, updatedApp.Status.Service)
+	assert.Equal(t, svcName, updatedApp.Status.Service.Name)
 }

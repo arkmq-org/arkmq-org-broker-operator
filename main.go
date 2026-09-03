@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"fmt"
@@ -49,6 +50,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	routev1 "github.com/openshift/api/route/v1"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/log"
@@ -102,6 +104,7 @@ func init() {
 	utilruntime.Must(brokerv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(brokerv1beta1.AddToScheme(scheme))
 	utilruntime.Must(brokerv1beta2.AddToScheme(scheme))
+	utilruntime.Must(cmv1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -280,6 +283,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	if !common.DetectCertManagerWith(cfg) {
+		setupLog.Error(nil, "cert-manager CRDs not found; "+
+			"cert-manager is a required dependency for the broker operator")
+		os.Exit(1)
+	}
+
 	brokerReconciler := controllers.NewActiveMQArtemisReconciler(
 		mgr,
 		ctrl.Log.WithName("ActiveMQArtemisReconciler"),
@@ -365,6 +374,11 @@ func main() {
 	}
 
 	//+kubebuilder:scaffold:builder
+
+	if err := mgr.Add(manager.RunnableFunc(common.CertManagerWatcher(cfg))); err != nil {
+		setupLog.Error(err, "unable to add cert-manager watcher")
+		os.Exit(1)
+	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")

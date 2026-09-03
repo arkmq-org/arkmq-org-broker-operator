@@ -53,6 +53,12 @@ type BrokerServiceSpec struct {
 	//+optional
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="App Selector Expression"
 	AppSelectorExpression string `json:"appSelectorExpression,omitempty"`
+
+	// PKI configures the chain-of-trust certificate properties.
+	// When omitted, sensible defaults are used (10-year CA, 90-day leaf certs).
+	//+optional
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="PKI Configuration"
+	PKI *PKISpec `json:"pki,omitempty"`
 }
 
 // RejectedApp represents a BrokerApp that was rejected during provisioning validation
