@@ -79,40 +79,40 @@ jobs:
           NEWLINE=$(echo 'XG4K' | base64 -d)
           VERSION_FILE='version/version.go'
           RELATED_IMAGES_FILE='config/manager/activemq_artemis_manager_related_images.yaml'
-          for ACTIVEMQ_ARTEMIS_BROKER_TAG in $(skopeo list-tags docker://quay.io/arkmq-org/activemq-artemis-broker-kubernetes | jq -r '[.Tags[] | select(. | startswith("artemis."))] | .[-5:] | .[]'); do
-            echo "ACTIVEMQ_ARTEMIS_BROKER_TAG: ${ACTIVEMQ_ARTEMIS_BROKER_TAG}"
-            ACTIVEMQ_ARTEMIS_VERSION="${ACTIVEMQ_ARTEMIS_BROKER_TAG/artemis./}"
-            ACTIVEMQ_ARTEMIS_COMPACT_VERSION=${ACTIVEMQ_ARTEMIS_VERSION//./}
-            ACTIVEMQ_ARTEMIS_BROKER_INIT_DIGEST="$(skopeo inspect docker://quay.io/arkmq-org/activemq-artemis-broker-init:${ACTIVEMQ_ARTEMIS_BROKER_TAG} | jq -r '.Digest')"
-            ACTIVEMQ_ARTEMIS_BROKER_KUBERNETES_DIGEST="$(skopeo inspect docker://quay.io/arkmq-org/activemq-artemis-broker-kubernetes:${ACTIVEMQ_ARTEMIS_BROKER_TAG} | jq -r '.Digest')"
-            if ! grep "${ACTIVEMQ_ARTEMIS_VERSION}" ${VERSION_FILE}; then
-                YACFG_BROKER_PROFILE="${ACTIVEMQ_ARTEMIS_VERSION}"
-                ACTIVEMQ_ARTEMIS_BROKER_INIT_VERSION="$(skopeo inspect docker://quay.io/arkmq-org/activemq-artemis-broker-init@${ACTIVEMQ_ARTEMIS_BROKER_INIT_DIGEST} | jq -r '.Labels.version')"
-                INIT_IMAGE_TAG="$(git ls-remote --tags https://github.com/arkmq-org/activemq-artemis-broker-init-image.git | grep -Po "(?<=refs/tags/)${ACTIVEMQ_ARTEMIS_BROKER_INIT_VERSION}[^^]*$" | head -1)"
-                INIT_IMAGE_DOCKERFILE="$(curl -L https://raw.githubusercontent.com/arkmq-org/activemq-artemis-broker-init-image/${INIT_IMAGE_TAG}/Dockerfile)"
+          for ARTEMIS_TAG in $(skopeo list-tags docker://quay.io/arkmq-org/arkmq-org-broker-kubernetes | jq -r '[.Tags[] | select(. | startswith("artemis."))] | .[-5:] | .[]'); do
+            echo "ARTEMIS_TAG: ${ARTEMIS_TAG}"
+            ARTEMIS_VERSION="${ARTEMIS_TAG/artemis./}"
+            ARTEMIS_COMPACT_VERSION=${ARTEMIS_VERSION//./}
+            ARTEMIS_INIT_DIGEST="$(skopeo inspect docker://quay.io/arkmq-org/arkmq-org-broker-init:${ARTEMIS_TAG} | jq -r '.Digest')"
+            ARTEMIS_KUBERNETES_DIGEST="$(skopeo inspect docker://quay.io/arkmq-org/arkmq-org-broker-kubernetes:${ARTEMIS_TAG} | jq -r '.Digest')"
+            if ! grep "${ARTEMIS_VERSION}" ${VERSION_FILE}; then
+                YACFG_BROKER_PROFILE="${ARTEMIS_VERSION}"
+                ARTEMIS_INIT_VERSION="$(skopeo inspect docker://quay.io/arkmq-org/arkmq-org-broker-init@${ARTEMIS_INIT_DIGEST} | jq -r '.Labels.version')"
+                INIT_IMAGE_TAG="$(git ls-remote --tags https://github.com/arkmq-org/arkmq-org-broker-init-image.git | grep -Po "(?<=refs/tags/)${ARTEMIS_INIT_VERSION}[^^]*$" | head -1)"
+                INIT_IMAGE_DOCKERFILE="$(curl -L https://raw.githubusercontent.com/arkmq-org/arkmq-org-broker-init-image/${INIT_IMAGE_TAG}/Dockerfile)"
                 REMOTE_SOURCE_REF="$(echo "${INIT_IMAGE_DOCKERFILE}" | grep -Po '(?<=REMOTE_SOURCE_REF=).*')"
                 REMOTE_SOURCE_REP="$(echo "${INIT_IMAGE_DOCKERFILE}" | grep -Po '(?<=REMOTE_SOURCE_REP=https://github.com/).*(?=.git)')"
                 YACFG_BROKER_PROFILES="$(curl -L https://raw.githubusercontent.com/${REMOTE_SOURCE_REP}/${REMOTE_SOURCE_REF}/setup.py | grep -Po '(?<=artemis/)[0-9.]+' | sort -rV | uniq)"
-                if ! echo "${YACFG_BROKER_PROFILES}" | grep "^${ACTIVEMQ_ARTEMIS_VERSION}$"; then
+                if ! echo "${YACFG_BROKER_PROFILES}" | grep "^${ARTEMIS_VERSION}$"; then
                     YACFG_BROKER_PROFILE="$(echo "${YACFG_BROKER_PROFILES}" | head -n1)"
                 fi
-                sed -i "/LatestVersion / s/${QUOTE_CHAR}.*${QUOTE_CHAR}/${QUOTE_CHAR}${ACTIVEMQ_ARTEMIS_VERSION}${QUOTE_CHAR}/" ${VERSION_FILE}
-                sed -i "/CompactLatestVersion / s/${QUOTE_CHAR}.*${QUOTE_CHAR}/${QUOTE_CHAR}${ACTIVEMQ_ARTEMIS_COMPACT_VERSION}${QUOTE_CHAR}/" ${VERSION_FILE}
-                sed -i "/var FullVersionFromCompactVersion/,/}/ s/}/	${QUOTE_CHAR}${ACTIVEMQ_ARTEMIS_COMPACT_VERSION}${QUOTE_CHAR}: ${QUOTE_CHAR}${ACTIVEMQ_ARTEMIS_VERSION}${QUOTE_CHAR},${NEWLINE}}/" ${VERSION_FILE}
-                sed -i "/var YacfgProfileVersionFromFullVersion/,/}/ s/}/	${QUOTE_CHAR}${ACTIVEMQ_ARTEMIS_VERSION}${QUOTE_CHAR}: ${QUOTE_CHAR}${YACFG_BROKER_PROFILE}${QUOTE_CHAR},${NEWLINE}}/" ${VERSION_FILE}
-                sed -i "/var SupportedActiveMQArtemisVersions/,/}/ s/}/	${QUOTE_CHAR}${ACTIVEMQ_ARTEMIS_VERSION}${QUOTE_CHAR},${NEWLINE}}/" ${VERSION_FILE}
+                sed -i "/LatestVersion / s/${QUOTE_CHAR}.*${QUOTE_CHAR}/${QUOTE_CHAR}${ARTEMIS_VERSION}${QUOTE_CHAR}/" ${VERSION_FILE}
+                sed -i "/CompactLatestVersion / s/${QUOTE_CHAR}.*${QUOTE_CHAR}/${QUOTE_CHAR}${ARTEMIS_COMPACT_VERSION}${QUOTE_CHAR}/" ${VERSION_FILE}
+                sed -i "/var FullVersionFromCompactVersion/,/}/ s/}/	${QUOTE_CHAR}${ARTEMIS_COMPACT_VERSION}${QUOTE_CHAR}: ${QUOTE_CHAR}${ARTEMIS_VERSION}${QUOTE_CHAR},${NEWLINE}}/" ${VERSION_FILE}
+                sed -i "/var YacfgProfileVersionFromFullVersion/,/}/ s/}/	${QUOTE_CHAR}${ARTEMIS_VERSION}${QUOTE_CHAR}: ${QUOTE_CHAR}${YACFG_BROKER_PROFILE}${QUOTE_CHAR},${NEWLINE}}/" ${VERSION_FILE}
+                sed -i "/var SupportedActiveMQArtemisVersions/,/}/ s/}/	${QUOTE_CHAR}${ARTEMIS_VERSION}${QUOTE_CHAR},${NEWLINE}}/" ${VERSION_FILE}
                 echo "" >> ${RELATED_IMAGES_FILE}
-                echo "        # ${ACTIVEMQ_ARTEMIS_VERSION}" >> ${RELATED_IMAGES_FILE}
-                echo "        - name: RELATED_IMAGE_ActiveMQ_Artemis_Broker_Init_${ACTIVEMQ_ARTEMIS_COMPACT_VERSION}" >> ${RELATED_IMAGES_FILE}
-                echo "          value: quay.io/arkmq-org/activemq-artemis-broker-init@${ACTIVEMQ_ARTEMIS_BROKER_INIT_DIGEST}" >> ${RELATED_IMAGES_FILE}
-                echo "        - name: RELATED_IMAGE_ActiveMQ_Artemis_Broker_Kubernetes_${ACTIVEMQ_ARTEMIS_COMPACT_VERSION}" >> ${RELATED_IMAGES_FILE}
-                echo "          value: quay.io/arkmq-org/activemq-artemis-broker-kubernetes@${ACTIVEMQ_ARTEMIS_BROKER_KUBERNETES_DIGEST}" >> ${RELATED_IMAGES_FILE}
+                echo "        # ${ARTEMIS_VERSION}" >> ${RELATED_IMAGES_FILE}
+                echo "        - name: RELATED_IMAGE_ActiveMQ_Artemis_Broker_Init_${ARTEMIS_COMPACT_VERSION}" >> ${RELATED_IMAGES_FILE}
+                echo "          value: quay.io/arkmq-org/arkmq-org-broker-init@${ARTEMIS_INIT_DIGEST}" >> ${RELATED_IMAGES_FILE}
+                echo "        - name: RELATED_IMAGE_ActiveMQ_Artemis_Broker_Kubernetes_${ARTEMIS_COMPACT_VERSION}" >> ${RELATED_IMAGES_FILE}
+                echo "          value: quay.io/arkmq-org/arkmq-org-broker-kubernetes@${ARTEMIS_KUBERNETES_DIGEST}" >> ${RELATED_IMAGES_FILE}
             else
-              sed -i "/RELATED_IMAGE_ActiveMQ_Artemis_Broker_Init_${ACTIVEMQ_ARTEMIS_COMPACT_VERSION}/,/value:/ s~value:.*~value: quay.io/arkmq-org/activemq-artemis-broker-init@${ACTIVEMQ_ARTEMIS_BROKER_INIT_DIGEST}~" ${RELATED_IMAGES_FILE}
-              sed -i "/RELATED_IMAGE_ActiveMQ_Artemis_Broker_Kubernetes_${ACTIVEMQ_ARTEMIS_COMPACT_VERSION}/,/value:/ s~value:.*~value: quay.io/arkmq-org/activemq-artemis-broker-kubernetes@${ACTIVEMQ_ARTEMIS_BROKER_KUBERNETES_DIGEST}~" ${RELATED_IMAGES_FILE}
+              sed -i "/RELATED_IMAGE_ActiveMQ_Artemis_Broker_Init_${ARTEMIS_COMPACT_VERSION}/,/value:/ s~value:.*~value: quay.io/arkmq-org/arkmq-org-broker-init@${ARTEMIS_INIT_DIGEST}~" ${RELATED_IMAGES_FILE}
+              sed -i "/RELATED_IMAGE_ActiveMQ_Artemis_Broker_Kubernetes_${ARTEMIS_COMPACT_VERSION}/,/value:/ s~value:.*~value: quay.io/arkmq-org/arkmq-org-broker-kubernetes@${ARTEMIS_KUBERNETES_DIGEST}~" ${RELATED_IMAGES_FILE}
             fi
             make build && make generate-deploy && make bundle && make helm-charts && git status
-            git commit --all --message "[NO-ISSUE] Update related images for Apache Artemis ${ACTIVEMQ_ARTEMIS_VERSION}" && echo "status=DONE" >> $GITHUB_OUTPUT || echo "nothing to commit"
+            git commit --all --message "[NO-ISSUE] Update related images for Apache Artemis ${ARTEMIS_VERSION}" && echo "status=DONE" >> $GITHUB_OUTPUT || echo "nothing to commit"
           done
 
       - name: Update version
