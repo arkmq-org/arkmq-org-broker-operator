@@ -1114,7 +1114,7 @@ func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQ
 	// Add queue-level attributes for specific queues with exact ObjectNames (include quotes) for canonocial string match, this restricts the attribute load
 	if len(appQueues) > 0 {
 		fmt.Fprintf(buf, "includeObjectNameAttributes:\n")
-		for address := range appQueues {
+		for _, address := range brokerproperties.SortedKeysBool(appQueues) {
 			fqqn := strings.SplitN(address, "::", 2)
 			if len(fqqn) > 1 {
 				fmt.Fprintf(buf, "  org.apache.activemq.artemis:broker=\"%s\",component=addresses,address=\"%s\",subcomponent=queues,routing-type=\"multicast\",queue=\"%s\":\n",

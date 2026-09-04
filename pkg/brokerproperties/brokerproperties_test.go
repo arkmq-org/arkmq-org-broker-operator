@@ -271,6 +271,17 @@ var _ = Describe("SortedKeysByteValue", func() {
 	})
 })
 
+var _ = Describe("SortedKeysBool", func() {
+	It("returns keys in alphabetical order", func() {
+		props := map[string]bool{"c": true, "a": true, "b": false}
+		Expect(SortedKeysBool(props)).To(Equal([]string{"a", "b", "c"}))
+	})
+
+	It("returns an empty slice for an empty map", func() {
+		Expect(SortedKeysBool(map[string]bool{})).To(BeEmpty())
+	})
+})
+
 var _ = Describe("KeyValuePairs", func() {
 	It("returns key=value lines, stripping leading whitespace", func() {
 		raw := []byte("  foo=bar\n")

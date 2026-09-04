@@ -124,6 +124,15 @@ func SortedKeysByteValue(props map[string][]byte) []string {
 	return keys
 }
 
+func SortedKeysBool(props map[string]bool) []string {
+	keys := make([]string, 0, len(props))
+	for k := range props {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func KeyValuePairs(data []byte) []string {
 	keyValuePairs := []string{}
 	for _, lineToTrim := range strings.Split(string(data), "\n") {
