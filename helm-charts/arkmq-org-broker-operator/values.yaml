@@ -94,6 +94,8 @@ controllerManager:
         digest: sha256:4a5cf0c4b11c7ade4b7ac312daa697f1f8ba60a8b81f0b3e9a3e37c284cf9c1d
       activemqArtemisBrokerInit2530:
         digest: sha256:97967beea913ae9f4deb84de0be71247d3c3d7cb325b7f7a45c1257521997f83
+      activemqArtemisBrokerInit2540:
+        digest: sha256:45c3184c51abc7b378d696953df53eaa463464eb85f36377851ab9a486f1556f
       activemqArtemisBrokerKubernetes2150:
         digest: sha256:39f34248f112751b7835f746016990046d21374a6514cb528632e0b06c76616b
       activemqArtemisBrokerKubernetes2160:
@@ -160,6 +162,8 @@ controllerManager:
         digest: sha256:cfcbdb91612ab0aaffd52d65336dfaaf10cecf98d859d517bd77b918800e049a
       activemqArtemisBrokerKubernetes2530:
         digest: sha256:6855d008e0a11b5110395ac321daaf69cfde24e36188c50e2b0291069e5a6234
+      activemqArtemisBrokerKubernetes2540:
+        digest: sha256:c4676a4647e8fac743453f1e0e6a08107a9bd7989215b39bb3ea583317366f73
   podSecurityContext:
     runAsNonRoot: true
     seccompProfile:
