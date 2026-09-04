@@ -513,6 +513,9 @@ var _ = Describe("Address controller tests", func() {
 
 		It("create address with name only", func() {
 			crd := generateArtemisSpec(defaultNamespace)
+			if k8sClient == nil {
+				Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+			}
 			Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
 
 			addressName := "my-address"

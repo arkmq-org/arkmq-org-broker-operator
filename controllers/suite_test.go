@@ -103,6 +103,11 @@ const (
 
 	// Default ingress domain for tests
 	defaultTestIngressDomain = "tests.arkmq-org.io"
+
+	// unitLabel identifies Ginkgo specs that exercise pure Go logic with no
+	// API server or cluster dependency. Specs tagged with this label can run
+	// without KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true.
+	unitLabel = "unit"
 )
 
 var (
@@ -482,10 +487,10 @@ func cleanUpTestProxy() {
 }
 
 func createControllerManagerForSuite() {
-	createControllerManager(false, "")
+	createControllerManager("")
 }
 
-func createControllerManager(disableMetrics bool, watchNamespace string) {
+func createControllerManager(watchNamespace string) {
 
 	managerCtx, managerCancel = context.WithCancel(ctx)
 
@@ -515,10 +520,9 @@ func createControllerManager(disableMetrics bool, watchNamespace string) {
 		}
 	}
 
-	if disableMetrics {
-		// if we can shutdown metrics port, we don't need disable it.
-		mgrOptions.Metrics.BindAddress = "0"
-	}
+	// Always disable the metrics port to avoid bind conflicts when multiple
+	// test processes run concurrently.
+	mgrOptions.Metrics.BindAddress = "0"
 
 	waitforever := time.Duration(-1)
 	mgrOptions.GracefulShutdownTimeout = &waitforever
@@ -878,7 +882,19 @@ func setUpK8sClient() {
 	Expect(k8sClient).NotTo(BeNil())
 }
 
+// isUnitOnlyRun reports whether the active Ginkgo label filter selects only
+// unit-labeled specs. When true, no control-plane setup is needed.
+// The check is an exact string match: compound filters like "unit && foo"
+// still require a running cluster and must not bypass setup.
+func isUnitOnlyRun() bool {
+	return GinkgoLabelFilter() == unitLabel
+}
+
 var _ = BeforeSuite(func() {
+	if isUnitOnlyRun() {
+		return
+	}
+
 	opts := zap.Options{
 		Development: true,
 		DestWriter:  GinkgoWriter,
@@ -942,6 +958,10 @@ func cleanUpPVC() {
 }
 
 var _ = AfterSuite(func() {
+	if isUnitOnlyRun() {
+		return
+	}
+
 	By("tearing down the test environment")
 	if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
 		cleanUpPVC()
