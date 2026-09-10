@@ -1,0 +1,17 @@
+appender.stdout.name = STDOUT
+appender.stdout.type = Console
+rootLogger = info, STDOUT
+appender.event_stream.type = RollingFile
+appender.event_stream.name = EventStream
+appender.event_stream.fileName = /app/log/event_stream.log
+appender.event_stream.filePattern = /app/log/event_stream.log.%i
+appender.event_stream.layout.type = PatternLayout
+appender.event_stream.layout.pattern = %d %-5level [%logger] %msg%n
+appender.event_stream.policies.type = Policies
+appender.event_stream.policies.size.type = SizeBasedTriggeringPolicy
+appender.event_stream.policies.size.size = 1KB
+appender.event_stream.strategy.type = DefaultRolloverStrategy
+appender.event_stream.strategy.max = 1
+logger.event_stream.name = org.apache.activemq.artemis.core.server
+logger.event_stream.level = INFO
+logger.event_stream.appenderRef.event_stream.ref = EventStream

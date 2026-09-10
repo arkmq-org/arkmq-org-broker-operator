@@ -1,0 +1,17 @@
+{{- /* shared by broker_prometheus and service_prometheus */ -}}
+{{define "ssl_header"}}httpServer:
+  authentication:
+    plugin:
+      class: org.apache.activemq.artemis.spi.core.security.jaas.HttpServerAuthenticator
+      subjectAttributeName: org.jolokia.jaasSubject
+  ssl:
+    mutualTLS: true
+    keyStore:
+      filename: {{.PemCfgPath}}
+      type: PEMCFG
+    trustStore:
+      filename: {{.CATrustStorePath}}
+      type: PEMCA
+    certificate:
+      alias: alias
+{{end}}
