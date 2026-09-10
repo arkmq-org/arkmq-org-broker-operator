@@ -1,0 +1,23 @@
+{{- if .Values.service.create }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "broker.fullname" . }}-svc
+  namespace: {{ include "broker.namespace" . }}
+  labels:
+  {{- include "broker.labels" . | nindent 4 }}
+  {{- with .Values.service.additionalLabels }}
+    {{ toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{ toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    ActiveMQArtemis: {{ include "broker.fullname" . }}
+    {{- include "broker.selectorLabels" . | nindent 4 }}
+  ports:
+  {{- .Values.service.ports | toYaml | nindent 2 }}
+{{- end }}
