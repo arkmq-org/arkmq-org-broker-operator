@@ -19,8 +19,8 @@ sed -i -z 's~WATCH_NAMESPACE\n          valueFrom:\n            fieldRef:\n     
 ${dir}/templates/deployment.yaml
 
 # related image prefix
-$YQ -i '.controllerManager.manager.relatedImages.activemqArtemisBrokerInitRepository="quay.io/arkmq-org/activemq-artemis-broker-init"' ${dir}/values.yaml
-$YQ -i '.controllerManager.manager.relatedImages.activemqArtemisBrokerKubernetesRepository="quay.io/arkmq-org/activemq-artemis-broker-kubernetes"' ${dir}/values.yaml
+$YQ -i '.controllerManager.manager.relatedImages.activemqArtemisBrokerInitRepository="quay.io/arkmq-org/arkmq-org-broker-init"' ${dir}/values.yaml
+$YQ -i '.controllerManager.manager.relatedImages.activemqArtemisBrokerKubernetesRepository="quay.io/arkmq-org/arkmq-org-broker-kubernetes"' ${dir}/values.yaml
 $YQ -i '.controllerManager.manager.relatedImages += (.controllerManager.manager.env | with_entries(select(.key | test("^relatedImageA.+"))) | with_entries(.key |= sub("relatedImageA","a")) | with_entries(.value |= {"digest": sub("quay.io.*@","")}))' ${dir}/values.yaml
 $YQ -i 'del(.controllerManager.manager.env)' ${dir}/values.yaml
 sed -i -E 's~\.Values\.controllerManager\.manager\.env\.relatedImageA(ctivemqArtemisBrokerInit.+)~(printf "%s@%s" .Values.controllerManager.manager.relatedImages.activemqArtemisBrokerInitRepository .Values.controllerManager.manager.relatedImages.a\1.digest)~' ${dir}/templates/deployment.yaml
