@@ -26,8 +26,8 @@ controllerManager:
         cpu: 200m
         memory: 128Mi
     relatedImages:
-      activemqArtemisBrokerInitRepository: quay.io/arkmq-org/activemq-artemis-broker-init
-      activemqArtemisBrokerKubernetesRepository: quay.io/arkmq-org/activemq-artemis-broker-kubernetes
+      activemqArtemisBrokerInitRepository: quay.io/arkmq-org/arkmq-org-broker-init
+      activemqArtemisBrokerKubernetesRepository: quay.io/arkmq-org/arkmq-org-broker-kubernetes
       activemqArtemisBrokerInit2150:
         digest: sha256:edbec2276270c2f890572daf9141390bc33b5cf75621eca6e10f11bb144944f3
       activemqArtemisBrokerInit2160:
