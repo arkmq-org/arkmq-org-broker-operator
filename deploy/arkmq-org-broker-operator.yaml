@@ -18592,7 +18592,6 @@ rules:
   - endpoints
   - events
   - persistentvolumeclaims
-  - pods
   - routes
   - secrets
   - serviceaccounts
@@ -18611,6 +18610,18 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - apps
