@@ -1,0 +1,210 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: artemis-broker-health
+  namespace: service-app-project
+  labels:
+    grafana_dashboard: "1"
+data:
+  artemis-broker-health.json: |
+    {
+      "title": "Artemis Broker - Memory & Queue Analysis",
+      "uid": "artemis-broker-memory-queue-analysis",
+      "style": "dark",
+      "tags": [
+        "artemis",
+        "amq-broker",
+        "jvm",
+        "memory",
+        "queue"
+      ],
+      "timezone": "",
+      "editable": true,
+      "graphTooltip": 1,
+      "time": {
+        "from": "now-30m",
+        "to": "now"
+      },
+      "timepicker": {},
+      "refresh": "5s",
+      "schemaVersion": 38,
+      "version": 34,
+      "panels": [
+        {
+          "id": 200,
+          "title": "Memory & Queue Performance",
+          "type": "row",
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "id": 10,
+          "title": "Container vs JVM vs Queue Memory",
+          "description": "Memory comparison for the messaging-service Artemis broker.",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 14, "w": 24, "x": 0, "y": 1 },
+          "targets": [
+            {
+              "expr": "sum(container_memory_working_set_bytes{namespace=\"service-app-project\",pod=~\"messaging-service-ss-.*\",container!=\"POD\",container!=\"\"})",
+              "legendFormat": "Container Working Set",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(jvm_memory_used_bytes{job=\"messaging-service-metrics\",area=\"heap\"})",
+              "legendFormat": "JVM Heap Used",
+              "refId": "B"
+            },
+            {
+              "expr": "sum(broker_queue_persistent_size{job=\"messaging-service-metrics\"})",
+              "legendFormat": "Queue Persistent Data",
+              "refId": "C"
+            },
+            {
+              "expr": "sum(kube_pod_container_resource_limits{namespace=\"service-app-project\",pod=~\"messaging-service-ss-.*\",resource=\"memory\"})",
+              "legendFormat": "Container Memory Limit",
+              "refId": "D"
+            },
+            {
+              "expr": "sum(jvm_memory_max_bytes{job=\"messaging-service-metrics\",area=\"heap\"})",
+              "legendFormat": "JVM Heap Max",
+              "refId": "E"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "min": 0,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 0,
+                "showPoints": "never",
+                "spanNulls": true,
+                "axisPlacement": "left",
+                "scaleDistribution": { "type": "linear" }
+              }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byFrameRefID", "options": "A" },
+                "properties": [
+                  { "id": "displayName", "value": "Container Working Set" },
+                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } },
+                  { "id": "custom.lineWidth", "value": 3 }
+                ]
+              },
+              {
+                "matcher": { "id": "byFrameRefID", "options": "B" },
+                "properties": [
+                  { "id": "displayName", "value": "JVM Heap Used" },
+                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } },
+                  { "id": "custom.lineWidth", "value": 2 }
+                ]
+              },
+              {
+                "matcher": { "id": "byFrameRefID", "options": "C" },
+                "properties": [
+                  { "id": "displayName", "value": "Queue Persistent Data" },
+                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } },
+                  { "id": "custom.lineWidth", "value": 2 }
+                ]
+              },
+              {
+                "matcher": { "id": "byFrameRefID", "options": "D" },
+                "properties": [
+                  { "id": "displayName", "value": "Container Memory Limit" },
+                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } },
+                  { "id": "custom.lineWidth", "value": 2 }
+                ]
+              },
+              {
+                "matcher": { "id": "byFrameRefID", "options": "E" },
+                "properties": [
+                  { "id": "displayName", "value": "JVM Heap Max" },
+                  { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+                  { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [6, 4] } },
+                  { "id": "custom.lineWidth", "value": 2 }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          }
+        },
+        {
+          "id": 300,
+          "title": "Queue Storage Breakdown",
+          "type": "row",
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 }
+        },
+        {
+          "id": 32,
+          "title": "Current Queue Breakdown",
+          "description": "Tabular view displaying persistent storage bytes and current message count for every Artemis queue.",
+          "type": "table",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+          "targets": [
+            {
+              "expr": "sum by (queue)(broker_queue_persistent_size{job=\"messaging-service-metrics\"})",
+              "format": "table",
+              "instant": true,
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (queue)(broker_queue_message_count{job=\"messaging-service-metrics\"})",
+              "format": "table",
+              "instant": true,
+              "refId": "B"
+            }
+          ],
+          "transformations": [
+            { "id": "merge", "options": {} },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": { "Time": true, "Time 1": true, "Time 2": true },
+                "indexByName": { "queue": 0, "Value #A": 1, "Value #B": 2 },
+                "renameByName": { "queue": "Queue", "Value #A": "Persistent Data", "Value #B": "Messages" }
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "custom": { "align": "auto" }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Queue" },
+                "properties": [ { "id": "custom.width", "value": 260 } ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Persistent Data" },
+                "properties": [
+                  { "id": "unit", "value": "bytes" },
+                  { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Messages" },
+                "properties": [
+                  { "id": "unit", "value": "short" },
+                  { "id": "custom.cellOptions", "value": { "type": "auto" } }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "sortBy": [ { "displayName": "Persistent Data", "desc": true } ]
+          }
+        }
+      ]
+    }
