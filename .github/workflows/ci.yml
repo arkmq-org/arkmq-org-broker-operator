@@ -385,7 +385,7 @@ jobs:
           minikube delete
           find docs/tutorials -type f -exec sed -i "s|^minikube start|minikube start  --cpus 2 --memory 8000 --insecure-registry=$HOSTNAME:5000 --extra-config=kubelet.sync-frequency=10s|" {} +
           sed -i "s|image: quay.io/arkmq-org/arkmq-org-broker-operator:.*|image: ${HOSTNAME}:5000/$IMAGE_NAME:dev.latest|" deploy/operator.yaml
-          markdown-runner docs/tutorials --view ci
+          markdown-runner docs/tutorials -r --view ci
 
       - name: Trigger release
         if: ${{ inputs.trigger_release }}
