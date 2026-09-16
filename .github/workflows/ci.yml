@@ -186,22 +186,22 @@ jobs:
         if: ${{ github.event_name == 'push' }}
         run: |
           podman login --username=${{ secrets.QUAY_USERNAME }} --password=${{ secrets.QUAY_PASSWORD }} quay.io
-          podman manifest push $IMAGE_NAME:dev.latest docker://quay.io/${{ secrets.QUAY_NAMESPACE }}/$IMAGE_NAME:dev.latest
+          podman manifest push $IMAGE_NAME:dev.latest docker://quay.io/${{ secrets.QUAY_NAMESPACE }}/$IMAGE_NAME:dev.latest-2.x
 
-      - name: Push dev-latest helm chart
+      - name: Push dev-latest-2.x helm chart
         if: ${{ github.event_name == 'push' }}
         run: |
           # Create a temporary copy for the dev chart
           cp -r helm-charts/arkmq-org-broker-operator helm-charts/arkmq-org-broker-operator-dev
-          # Update version and image tag for dev-latest
-          yq -i '.version="0.0.0-dev.latest"' helm-charts/arkmq-org-broker-operator-dev/Chart.yaml
-          yq -i '.appVersion="dev.latest"' helm-charts/arkmq-org-broker-operator-dev/Chart.yaml
-          yq -i '.controllerManager.manager.image.tag="dev.latest"' helm-charts/arkmq-org-broker-operator-dev/values.yaml
+          # Update version and image tag for dev.latest-2.x
+          yq -i '.version="0.0.0-dev.latest-2.x"' helm-charts/arkmq-org-broker-operator-dev/Chart.yaml
+          yq -i '.appVersion="dev.latest-2.x"' helm-charts/arkmq-org-broker-operator-dev/Chart.yaml
+          yq -i '.controllerManager.manager.image.tag="dev.latest-2.x"' helm-charts/arkmq-org-broker-operator-dev/values.yaml
           yq -i '.controllerManager.manager.image.pullPolicy="Always"' helm-charts/arkmq-org-broker-operator-dev/values.yaml
           # Package and push
           helm package helm-charts/arkmq-org-broker-operator-dev/
           helm registry login --username=${{ secrets.QUAY_USERNAME }} --password=${{ secrets.QUAY_PASSWORD }} quay.io
-          helm push arkmq-org-broker-operator-0.0.0-dev.latest.tgz oci://quay.io/${{ secrets.QUAY_NAMESPACE }}/helm-charts
+          helm push arkmq-org-broker-operator-0.0.0-dev.latest-2.x.tgz oci://quay.io/${{ secrets.QUAY_NAMESPACE }}/helm-charts
 
       - name: Build the bundle image
         run: |
@@ -240,8 +240,8 @@ jobs:
         if: ${{ github.event_name == 'push' }}
         run: |
           podman login --username=${{ secrets.QUAY_USERNAME }} --password=${{ secrets.QUAY_PASSWORD }} quay.io
-          podman tag $IMAGE_NAME-bundle:dev.latest quay.io/${{ secrets.QUAY_NAMESPACE }}/$IMAGE_NAME-bundle:dev.latest
-          podman push quay.io/${{ secrets.QUAY_NAMESPACE }}/$IMAGE_NAME-bundle:dev.latest
+          podman tag $IMAGE_NAME-bundle:dev.latest quay.io/${{ secrets.QUAY_NAMESPACE }}/$IMAGE_NAME-bundle:dev.latest-2.x
+          podman push quay.io/${{ secrets.QUAY_NAMESPACE }}/$IMAGE_NAME-bundle:dev.latest-2.x
 
       - name: Get changed files in tutorials
         id: changed-tutorial-files
