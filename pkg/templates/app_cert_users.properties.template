@@ -1,0 +1,6 @@
+{{- /* the control-plane cert_users, plus one identity per provisioned app so
+       the app's own cert can authenticate against the metrics endpoint */ -}}
+{{- template "cert_users_base" . -}}
+{{- range .Apps -}}
+{{.Identity}}=/.*{{.CNPattern}}.*/
+{{end -}}

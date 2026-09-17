@@ -1,0 +1,8 @@
+{{- /* the control-plane cert_roles, plus the membership that puts each app's
+       identity into its own <ns>-<app>-metrics role. That role already carries
+       per-queue view grants from capabilities.properties; without this line it
+       has grants but no members. */ -}}
+{{- template "cert_roles_base" . -}}
+{{- range .Apps -}}
+{{.Identity}}-metrics={{.Identity}}
+{{end -}}

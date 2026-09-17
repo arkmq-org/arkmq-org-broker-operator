@@ -18,7 +18,13 @@ var loginConfigTmpl string
 var certUsersTmpl string
 
 //go:embed cert_roles.properties.template
-var certRolesBytes []byte
+var certRolesTmpl string
+
+//go:embed app_cert_users.properties.template
+var appCertUsersTmpl string
+
+//go:embed app_cert_roles.properties.template
+var appCertRolesTmpl string
 
 //go:embed logging.properties.template
 var loggingBytes []byte
@@ -38,14 +44,23 @@ var brokerPrometheusTmpl string
 //go:embed service_prometheus.yaml.template
 var servicePrometheusTmpl string
 
+// mustParseWith parses content into a template set that already carries the
+// {{define}} blocks of base, so content can {{template}} into them.
+func mustParseWith(base, name, content string) *template.Template {
+	return template.Must(template.Must(template.New("").Parse(base)).New(name).Parse(content))
+}
+
 func mustParse(name, content string) *template.Template {
-	return template.Must(template.Must(template.New("").Parse(sslHeaderTmpl)).New(name).Parse(content))
+	return mustParseWith(sslHeaderTmpl, name, content)
 }
 
 const (
 	Security          = "security"
 	Login             = "login_config"
 	CertUsers         = "cert_users"
+	CertRoles         = "cert_roles"
+	AppCertUsers      = "app_cert_users"
+	AppCertRoles      = "app_cert_roles"
 	Jolokia           = "jolokia"
 	PemCfg            = "pemcfg"
 	BrokerPrometheus  = "broker_prometheus"
@@ -56,6 +71,9 @@ var parsedTemplates = map[string]*template.Template{
 	Security:          template.Must(template.New(Security).Parse(securityTmpl)),
 	Login:             template.Must(template.New(Login).Parse(loginConfigTmpl)),
 	CertUsers:         template.Must(template.New(CertUsers).Parse(certUsersTmpl)),
+	CertRoles:         template.Must(template.New(CertRoles).Parse(certRolesTmpl)),
+	AppCertUsers:      mustParseWith(certUsersTmpl, AppCertUsers, appCertUsersTmpl),
+	AppCertRoles:      mustParseWith(certRolesTmpl, AppCertRoles, appCertRolesTmpl),
 	Jolokia:           template.Must(template.New(Jolokia).Parse(jolokiaTmpl)),
 	PemCfg:            template.Must(template.New(PemCfg).Parse(pemcfgTmpl)),
 	BrokerPrometheus:  mustParse(BrokerPrometheus, brokerPrometheusTmpl),
@@ -77,6 +95,25 @@ type CertUsersConfig struct {
 	OperatorCN   string
 	OperandCN    string
 	PrometheusCN string
+}
+
+// AppIdentityEntry is one provisioned app's control-plane identity.
+type AppIdentityEntry struct {
+	Identity  string // <namespace>-<app>, matches metricsRole in capabilities.properties
+	CNPattern string // regex-escaped cert CN, matched against the client cert DN
+}
+
+// AppCertUsersConfig renders the control-plane cert_users plus one line per app.
+// The embedded CertUsersConfig feeds the shared "cert_users_base" define.
+type AppCertUsersConfig struct {
+	CertUsersConfig
+	Apps []AppIdentityEntry
+}
+
+// AppCertRolesConfig renders the control-plane cert_roles plus the per-app
+// metrics role membership.
+type AppCertRolesConfig struct {
+	Apps []AppIdentityEntry
 }
 
 type JolokiaConfig struct {
@@ -119,7 +156,12 @@ func Render(name string, cfg any) ([]byte, error) {
 }
 
 func RenderCertRoles() []byte {
-	return certRolesBytes
+	data, err := Render(CertRoles, nil)
+	if err != nil {
+		// the template is embedded and takes no input, so this cannot fail
+		panic(err)
+	}
+	return data
 }
 
 func RenderLogging() []byte {
