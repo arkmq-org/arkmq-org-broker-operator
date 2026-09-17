@@ -32,6 +32,7 @@ import (
 	tm "github.com/cert-manager/trust-manager/pkg/apis/trust/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -66,6 +67,7 @@ type ConnectorConfig struct {
 
 var _ = Describe("artemis controller with cert manager test", Label("controller-cert-mgr-test"), func() {
 	var installedCertManager bool = false
+	var installedTrustManager bool = false
 
 	BeforeEach(func() {
 		BeforeEachSpec()
@@ -76,6 +78,12 @@ var _ = Describe("artemis controller with cert manager test", Label("controller-
 				Expect(InstallCertManager()).To(Succeed())
 				installedCertManager = true
 			}
+			var trustManagerErr error
+			installedTrustManager, trustManagerErr = installTrustManagerIfMissing()
+			Expect(trustManagerErr).To(Succeed())
+
+			trustManagerDeployment := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "trust-manager", Namespace: "cert-manager"}, trustManagerDeployment)).To(Succeed())
 
 			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
 
@@ -101,10 +109,30 @@ var _ = Describe("artemis controller with cert manager test", Label("controller-
 
 	AfterEach(func() {
 		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			UnInstallCaBundle(common.DefaultOperatorCASecretName)
-			UninstallClusteredIssuer(caIssuerName)
-			UninstallCert(rootCert.Name, rootCert.Namespace)
-			UninstallClusteredIssuer(rootIssuerName)
+			bundle := &tm.Bundle{}
+			if k8sClient.Get(ctx, types.NamespacedName{Name: common.DefaultOperatorCASecretName, Namespace: "cert-manager"}, bundle) == nil {
+				UnInstallCaBundle(common.DefaultOperatorCASecretName)
+			}
+
+			caIssuer := &cmv1.ClusterIssuer{}
+			if k8sClient.Get(ctx, types.NamespacedName{Name: caIssuerName}, caIssuer) == nil {
+				UninstallClusteredIssuer(caIssuerName)
+			}
+
+			rootCert := &cmv1.Certificate{}
+			if k8sClient.Get(ctx, types.NamespacedName{Name: rootCertName, Namespace: rootCertNamespce}, rootCert) == nil {
+				UninstallCert(rootCert.Name, rootCert.Namespace)
+			}
+
+			rootIssuer := &cmv1.ClusterIssuer{}
+			if k8sClient.Get(ctx, types.NamespacedName{Name: rootIssuerName}, rootIssuer) == nil {
+				UninstallClusteredIssuer(rootIssuerName)
+			}
+
+			if installedTrustManager {
+				Expect(UninstallTrustManager()).To(Succeed())
+				installedTrustManager = false
+			}
 
 			if installedCertManager {
 				Expect(UninstallCertManager()).To(Succeed())

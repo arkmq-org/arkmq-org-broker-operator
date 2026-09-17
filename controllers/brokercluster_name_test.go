@@ -55,6 +55,8 @@ var _ = Describe("broker name", func() {
 				Expect(InstallCertManager()).To(Succeed())
 				installedCertManager = true
 			}
+			_, trustManagerErr := installTrustManagerIfMissing()
+			Expect(trustManagerErr).To(Succeed())
 
 			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
 
