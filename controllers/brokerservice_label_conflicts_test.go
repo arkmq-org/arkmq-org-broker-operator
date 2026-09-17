@@ -61,7 +61,7 @@ func TestLabelConflicts_NoReservedKeys(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(service, nsObj).
+		WithObjects(WithCerts(service, nsObj)...).
 		WithStatusSubresource(service).
 		WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -124,7 +124,7 @@ func TestLabelConflicts_ProperDomainPrefixes(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(service, nsObj).
+		WithObjects(WithCerts(service, nsObj)...).
 		WithStatusSubresource(service).
 		WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)

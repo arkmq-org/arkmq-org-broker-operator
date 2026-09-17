@@ -72,7 +72,7 @@ func TestPodLabels_StandardKubernetesLabels(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(service, nsObj).
+		WithObjects(WithCerts(service, nsObj)...).
 		WithStatusSubresource(service).
 		WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -159,7 +159,7 @@ func TestPodLabels_NetworkPolicyMatchingBrokerService(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(service, netpol, nsObj).
+		WithObjects(WithCerts(service, netpol, nsObj)...).
 		WithStatusSubresource(service, &v1beta2.Broker{}).
 		WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -275,7 +275,7 @@ func TestPodLabels_NetworkPolicyMatchingComponentLabel(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(service, netpol, nsObj).
+		WithObjects(WithCerts(service, netpol, nsObj)...).
 		WithStatusSubresource(service, &v1beta2.Broker{}).
 		WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)

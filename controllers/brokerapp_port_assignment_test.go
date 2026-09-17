@@ -79,7 +79,7 @@ func TestBrokerAppPortAssignment_DefaultPool(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, app, nsObj).
+		WithObjects(WithCerts(svc, app, nsObj)...).
 		WithStatusSubresource(app, svc).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -159,7 +159,7 @@ func TestBrokerAppPortAssignment_ExistingPortPreserved(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, app, nsObj).
+		WithObjects(WithCerts(svc, app, nsObj)...).
 		WithStatusSubresource(app, svc).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -241,7 +241,7 @@ func TestBrokerAppPortAssignment_MultipleApps(t *testing.T) {
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, app1, app2, nsObj).
+		WithObjects(WithCerts(svc, app1, app2, nsObj)...).
 		WithStatusSubresource(app1, app2, svc).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)

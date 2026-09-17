@@ -200,6 +200,7 @@ var _ = Describe("broker-service address post-binding validation", func() {
 					},
 				},
 			}
+			InstallAppCert(&ownerApp)
 			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
 
 			consumerAppName := NextSpecResourceName()
@@ -248,6 +249,7 @@ var _ = Describe("broker-service address post-binding validation", func() {
 					},
 				},
 			}
+			InstallAppCert(&consumerApp)
 			Expect(k8sClient.Create(ctx, &consumerApp)).Should(Succeed())
 
 			By("waiting for both apps to be deployed")
@@ -421,6 +423,7 @@ var _ = Describe("broker-service address post-binding validation", func() {
 					},
 				},
 			}
+			InstallAppCert(&ownerApp)
 			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
 
 			consumerAppName := NextSpecResourceName() + "-ref"
@@ -469,6 +472,7 @@ var _ = Describe("broker-service address post-binding validation", func() {
 					},
 				},
 			}
+			InstallAppCert(&consumerApp)
 			Expect(k8sClient.Create(ctx, &consumerApp)).Should(Succeed())
 
 			By("waiting for both apps to be deployed")
@@ -634,6 +638,7 @@ var _ = Describe("broker-service address post-binding validation", func() {
 					},
 				},
 			}
+			InstallAppCert(&ownerApp)
 			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
 
 			consumerAppName := NextSpecResourceName() + "-ref"
@@ -683,6 +688,7 @@ var _ = Describe("broker-service address post-binding validation", func() {
 					},
 				},
 			}
+			InstallAppCert(&consumerApp)
 			Expect(k8sClient.Create(ctx, &consumerApp)).Should(Succeed())
 
 			By("waiting for both apps to be deployed")
@@ -937,6 +943,7 @@ var _ = Describe("broker-service address post-binding validation", func() {
 					},
 				},
 			}
+			InstallAppCert(&app1)
 			Expect(k8sClient.Create(ctx, &app1)).Should(Succeed())
 
 			app2Name := NextSpecResourceName()
@@ -984,6 +991,7 @@ var _ = Describe("broker-service address post-binding validation", func() {
 					},
 				},
 			}
+			InstallAppCert(&app2)
 			Expect(k8sClient.Create(ctx, &app2)).Should(Succeed())
 
 			By("waiting for both apps to be deployed")

@@ -57,7 +57,7 @@ func TestValidation_SharedAddress_Multicast_UsedAsAnycast(t *testing.T) {
 
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(app).
+		WithObjects(WithCerts(app)...).
 		WithStatusSubresource(app)).
 		Build()
 
@@ -122,7 +122,7 @@ func TestValidation_SharedAddress_Anycast_UsedAsMulticast(t *testing.T) {
 
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(app).
+		WithObjects(WithCerts(app)...).
 		WithStatusSubresource(app)).
 		Build()
 
@@ -187,7 +187,7 @@ func TestValidation_PrivateAddress_Multicast_UsedAsAnycast(t *testing.T) {
 
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(app).
+		WithObjects(WithCerts(app)...).
 		WithStatusSubresource(app)).
 		Build()
 
@@ -259,7 +259,7 @@ func TestValidation_SharedAddress_Consistent_Multicast_Valid(t *testing.T) {
 
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(app).
+		WithObjects(WithCerts(app)...).
 		WithStatusSubresource(app)).
 		Build()
 
@@ -329,7 +329,7 @@ func TestValidation_SharedAddress_Consistent_Anycast_Valid(t *testing.T) {
 
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(app).
+		WithObjects(WithCerts(app)...).
 		WithStatusSubresource(app)).
 		Build()
 
@@ -402,7 +402,7 @@ func TestValidation_MultipleAddresses_MixedTypes(t *testing.T) {
 
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(app).
+		WithObjects(WithCerts(app)...).
 		WithStatusSubresource(app)).
 		Build()
 
@@ -451,7 +451,7 @@ func TestValidation_AddressNotDeclared_OnlyInCapability(t *testing.T) {
 
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(app).
+		WithObjects(WithCerts(app)...).
 		WithStatusSubresource(app)).
 		Build()
 
@@ -507,7 +507,7 @@ func TestValidation_Address_PubSubFalse_WithSubscriptions(t *testing.T) {
 
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(app).
+		WithObjects(WithCerts(app)...).
 		WithStatusSubresource(app)).
 		Build()
 

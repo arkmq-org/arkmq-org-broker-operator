@@ -254,7 +254,7 @@ func TestReconcileStatusUpdateFailure(t *testing.T) {
 
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(namespace, svc, app).
+		WithObjects(WithCerts(namespace, svc, app)...).
 		WithStatusSubresource(app).
 		WithInterceptorFuncs(interceptorFuncs)).
 		Build()
@@ -405,7 +405,7 @@ func TestReconcileIdempotentStatus(t *testing.T) {
 	}
 
 	// Setup fake client for first reconcile
-	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().WithScheme(scheme).WithObjects(namespace, svc, app).WithStatusSubresource(app, svc)).Build()
+	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().WithScheme(scheme).WithObjects(WithCerts(namespace, svc, app)...).WithStatusSubresource(app, svc)).Build()
 
 	// Create Reconciler
 	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
@@ -434,7 +434,7 @@ func TestReconcileIdempotentStatus(t *testing.T) {
 
 	cl2 := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(namespace, svc, updatedApp).
+		WithObjects(WithCerts(namespace, svc, updatedApp)...).
 		WithStatusSubresource(updatedApp, svc).
 		WithInterceptorFuncs(interceptorFuncs)).
 		Build()

@@ -85,7 +85,7 @@ func TestBrokerServiceRejectsManuallyAnnotatedApp(t *testing.T) {
 	// Setup fake client with indexer
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, attackerApp).
+		WithObjects(WithCerts(svc, attackerApp)...).
 		WithStatusSubresource(svc, attackerApp).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -231,7 +231,7 @@ func TestBrokerServiceAllowsMatchingApp(t *testing.T) {
 	// Setup fake client
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, legitimateApp, opCASecret).
+		WithObjects(WithCerts(svc, legitimateApp, opCASecret)...).
 		WithStatusSubresource(svc, legitimateApp).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -351,7 +351,7 @@ func TestBrokerServiceRejectsLabelMismatch(t *testing.T) {
 	// Setup fake client
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, app, opCASecret).
+		WithObjects(WithCerts(svc, app, opCASecret)...).
 		WithStatusSubresource(svc, app).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -503,7 +503,7 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 	// Setup fake client
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, matchingApp1, matchingApp2, attackerApp, opCASecret).
+		WithObjects(WithCerts(svc, matchingApp1, matchingApp2, attackerApp, opCASecret)...).
 		WithStatusSubresource(svc, matchingApp1, matchingApp2, attackerApp).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)
@@ -669,7 +669,7 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 	// Setup fake client
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc, validApp, attackerApp, opCASecret).
+		WithObjects(WithCerts(svc, validApp, attackerApp, opCASecret)...).
 		WithStatusSubresource(svc, validApp, attackerApp).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(obj client.Object) []string {
 			app := obj.(*v1beta2.BrokerApp)

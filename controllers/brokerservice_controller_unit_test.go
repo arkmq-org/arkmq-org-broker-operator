@@ -107,7 +107,7 @@ func TestBrokerServiceReconcileWithAppMove(t *testing.T) {
 	}
 
 	// Setup fake client with indexer
-	builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(namespace, oc, s1, s2, app).WithStatusSubresource(s1, s2, app)
+	builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(WithCerts(namespace, oc, s1, s2, app)...).WithStatusSubresource(s1, s2, app)
 	builder.WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 		app := rawObj.(*v1beta2.BrokerApp)
 		if app.Status.Service != nil {
@@ -200,7 +200,7 @@ func TestBrokerServiceReconcileErrorPropagation(t *testing.T) {
 	}
 
 	// Setup fake client with indexer
-	builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(s1).WithStatusSubresource(s1).WithInterceptorFuncs(interceptorFuncs)
+	builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(WithCerts(s1)...).WithStatusSubresource(s1).WithInterceptorFuncs(interceptorFuncs)
 	builder.WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 		app := rawObj.(*v1beta2.BrokerApp)
 		if app.Status.Service != nil {
@@ -260,7 +260,7 @@ func TestBrokerServiceReconcileStatusUpdateFailure(t *testing.T) {
 	}
 
 	// Setup fake client with indexer
-	builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(s1).WithStatusSubresource(s1).WithInterceptorFuncs(interceptorFuncs)
+	builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(WithCerts(s1)...).WithStatusSubresource(s1).WithInterceptorFuncs(interceptorFuncs)
 	builder.WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 		return nil
 	})
@@ -306,7 +306,7 @@ func TestBrokerServiceReconcileRequiresIndex(t *testing.T) {
 
 	// Setup fake client WITHOUT indexer
 	// This simulates what happens if SetupWithManager doesn't register the indexer
-	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(s1, app).WithStatusSubresource(s1, app).Build()
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(WithCerts(s1, app)...).WithStatusSubresource(s1, app).Build()
 
 	// Create Reconciler
 	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
@@ -343,7 +343,7 @@ func TestReconcileDeployedConditionTransition(t *testing.T) {
 	}
 
 	// Setup fake client with indexer required by controller
-	builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(svc).WithStatusSubresource(svc, &v1beta2.Broker{})
+	builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(WithCerts(svc)...).WithStatusSubresource(svc, &v1beta2.Broker{})
 	builder.WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 		app := rawObj.(*v1beta2.BrokerApp)
 		if app.Status.Service != nil {
@@ -491,7 +491,7 @@ func TestBrokerServiceReconcileStatusAppliedApps(t *testing.T) {
 	// Setup fake client
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(namespace, oc, svc, app).
+		WithObjects(WithCerts(namespace, oc, svc, app)...).
 		WithStatusSubresource(svc, &v1beta2.Broker{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
@@ -620,7 +620,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 	// Setup fake client
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(namespace, oc, svc, app1).
+		WithObjects(WithCerts(namespace, oc, svc, app1)...).
 		WithStatusSubresource(svc, &v1beta2.Broker{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
@@ -760,7 +760,7 @@ func TestBrokerServiceReconcileAppsProvisionedCondition(t *testing.T) {
 	// Setup fake client
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc).
+		WithObjects(WithCerts(svc)...).
 		WithStatusSubresource(svc, &v1beta2.Broker{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
@@ -914,7 +914,7 @@ func TestBrokerServiceReconcilePrometheusOverrideSecret(t *testing.T) {
 	// Setup fake client
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(namespace, oc, svc, app).
+		WithObjects(WithCerts(namespace, oc, svc, app)...).
 		WithStatusSubresource(svc, &v1beta2.Broker{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
@@ -1004,7 +1004,7 @@ func TestBrokerServiceReconcilePrometheusOverrideNoApps(t *testing.T) {
 	// Setup fake client
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(namespace, oc, svc).
+		WithObjects(WithCerts(namespace, oc, svc)...).
 		WithStatusSubresource(svc, &v1beta2.Broker{}).
 		WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 			app := rawObj.(*v1beta2.BrokerApp)
@@ -1062,7 +1062,7 @@ func TestBrokerServiceValidCondition(t *testing.T) {
 		// Setup fake client with field indexer using helper
 		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(svc).
+			WithObjects(WithCerts(svc)...).
 			WithStatusSubresource(svc)).
 			Build()
 
@@ -1100,7 +1100,7 @@ func TestBrokerServiceValidCondition(t *testing.T) {
 		// Setup fake client with field indexer using helper
 		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(svc).
+			WithObjects(WithCerts(svc)...).
 			WithStatusSubresource(svc)).
 			Build()
 
@@ -1146,7 +1146,7 @@ func TestBrokerServiceValidCondition(t *testing.T) {
 		// Setup fake client with field indexer using helper
 		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(svc).
+			WithObjects(WithCerts(svc)...).
 			WithStatusSubresource(svc)).
 			Build()
 
@@ -1204,7 +1204,7 @@ func TestBrokerServiceIdempotentStatus(t *testing.T) {
 	// Setup fake client with indexer
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc).
+		WithObjects(WithCerts(svc)...).
 		WithStatusSubresource(svc)).
 		Build()
 
@@ -1263,7 +1263,7 @@ func TestBrokerServiceConditionIndependence(t *testing.T) {
 	// Setup fake client with indexer
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc).
+		WithObjects(WithCerts(svc)...).
 		WithStatusSubresource(svc)).
 		Build()
 
@@ -1336,7 +1336,7 @@ func TestBrokerServiceValidPersistsThroughRuntimeErrors(t *testing.T) {
 
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc).
+		WithObjects(WithCerts(svc)...).
 		WithStatusSubresource(svc).
 		WithInterceptorFuncs(interceptorFuncs)).
 		Build()
@@ -1390,7 +1390,7 @@ func TestBrokerServiceConditionTransitionsOnRecovery(t *testing.T) {
 	// Setup fake client
 	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(svc).
+		WithObjects(WithCerts(svc)...).
 		WithStatusSubresource(svc, &v1beta2.Broker{})).
 		Build()
 

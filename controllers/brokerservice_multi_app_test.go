@@ -660,6 +660,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 				},
 			}
+			InstallAppCert(&app1)
 			Expect(k8sClient.Create(ctx, &app1)).Should(Succeed())
 
 			app1Key := types.NamespacedName{Name: app1Name, Namespace: defaultNamespace}
@@ -733,6 +734,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 				},
 			}
+			InstallAppCert(&app2)
 			Expect(k8sClient.Create(ctx, &app2)).Should(Succeed())
 
 			app2Key := types.NamespacedName{Name: app2Name, Namespace: otherNamespace}
@@ -822,6 +824,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 					},
 				},
 			}
+			InstallAppCert(&app3)
 			Expect(k8sClient.Create(ctx, &app3)).Should(Succeed())
 
 			app3Key := types.NamespacedName{Name: app3Name, Namespace: defaultNamespace}

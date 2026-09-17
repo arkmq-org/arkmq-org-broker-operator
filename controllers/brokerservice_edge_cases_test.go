@@ -340,7 +340,7 @@ var _ = Describe("broker-service edge cases and concurrent operations", func() {
 				},
 			}
 
-			appCertName := strings.ReplaceAll(appName, ".", "-") + common.AppCertSecretSuffix
+			appCertName := appName + common.AppCertSecretSuffix
 			InstallCert(appCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
 				candidate.Spec.SecretName = appCertName
 				candidate.Spec.CommonName = appName

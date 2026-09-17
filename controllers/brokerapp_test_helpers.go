@@ -1,6 +1,15 @@
 package controllers
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"sync"
+	"time"
+
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/go-logr/logr"
@@ -53,6 +62,8 @@ func NewTestEnvironment(namespace string, objects ...client.Object) *TestEnviron
 			ObjectMeta: metav1.ObjectMeta{Name: namespace},
 		}}, objects...)
 	}
+
+	objects = WithCerts(objects...)
 
 	// Separate status-enabled resources
 	var statusObjs []client.Object
@@ -307,4 +318,92 @@ func CreateSecret(name, namespace string) *corev1.Secret {
 // BrokerServiceInstanceReconcilerForTest creates a reconciler for testing processCapabilities
 func BrokerServiceInstanceReconcilerForTest() *BrokerServiceInstanceReconciler {
 	return &BrokerServiceInstanceReconciler{}
+}
+
+// testSigningKey is generated once; RSA keygen dominates the cost of building
+// these fixtures, while issuing a cert from an existing key is cheap.
+var testSigningKey = sync.OnceValue(func() *rsa.PrivateKey {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(err)
+	}
+	return key
+})
+
+// NewAppCertSecret builds the client certificate an app is expected to have,
+// following the <app>-app-cert convention, with the app name as its CN.
+func NewAppCertSecret(appName, namespace string) *corev1.Secret {
+	return NewCertSecret(appName+common.AppCertSecretSuffix, namespace, appName)
+}
+
+// NewCertSecret builds a self-signed key pair in a secret, for fixtures that
+// need a certificate the operator can read a subject from.
+func NewCertSecret(secretName, namespace, commonName string) *corev1.Secret {
+	key := testSigningKey()
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: commonName},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		panic(err)
+	}
+
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: namespace,
+		},
+		Data: map[string][]byte{
+			"tls.crt": pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+			"tls.key": pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}),
+		},
+	}
+}
+
+// WithCerts gives the fixture the certificates the operator expects to exist:
+// an <app>-app-cert for every BrokerApp, and for every BrokerService the
+// operator and operand certs the control-plane identities are resolved from.
+// Neither an app nor a service reconciles without them, so fixtures that build
+// a client directly pass their objects through here. Anything the test supplied
+// itself is left alone.
+func WithCerts(objects ...client.Object) []client.Object {
+	existing := make(map[string]bool)
+	for _, obj := range objects {
+		if secret, ok := obj.(*corev1.Secret); ok {
+			existing[secret.Namespace+"/"+secret.Name] = true
+		}
+	}
+
+	add := func(name, namespace, commonName string) {
+		if key := namespace + "/" + name; !existing[key] {
+			secret := NewCertSecret(name, namespace, commonName)
+			objects = append(objects, secret)
+			existing[key] = true
+		}
+	}
+
+	for _, obj := range objects {
+		switch res := obj.(type) {
+		case *v1beta2.BrokerApp:
+			add(res.Name+common.AppCertSecretSuffix, res.Namespace, res.Name)
+		case *v1beta2.BrokerService:
+			// stand in for a cluster where the operator runs alongside the
+			// service; a test that sets the namespace itself keeps its value,
+			// and the cert is added to whichever namespace resolves.
+			if _, err := common.GetOperatorNamespaceFromEnv(); err != nil {
+				common.SetOperatorNameSpace(res.Namespace)
+			}
+			if operatorNs, err := common.GetOperatorNamespaceFromEnv(); err == nil {
+				add(common.GetOperatorCertSecretName(), operatorNs, "operator")
+			}
+			add(common.GetOperatorCertSecretName(), res.Namespace, "operator")
+			add(res.Name+"-"+common.DefaultOperandCertSecretName, res.Namespace, res.Name)
+		}
+	}
+	return objects
 }

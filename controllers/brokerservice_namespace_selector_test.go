@@ -263,6 +263,7 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 					},
 				},
 			}
+			InstallAppCert(&prodApp)
 			Expect(k8sClient.Create(ctx, &prodApp)).Should(Succeed())
 
 			prodAppKey := types.NamespacedName{Name: prodApp.Name, Namespace: prodApp.Namespace}
@@ -317,6 +318,7 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 					},
 				},
 			}
+			InstallAppCert(&devApp)
 			Expect(k8sClient.Create(ctx, &devApp)).Should(Succeed())
 
 			devAppKey := types.NamespacedName{Name: devApp.Name, Namespace: devApp.Namespace}
@@ -372,6 +374,7 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 					},
 				},
 			}
+			InstallAppCert(&qaApp)
 			Expect(k8sClient.Create(ctx, &qaApp)).Should(Succeed())
 
 			qaAppKey := types.NamespacedName{Name: qaApp.Name, Namespace: qaApp.Namespace}
@@ -539,6 +542,7 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 					},
 				},
 			}
+			InstallAppCert(&paymentsApp)
 			Expect(k8sClient.Create(ctx, &paymentsApp)).Should(Succeed())
 
 			paymentsAppKey := types.NamespacedName{Name: paymentsApp.Name, Namespace: paymentsApp.Namespace}
@@ -578,6 +582,7 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 					},
 				},
 			}
+			InstallAppCert(&ordersApp)
 			Expect(k8sClient.Create(ctx, &ordersApp)).Should(Succeed())
 
 			ordersAppKey := types.NamespacedName{Name: ordersApp.Name, Namespace: ordersApp.Namespace}
