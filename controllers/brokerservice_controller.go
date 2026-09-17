@@ -819,6 +819,11 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 		}
 	}
 
+	// queryMBeans only enumerates; the per-queue grants above decide what comes back
+	if len(queueNamesForMetrics) > 0 {
+		props[fmt.Sprintf("securityRoles.\"mops.mbeanserver.queryMBeans\".\"%s\".view=true\n", metricsRole(AppIdentity(app)))] = ""
+	}
+
 	buf := brokerproperties.NewPropsWithHeader()
 	for _, k := range brokerproperties.SortedKeys(props) {
 		fmt.Fprint(buf, k)
@@ -1067,8 +1072,79 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 	}
 	desired.Data[PrometheusConfigFileName] = prometheusConfig
 
+	// Give each app an identity on the metrics endpoint. applyControlPlaneOverridesForBroker
+	// replaces whole keys, so these are rendered complete, control-plane entries included.
+	appEntries, err := reconciler.appIdentityEntries(validApps)
+	if err != nil {
+		return err
+	}
+
+	cns, err := common.ResolveControlPlaneCNs(reconciler.Client,
+		common.GenerateBroker(reconciler.instance.Name, reconciler.instance.Namespace))
+	if err != nil {
+		return err
+	}
+
+	certUsers, err := templates.Render(templates.AppCertUsers, templates.AppCertUsersConfig{
+		CertUsersConfig: templates.CertUsersConfig(cns),
+		Apps:            appEntries,
+	})
+	if err != nil {
+		return err
+	}
+	desired.Data[common.GetCertUsersKey(common.HttpAuthenticatorRealm)] = certUsers
+
+	certRoles, err := templates.Render(templates.AppCertRoles, templates.AppCertRolesConfig{
+		Apps: appEntries,
+	})
+	if err != nil {
+		return err
+	}
+	desired.Data[common.GetCertRolesKey(common.HttpAuthenticatorRealm)] = certRoles
+
 	reconciler.TrackDesired(desired)
 	return nil
+}
+
+// appIdentityEntries maps the provisioned apps to their control-plane
+// identities, sorted so the rendered override is stable.
+func (reconciler *BrokerServiceInstanceReconciler) appIdentityEntries(validApps []broker.BrokerApp) ([]templates.AppIdentityEntry, error) {
+	entries := make([]templates.AppIdentityEntry, 0, len(validApps))
+	for i := range validApps {
+		app := &validApps[i]
+
+		cn, err := reconciler.appCertCN(app)
+		if err != nil {
+			return nil, err
+		}
+
+		entries = append(entries, templates.AppIdentityEntry{
+			Identity:  AppIdentity(app),
+			CNPattern: common.EscapeForRegex(cn),
+		})
+	}
+
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Identity < entries[j].Identity })
+	return entries, nil
+}
+
+// appCertCN returns the common name of the app's client certificate, found by
+// the <app>-app-cert convention, as ResolveControlPlaneCNs does for the other
+// control-plane identities.
+func (reconciler *BrokerServiceInstanceReconciler) appCertCN(app *broker.BrokerApp) (string, error) {
+	secretName := app.Name + common.AppCertSecretSuffix
+
+	secret, err := common.GetNamespacedSecret(reconciler.Client, secretName, app.Namespace)
+	if err != nil {
+		return "", err
+	}
+
+	subject, err := common.ExtractCertSubjectFromSecret(secret)
+	if err != nil {
+		return "", fmt.Errorf("failed to extract subject from app cert %s, %w", secretName, err)
+	}
+
+	return subject.CommonName, nil
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]bool) ([]byte, error) {
