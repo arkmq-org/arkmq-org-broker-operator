@@ -825,6 +825,64 @@ func UnsetOperatorCASecretName() {
 	operatorCASecretName = nil
 }
 
+// ControlPlaneCNs holds the common names of the identities allowed to talk to
+// the broker's control plane. PrometheusCN is empty when no prometheus cert
+// exists.
+type ControlPlaneCNs struct {
+	OperatorCN   string
+	OperandCN    string
+	PrometheusCN string
+}
+
+// ResolveControlPlaneCNs looks up the common names of the identities that may
+// talk to the broker's control plane: the operator, the operand (probe) and,
+// when present, prometheus.
+//
+// It is shared by the Broker controller, which renders cert_users for its own
+// props, and the BrokerService controller, which has to render the same file
+// complete into its control-plane override. Keeping one resolver means the two
+// cannot disagree about which secret holds which identity -- a disagreement
+// would surface as a silent 401 on the control-plane endpoints.
+//
+// A missing prometheus cert is not an error: the entry is simply omitted, and
+// the template drops the line.
+func ResolveControlPlaneCNs(client rtclient.Client, cr *v1beta2.Broker) (ControlPlaneCNs, error) {
+	cfg := ControlPlaneCNs{}
+
+	operatorCert, err := GetOperatorClientCertificate(client, nil)
+	if err != nil {
+		return cfg, fmt.Errorf("failed to get operator client cert, %w", err)
+	}
+	operatorCertSubject, err := ExtractCertSubject(operatorCert)
+	if err != nil {
+		return cfg, fmt.Errorf("failed to extract operator subject from client cert, %w", err)
+	}
+	cfg.OperatorCN = operatorCertSubject.CommonName
+
+	operandCertSecret, err := GetNamespacedSecret(client, GetOperandCertSecretName(cr, client), cr.Namespace)
+	if err != nil {
+		return cfg, err
+	}
+	operandCertSubject, err := ExtractCertSubjectFromSecret(operandCertSecret)
+	if err != nil {
+		return cfg, fmt.Errorf("failed to extract operand subject from certificate, %w", err)
+	}
+	cfg.OperandCN = operandCertSubject.CommonName
+
+	prometheusCertSecret, err := GetNamespacedSecret(client, GetPrometheusCertSecretName(cr, client), cr.Namespace)
+	if err != nil {
+		ctrl.Log.V(1).Info("prometheus secret not found", "err", err)
+		return cfg, nil
+	}
+	prometheusCertSubject, err := ExtractCertSubjectFromSecret(prometheusCertSecret)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.PrometheusCN = prometheusCertSubject.CommonName
+
+	return cfg, nil
+}
+
 func GetPrometheusCertSecretName(cr *v1beta2.Broker, client rtclient.Client) string {
 	// Determine the base secret name (from env or default)
 	if prometheusCertSecretName == nil {
