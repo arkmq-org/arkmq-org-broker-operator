@@ -813,6 +813,7 @@ const (
 	DeployedConditionProvisionedReason            = "Provisioned"
 	DeployedConditionSelectorEvaluationError      = "AppSelectorEvaluationError"
 	DeployedConditionPortPoolExhaustedReason      = "PortPoolExhausted"
+	DeployedConditionMissingAppCertReason         = "MissingAppCert"
 
 	AppsProvisionedConditionType           = "AppsProvisioned"
 	AppsProvisionedConditionSyncedReason   = "Synced"

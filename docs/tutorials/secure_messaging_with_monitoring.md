@@ -186,7 +186,9 @@ In this tutorial:
 You can use different CN values; the operator will extract them from your actual
 certificates. For `BrokerService`, the operator additionally generates per-queue
 Prometheus metrics for every address declared by bound `BrokerApp`s
-automatically via a control-plane-override secret.
+automatically via a control-plane-override secret. That secret also gives each
+bound app an identity in this realm, so an app can scrape the metrics of its own
+queues with its app certificate, and sees only those.
 
 **Messaging realm (AMQPS acceptor)**
 

@@ -720,3 +720,73 @@ func TestRoutingTypeConflictValidation(t *testing.T) {
 		assert.Equal(t, v1.ConditionTrue, validCondition.Status)
 	})
 }
+
+// The app cert is the identity the broker authorises the app as, so a missing
+// one has to be visible on the app itself, not only in the service's logs.
+func TestVerifyAppCertReportsMissingCertOnTheApp(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta2.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	reconciler := newAppReconcilerWithClient(
+		fake.NewClientBuilder().WithScheme(scheme).Build(), "app-alpha", "ns1")
+
+	err := reconciler.verifyAppCert()
+
+	transErr, ok := err.(*TransientError)
+	assert.True(t, ok, "must be transient so the app recovers when the cert appears")
+	assert.Equal(t, v1beta2.DeployedConditionMissingAppCertReason, transErr.ConditionReason())
+	assert.Contains(t, transErr.Error(), "app-alpha"+common.AppCertSecretSuffix)
+}
+
+func TestVerifyAppCertRejectsUnreadableCert(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta2.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "app-alpha" + common.AppCertSecretSuffix,
+			Namespace: "ns1",
+		},
+		Data: map[string][]byte{"tls.crt": []byte("not a certificate")},
+	}).Build()
+
+	err := newAppReconcilerWithClient(cl, "app-alpha", "ns1").verifyAppCert()
+
+	transErr, ok := err.(*TransientError)
+	assert.True(t, ok)
+	assert.Equal(t, v1beta2.DeployedConditionMissingAppCertReason, transErr.ConditionReason())
+}
+
+func TestVerifyAppCertAcceptsAValidCert(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta2.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	certPEM, keyPEM := mustTestKeyPairCN(t, "app-alpha")
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(WithCerts(&corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "app-alpha" + common.AppCertSecretSuffix,
+			Namespace: "ns1",
+		},
+		Data: map[string][]byte{"tls.crt": certPEM, "tls.key": keyPEM},
+	})...).Build()
+
+	assert.NoError(t, newAppReconcilerWithClient(cl, "app-alpha", "ns1").verifyAppCert())
+}
+
+func newAppReconcilerWithClient(cl client.Client, name, namespace string) BrokerAppInstanceReconciler {
+	instance := &v1beta2.BrokerApp{
+		ObjectMeta: v1.ObjectMeta{Name: name, Namespace: namespace},
+	}
+	return BrokerAppInstanceReconciler{
+		BrokerAppReconciler: &BrokerAppReconciler{
+			ReconcilerLoop: &ReconcilerLoop{
+				KubeBits: &KubeBits{Client: cl, log: logr.Discard()},
+			},
+		},
+		instance: instance,
+		status:   instance.Status.DeepCopy(),
+	}
+}

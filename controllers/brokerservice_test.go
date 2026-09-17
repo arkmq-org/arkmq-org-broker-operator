@@ -898,26 +898,20 @@ var _ = Describe("broker-service-poc", func() {
 
 				if resp != nil {
 					fmt.Printf("Prometheus metrics scrape with app cert: status=%d\n", resp.StatusCode)
-					g.Expect(resp.StatusCode).Should(Equal(401))
+					g.Expect(resp.StatusCode).Should(Equal(200))
 
-					// need to update the control plane cert users/roles -
-					// will avoid this by using ou's in generated control plane common.
-					// needs: https://issues.apache.org/jira/browse/ARTEMIS-5959
-					// then we can work the 200 ok
-					/*
-						defer resp.Body.Close()
-						body, err := io.ReadAll(resp.Body)
-						g.Expect(err).Should(Succeed())
+					defer resp.Body.Close() //nolint:errcheck
+					body, err := io.ReadAll(resp.Body)
+					g.Expect(err).Should(Succeed())
 
-						bodyStr := string(body)
-						if verbose {
-							fmt.Printf("Metrics response with app cert (first 20000 chars):\n%s\n", bodyStr[:min(20000, len(bodyStr))])
-						}
+					bodyStr := string(body)
+					if verbose {
+						fmt.Printf("Metrics response with app cert (first 20000 chars):\n%s\n", bodyStr[:min(20000, len(bodyStr))])
+					}
 
-						// Verify queue-level metrics for app queues are present with app cert too
-						g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.ONE"`), "should have MessageCount for METRICS.QUEUE.ONE")
-						g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.ONE"`), "should have ConsumerCount for METRICS.QUEUE.ONE")
-					*/
+					// Verify queue-level metrics for app queues are present with app cert too
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.ONE"`), "should have MessageCount for METRICS.QUEUE.ONE")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.ONE"`), "should have ConsumerCount for METRICS.QUEUE.ONE")
 				}
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())

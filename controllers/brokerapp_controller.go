@@ -159,6 +159,31 @@ func (reconciler BrokerAppInstanceReconciler) validateSpec() error {
 	return reconciler.validateAddressCapabilityConsistency()
 }
 
+// verifyAppCert checks the app's client certificate is present and readable.
+// Its common name is what the broker authorises the app as, so without it there
+// is nothing to provision.
+//
+// Transient rather than a ValidationError: the spec is fine, the certificate is
+// just not there yet, and a ValidationError would not retry once it appears.
+func (reconciler BrokerAppInstanceReconciler) verifyAppCert() error {
+	secretName := reconciler.instance.Name + common.AppCertSecretSuffix
+
+	secret, err := common.GetNamespacedSecret(reconciler.Client, secretName, reconciler.instance.Namespace)
+	if err != nil {
+		return NewTransientErrorWithCause(
+			broker.DeployedConditionMissingAppCertReason,
+			fmt.Sprintf("app certificate secret %s not found", secretName), err)
+	}
+
+	if _, err := common.ExtractCertSubjectFromSecret(secret); err != nil {
+		return NewTransientErrorWithCause(
+			broker.DeployedConditionMissingAppCertReason,
+			fmt.Sprintf("app certificate secret %s is not a readable key pair", secretName), err)
+	}
+
+	return nil
+}
+
 func (reconciler BrokerAppInstanceReconciler) processBindingSecret() error {
 
 	// Only manage binding secret if app has been bound to a service (status field exists)
@@ -231,10 +256,12 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 
 	reqLogger.V(2).Info("Reconciler Processing...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation)
 	if err = processor.validateSpec(); err == nil {
-		if err = processor.resolveBrokerService(); err == nil {
-			if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
-				if err = processor.processBindingSecret(); err == nil {
-					err = processor.SyncDesiredWithDeployed(processor.instance)
+		if err = processor.verifyAppCert(); err == nil {
+			if err = processor.resolveBrokerService(); err == nil {
+				if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
+					if err = processor.processBindingSecret(); err == nil {
+						err = processor.SyncDesiredWithDeployed(processor.instance)
+					}
 				}
 			}
 		}

@@ -557,12 +557,17 @@ func TestPodTemplateSpecForCR_SidecarInitContainer(t *testing.T) {
 
 func mustTestKeyPair(t *testing.T) (certPEM, keyPEM []byte) {
 	t.Helper()
+	return mustTestKeyPairCN(t, "test")
+}
+
+func mustTestKeyPairCN(t *testing.T, commonName string) (certPEM, keyPEM []byte) {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	assert.NoError(t, err)
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "test"},
+		Subject:      pkix.Name{CommonName: commonName},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
