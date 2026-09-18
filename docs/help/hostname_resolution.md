@@ -20,6 +20,14 @@ will list some of them in this document. Note that this is not a exhaustive
 coverage of all the possibilities and feel free to contribute to the
 documentation if you have other ways of doing this.
 
+The hostnames used by the operator are built from the same template regardless
+of `exposeMode`. The variables `$(CR_NAME)`, `$(CR_NAMESPACE)`,
+`$(BROKER_ORDINAL)`, `$(ITEM_NAME)`, `$(RES_TYPE)` and `$(INGRESS_DOMAIN)` are
+substituted in `ingressHost` for the Ingress (`$(RES_TYPE) = ing`),
+Route (`rte`), HTTPRoute (`httprte`) and TLSRoute (`tlsrte`) cases, so any
+DNS setup that resolves the wildcard `*.$(INGRESS_DOMAIN)` works for all four
+resource kinds.
+
 ## Prerequisite
 
 Before you start, you need to have access to a running Kubernetes cluster

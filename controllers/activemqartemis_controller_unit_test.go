@@ -59,7 +59,7 @@ func TestValidate(t *testing.T) {
 
 	namer := MakeNamers(cr)
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	valid, retry := ri.validate(cr, k8sClient, *namer)
@@ -87,7 +87,7 @@ func TestValidateBrokerPropsDuplicate(t *testing.T) {
 
 	namer := MakeNamers(cr)
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	valid, retry := ri.validate(cr, k8sClient, *namer)
@@ -115,7 +115,7 @@ func TestValidateBrokerPropsDuplicateOnFirstEquals(t *testing.T) {
 
 	namer := MakeNamers(cr)
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	valid, retry := ri.validate(cr, k8sClient, *namer)
@@ -143,7 +143,7 @@ func TestValidateBrokerPropsDuplicateOnFirstEqualsCorrect(t *testing.T) {
 
 	namer := MakeNamers(cr)
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	valid, retry := ri.validate(cr, k8sClient, *namer)
@@ -172,7 +172,7 @@ func TestStatusPodsCheckCached(t *testing.T) {
 		},
 	}
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	checkOk := func(brokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError {
@@ -209,7 +209,7 @@ func TestJolokiaStatusCached(t *testing.T) {
 		Spec:       v1beta2.BrokerClusterSpec{},
 	}
 
-	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
 	ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 	checkOk := func(brokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError {
@@ -379,7 +379,7 @@ func TestReconcileRequeuesOnNotReady(t *testing.T) {
 
 	cl := fake.NewClientBuilder().WithScheme(s).WithObjects(crd).WithStatusSubresource(crd).Build()
 
-	r := NewActiveMQArtemisReconciler(&NillCluster{}, ctrl.Log, false)
+	r := NewActiveMQArtemisReconciler(&NillCluster{}, ctrl.Log, false, false)
 	r.Client = cl
 	r.Scheme = s
 
