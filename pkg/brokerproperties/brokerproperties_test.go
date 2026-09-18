@@ -1,6 +1,7 @@
 package brokerproperties
 
 import (
+	"encoding/json"
 	"strings"
 
 	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
@@ -702,5 +703,113 @@ var _ = Describe("AssertSecretContainsOneOf", func() {
 		result := AssertSecretContainsOneOf(secret, []string{"tls.crt", "tls.key"}, "ctx")
 		Expect(result).NotTo(BeNil())
 		Expect(result.Reason).To(Equal(v1beta2.ValidConditionInvalidCertSecretReason))
+	})
+})
+
+func mustRestrictedConfig(brokerName string) []byte {
+	data, err := RestrictedConfigData(brokerName)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	return data
+}
+
+func mustRBACConfig() []byte {
+	data, err := RBACConfigData()
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	return data
+}
+
+var _ = Describe("RestrictedConfigData", func() {
+	It("produces valid JSON", func() {
+		Expect(json.Valid(mustRestrictedConfig("my-broker"))).To(BeTrue())
+	})
+
+	It("sets the broker name", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("my-broker"), &m)).To(Succeed())
+		Expect(m["name"]).To(Equal("my-broker"))
+	})
+
+	It("disables criticalAnalyzer", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["criticalAnalyzer"]).To(BeFalse())
+	})
+
+	It("disables messageCounterEnabled", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["messageCounterEnabled"]).To(BeFalse())
+	})
+
+	It("sets journalDirectory to /app/data", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["journalDirectory"]).To(Equal("/app/data"))
+	})
+
+	It("sets bindingsDirectory to /app/data/bindings", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["bindingsDirectory"]).To(Equal("/app/data/bindings"))
+	})
+
+	It("sets largeMessagesDirectory to /app/data/largemessages", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["largeMessagesDirectory"]).To(Equal("/app/data/largemessages"))
+	})
+
+	It("sets pagingDirectory to /app/data/paging", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["pagingDirectory"]).To(Equal("/app/data/paging"))
+	})
+
+	It("uses different names for different broker instances", func() {
+		a := mustRestrictedConfig("broker-a")
+		b := mustRestrictedConfig("broker-b")
+		Expect(a).NotTo(Equal(b))
+	})
+})
+
+var _ = Describe("RBACConfigData", func() {
+	type rbacResult struct {
+		SecurityRoles map[string]map[string]map[string]bool `json:"securityRoles"`
+	}
+
+	parse := func() rbacResult {
+		var r rbacResult
+		ExpectWithOffset(1, json.Unmarshal(mustRBACConfig(), &r)).To(Succeed())
+		return r
+	}
+
+	It("produces valid JSON", func() {
+		Expect(json.Valid(mustRBACConfig())).To(BeTrue())
+	})
+
+	It("grants status.view to mops.broker.getStatus", func() {
+		r := parse()
+		Expect(r.SecurityRoles["mops.broker.getStatus"]["status"]["view"]).To(BeTrue())
+	})
+
+	It("grants metrics.view to mops.mbeanserver.queryMBeans", func() {
+		r := parse()
+		Expect(r.SecurityRoles["mops.mbeanserver.queryMBeans"]["metrics"]["view"]).To(BeTrue())
+	})
+
+	It("grants metrics.view to mops.broker (for query filter removal)", func() {
+		r := parse()
+		Expect(r.SecurityRoles["mops.broker"]["metrics"]["view"]).To(BeTrue())
+	})
+
+	It("grants metrics.view to the three getTotalMessage operations", func() {
+		r := parse()
+		for _, op := range []string{
+			"mops.broker.getTotalMessageCount",
+			"mops.broker.getTotalMessagesAcknowledged",
+			"mops.broker.getTotalMessagesAdded",
+		} {
+			Expect(r.SecurityRoles[op]["metrics"]["view"]).To(BeTrue(), "expected metrics.view for %s", op)
+		}
 	})
 })

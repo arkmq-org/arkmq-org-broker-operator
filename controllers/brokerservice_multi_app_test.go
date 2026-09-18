@@ -287,8 +287,8 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			By("verifying app properties secret contains both apps")
 
-			app1ConfigKey := AppIdentityPrefixed(&app1, "capabilities.properties")
-			app2ConfigKey := AppIdentityPrefixed(&app2, "capabilities.properties")
+			app1ConfigKey := AppIdentityPrefixed(&app1, "capabilities.json")
+			app2ConfigKey := AppIdentityPrefixed(&app2, "capabilities.json")
 			secretName := AppPropertiesSecretName(serviceName)
 			secret := &corev1.Secret{}
 			secretKey := types.NamespacedName{Name: secretName, Namespace: defaultNamespace}
