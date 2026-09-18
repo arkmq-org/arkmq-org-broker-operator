@@ -16,6 +16,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -1493,15 +1495,13 @@ func TestProcessCapabilitiesGrantsQueryMBeansToAppMetricsRole(t *testing.T) {
 	secret := &corev1.Secret{}
 	assert.NoError(t, reconciler.processCapabilities(secret, app))
 
-	props := string(secret.Data[AppIdentityPrefixed(app, "capabilities.properties")])
+	var cfg brokerproperties.CapabilitiesJSON
+	assert.NoError(t, json.Unmarshal(secret.Data[AppIdentityPrefixed(app, "capabilities.json")], &cfg))
 
-	assert.Contains(t, props,
-		`securityRoles."mops.mbeanserver.queryMBeans"."ns1-my-app-metrics".view=true`,
+	assert.True(t, cfg.SecurityRoles["mops.mbeanserver.queryMBeans"]["ns1-my-app-metrics"].View,
 		"app metrics role needs the queryMBeans gate to enumerate its own mbeans")
 
-	// the grant it already had, which the gate unlocks
-	assert.Contains(t, props,
-		`securityRoles."mops.queue.my-address"."ns1-my-app-metrics".view=true`)
+	assert.True(t, cfg.SecurityRoles["mops.queue.my-address"]["ns1-my-app-metrics"].View)
 }
 
 // An app with no queues gets no metrics identity worth gating.
@@ -1516,8 +1516,11 @@ func TestProcessCapabilitiesOmitsQueryMBeansWithoutQueues(t *testing.T) {
 	secret := &corev1.Secret{}
 	assert.NoError(t, reconciler.processCapabilities(secret, app))
 
-	props := string(secret.Data[AppIdentityPrefixed(app, "capabilities.properties")])
-	assert.NotContains(t, props, "queryMBeans")
+	var cfg brokerproperties.CapabilitiesJSON
+	assert.NoError(t, json.Unmarshal(secret.Data[AppIdentityPrefixed(app, "capabilities.json")], &cfg))
+
+	_, hasQueryMBeans := cfg.SecurityRoles["mops.mbeanserver.queryMBeans"]
+	assert.False(t, hasQueryMBeans)
 }
 
 // The cached List returns apps in an arbitrary order, so unsorted entries would

@@ -122,7 +122,7 @@ func TestBrokerServiceRejectsManuallyAnnotatedApp(t *testing.T) {
 		}
 
 		// Check that no acceptor config was created for the attacker's app
-		acceptorKey := attackerNs + "-" + appName + "-acceptor.properties"
+		acceptorKey := attackerNs + "-" + appName + "-acceptor.json"
 		_, hasAcceptorConfig := secret.Data[acceptorKey]
 		assert.False(t, hasAcceptorConfig, "Should not create acceptor config for unauthorized app")
 	}
@@ -266,7 +266,7 @@ func TestBrokerServiceAllowsMatchingApp(t *testing.T) {
 		}
 
 		// Check that acceptor config was created for the legitimate app
-		acceptorKey := allowedNs + "-" + appName + "-acceptor.properties"
+		acceptorKey := allowedNs + "-" + appName + "-acceptor.json"
 		_, hasAcceptorConfig := secret.Data[acceptorKey]
 		assert.True(t, hasAcceptorConfig, "Should create acceptor config for authorized app")
 	}
@@ -386,7 +386,7 @@ func TestBrokerServiceRejectsLabelMismatch(t *testing.T) {
 		}
 
 		// Check that no acceptor config was created
-		acceptorKey := appNs + "-" + appName + "-acceptor.properties"
+		acceptorKey := appNs + "-" + appName + "-acceptor.json"
 		_, hasAcceptorConfig := secret.Data[acceptorKey]
 		assert.False(t, hasAcceptorConfig, "Should not create acceptor config for app with mismatched labels")
 	}
@@ -532,13 +532,13 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 
 	if err == nil {
 		// Should have configs for app1 and app2 but NOT attacker-app
-		_, hasApp1Config := secret.Data["team-a-app1-acceptor.properties"]
+		_, hasApp1Config := secret.Data["team-a-app1-acceptor.json"]
 		assert.True(t, hasApp1Config, "Should provision matching app1")
 
-		_, hasApp2Config := secret.Data["team-b-app2-acceptor.properties"]
+		_, hasApp2Config := secret.Data["team-b-app2-acceptor.json"]
 		assert.True(t, hasApp2Config, "Should provision matching app2")
 
-		_, hasAttackerConfig := secret.Data["other-namespace-attacker-app-acceptor.properties"]
+		_, hasAttackerConfig := secret.Data["other-namespace-attacker-app-acceptor.json"]
 		assert.False(t, hasAttackerConfig, "Should NOT provision non-matching attacker-app")
 
 		// Check provisioned apps annotation
