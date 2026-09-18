@@ -939,35 +939,13 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		}
 		brokerPropertiesMapData[common.GetCertRolesKey(common.HttpAuthenticatorRealm)] = templates.RenderCertRoles()
 
-		foundationalProps := brokerproperties.NewPropsWithHeader()
-		fmt.Fprintf(foundationalProps, "name=%s\n", environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name))
-		fmt.Fprintln(foundationalProps, "criticalAnalyzer=false")
-		fmt.Fprintln(foundationalProps, "literalMatchMarkers=()")
-
-		// with cert or token, jaas is cheap and a token will be cached while valid
-		// TODO - avoid AMQP SASL login and server login duplication, verify
-		fmt.Fprintln(foundationalProps, "authenticationCacheSize=0")
-
-		fmt.Fprintln(foundationalProps, "messageCounterEnabled=false")
-		fmt.Fprintln(foundationalProps, "journalDirectory=/app/data")
-		fmt.Fprintln(foundationalProps, "bindingsDirectory=/app/data/bindings")
-		fmt.Fprintln(foundationalProps, "largeMessagesDirectory=/app/data/largemessages")
-		fmt.Fprintln(foundationalProps, "pagingDirectory=/app/data/paging")
-
-		brokerPropertiesMapData["aa_restricted.properties"] = foundationalProps.Bytes()
-
-		rbac := brokerproperties.NewPropsWithHeader()
-		// operator status check
-		fmt.Fprintln(rbac, "securityRoles.\"mops.broker.getStatus\".status.view=true")
-
-		// jmx_exporter metrics perms
-		fmt.Fprintln(rbac, "securityRoles.\"mops.mbeanserver.queryMBeans\".metrics.view=true")
-		fmt.Fprintln(rbac, "securityRoles.\"mops.broker\".metrics.view=true") // we need view permission on the broker in order to locate through a query and retrieve it.
-		fmt.Fprintln(rbac, "securityRoles.\"mops.broker.getTotalMessageCount\".metrics.view=true")
-		fmt.Fprintln(rbac, "securityRoles.\"mops.broker.getTotalMessagesAcknowledged\".metrics.view=true")
-		fmt.Fprintln(rbac, "securityRoles.\"mops.broker.getTotalMessagesAdded\".metrics.view=true")
-
-		brokerPropertiesMapData["aa_rbac.properties"] = rbac.Bytes()
+		brokerName := environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name)
+		if brokerPropertiesMapData["aa_restricted.json"], err = brokerproperties.RestrictedConfigData(brokerName); err != nil {
+			return nil, err
+		}
+		if brokerPropertiesMapData["aa_rbac.json"], err = brokerproperties.RBACConfigData(); err != nil {
+			return nil, err
+		}
 
 		secretsToMount = append(secretsToMount, operandCertSecretName)
 		caSecret := common.GetOperatorCASecretName()

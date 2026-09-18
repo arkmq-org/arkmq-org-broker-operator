@@ -3,6 +3,8 @@ package controllers
 import (
 	"strings"
 	"testing"
+
+	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 )
 
 // Helper functions for paired tests
@@ -25,16 +27,16 @@ func testMulticastRoutingForSubscriptions(t *testing.T, useShared bool) {
 		t.Fatalf("processCapabilities failed: %v", err)
 	}
 
-	props := string(secret.Data["test-multicast-app-capabilities.properties"])
-	t.Logf("PROPS:\n%s\n", props)
+	caps := parseCapabilities(t, secret, "multicast-app")
 
-	// Should use MULTICAST routing type (NOT ANYCAST) for subscription address
-	if !strings.Contains(props, `addressConfigurations."events".routingTypes=MULTICAST`) {
-		t.Error("expected routingTypes=MULTICAST for subscription address")
+	eventsAddr := caps.AddressConfigurations["events"]
+	if eventsAddr == nil {
+		t.Fatal("expected addressConfigurations for 'events'")
 	}
 
-	if strings.Contains(props, `addressConfigurations."events".routingTypes=ANYCAST`) {
-		t.Error("should NOT have routingTypes=ANYCAST for subscription address")
+	// Should use MULTICAST routing type (NOT ANYCAST) for subscription address
+	if eventsAddr.RoutingTypes != brokerproperties.RoutingTypeMulticast {
+		t.Errorf("expected routingTypes=MULTICAST for subscription address, got %q", eventsAddr.RoutingTypes)
 	}
 }
 
@@ -56,16 +58,16 @@ func testAnycastRoutingForConsumerOf(t *testing.T, useShared bool) {
 		t.Fatalf("processCapabilities failed: %v", err)
 	}
 
-	props := string(secret.Data["test-anycast-app-capabilities.properties"])
-	t.Logf("PROPS:\n%s\n", props)
+	caps := parseCapabilities(t, secret, "anycast-app")
 
-	// Should use ANYCAST routing type (NOT MULTICAST) for consumerOf address
-	if !strings.Contains(props, `addressConfigurations."commands".routingTypes=ANYCAST`) {
-		t.Error("expected routingTypes=ANYCAST for consumerOf address")
+	commandsAddr := caps.AddressConfigurations["commands"]
+	if commandsAddr == nil {
+		t.Fatal("expected addressConfigurations for 'commands'")
 	}
 
-	if strings.Contains(props, `addressConfigurations."commands".routingTypes=MULTICAST`) {
-		t.Error("should NOT have routingTypes=MULTICAST for consumerOf address")
+	// Should use ANYCAST routing type (NOT MULTICAST) for consumerOf address
+	if commandsAddr.RoutingTypes != brokerproperties.RoutingTypeAnycast {
+		t.Errorf("expected routingTypes=ANYCAST for consumerOf address, got %q", commandsAddr.RoutingTypes)
 	}
 }
 
@@ -162,19 +164,16 @@ func TestProcessCapabilities_ConflictingRoutingTypes_MultipleApps(t *testing.T) 
 		t.Fatalf("processCapabilities for app2 failed: %v", err)
 	}
 
-	props1 := string(secret.Data["test-producer-app-capabilities.properties"])
-	props2 := string(secret.Data["test-consumer-app-capabilities.properties"])
-
-	t.Logf("APP1 PROPS:\n%s\n", props1)
-	t.Logf("APP2 PROPS:\n%s\n", props2)
+	caps1 := parseCapabilities(t, secret, "producer-app")
+	caps2 := parseCapabilities(t, secret, "consumer-app")
 
 	// App1 should have MULTICAST routing for shared-events
-	if !strings.Contains(props1, `addressConfigurations."shared-events".routingTypes=MULTICAST`) {
+	if addr := caps1.AddressConfigurations["shared-events"]; addr == nil || addr.RoutingTypes != brokerproperties.RoutingTypeMulticast {
 		t.Error("app1 should have MULTICAST routing for shared-events")
 	}
 
 	// App2 should NOT generate routingTypes (not owned)
-	if strings.Contains(props2, `addressConfigurations."shared-events".routingTypes`) {
+	if addr := caps2.AddressConfigurations["shared-events"]; addr != nil && addr.RoutingTypes != "" {
 		t.Error("app2 should NOT generate routingTypes for cross-app address")
 	}
 
@@ -184,7 +183,8 @@ func TestProcessCapabilities_ConflictingRoutingTypes_MultipleApps(t *testing.T) 
 	//
 	// At this level (processCapabilities), app2 successfully generates its ANYCAST queue config,
 	// but the BrokerApp reconciler would reject app2's spec during validation before it gets deployed.
-	if !strings.Contains(props2, `queueConfigs."shared-events".routingType=ANYCAST`) {
+	addr2 := caps2.AddressConfigurations["shared-events"]
+	if addr2 == nil || addr2.QueueConfigs["shared-events"] == nil || addr2.QueueConfigs["shared-events"].RoutingType != brokerproperties.RoutingTypeAnycast {
 		t.Error("app2 should generate ANYCAST queue config (conflict detected at validation time, not here)")
 	}
 }
@@ -210,34 +210,29 @@ func TestProcessCapabilities_SharedAddress_BothSubscriptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("processCapabilities for app1 failed: %v", err)
 	}
-
 	err = reconciler.processCapabilities(secret, app2)
 	if err != nil {
 		t.Fatalf("processCapabilities for app2 failed: %v", err)
 	}
 
-	props1 := string(secret.Data["test-sub-app1-capabilities.properties"])
-	props2 := string(secret.Data["test-sub-app2-capabilities.properties"])
-
-	t.Logf("APP1 PROPS:\n%s\n", props1)
-	t.Logf("APP2 PROPS:\n%s\n", props2)
+	caps1 := parseCapabilities(t, secret, "sub-app1")
+	caps2 := parseCapabilities(t, secret, "sub-app2")
 
 	// Both should have MULTICAST routing (compatible)
-	if !strings.Contains(props1, `addressConfigurations."topic".routingTypes=MULTICAST`) {
+	if addr := caps1.AddressConfigurations["topic"]; addr == nil || addr.RoutingTypes != brokerproperties.RoutingTypeMulticast {
 		t.Error("app1 should have MULTICAST routing")
 	}
 
 	// App2 doesn't own the address, so no routingTypes
-	if strings.Contains(props2, `addressConfigurations."topic".routingTypes`) {
+	if addr := caps2.AddressConfigurations["topic"]; addr != nil && addr.RoutingTypes != "" {
 		t.Error("app2 should NOT generate routingTypes for cross-app address")
 	}
 
-	// But both should have their subscription queues
-	if !strings.Contains(props1, `queueConfigs."sub1".routingType=MULTICAST`) {
+	// Both should have their subscription queues under the "topic" address entry
+	if addr := caps1.AddressConfigurations["topic"]; addr == nil || addr.QueueConfigs["sub1"] == nil || addr.QueueConfigs["sub1"].RoutingType != brokerproperties.RoutingTypeMulticast {
 		t.Error("app1 should have MULTICAST queue sub1")
 	}
-
-	if !strings.Contains(props2, `queueConfigs."sub2".routingType=MULTICAST`) {
+	if addr := caps2.AddressConfigurations["topic"]; addr == nil || addr.QueueConfigs["sub2"] == nil || addr.QueueConfigs["sub2"].RoutingType != brokerproperties.RoutingTypeMulticast {
 		t.Error("app2 should have MULTICAST queue sub2")
 	}
 }
@@ -263,34 +258,29 @@ func TestProcessCapabilities_SharedAddress_BothConsumerOf(t *testing.T) {
 	if err != nil {
 		t.Fatalf("processCapabilities for app1 failed: %v", err)
 	}
-
 	err = reconciler.processCapabilities(secret, app2)
 	if err != nil {
 		t.Fatalf("processCapabilities for app2 failed: %v", err)
 	}
 
-	props1 := string(secret.Data["test-consumer-app1-capabilities.properties"])
-	props2 := string(secret.Data["test-consumer-app2-capabilities.properties"])
-
-	t.Logf("APP1 PROPS:\n%s\n", props1)
-	t.Logf("APP2 PROPS:\n%s\n", props2)
+	caps1 := parseCapabilities(t, secret, "consumer-app1")
+	caps2 := parseCapabilities(t, secret, "consumer-app2")
 
 	// Both should have ANYCAST routing (compatible)
-	if !strings.Contains(props1, `addressConfigurations."queue".routingTypes=ANYCAST`) {
+	if addr := caps1.AddressConfigurations["queue"]; addr == nil || addr.RoutingTypes != brokerproperties.RoutingTypeAnycast {
 		t.Error("app1 should have ANYCAST routing")
 	}
 
 	// App2 doesn't own the address
-	if strings.Contains(props2, `addressConfigurations."queue".routingTypes`) {
+	if addr := caps2.AddressConfigurations["queue"]; addr != nil && addr.RoutingTypes != "" {
 		t.Error("app2 should NOT generate routingTypes for cross-app address")
 	}
 
 	// Both should have ANYCAST queues
-	if !strings.Contains(props1, `queueConfigs."queue".routingType=ANYCAST`) {
+	if addr := caps1.AddressConfigurations["queue"]; addr == nil || addr.QueueConfigs["queue"] == nil || addr.QueueConfigs["queue"].RoutingType != brokerproperties.RoutingTypeAnycast {
 		t.Error("app1 should have ANYCAST queue")
 	}
-
-	if !strings.Contains(props2, `queueConfigs."queue".routingType=ANYCAST`) {
+	if addr := caps2.AddressConfigurations["queue"]; addr == nil || addr.QueueConfigs["queue"] == nil || addr.QueueConfigs["queue"].RoutingType != brokerproperties.RoutingTypeAnycast {
 		t.Error("app2 should have ANYCAST queue")
 	}
 }

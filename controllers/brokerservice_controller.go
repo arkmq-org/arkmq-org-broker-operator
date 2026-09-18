@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path"
 	"reflect"
@@ -739,58 +740,66 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 		}
 	}
 
-	props := map[string]string{} // need to dedup
+	cfg := &brokerproperties.CapabilitiesJSON{
+		AddressConfigurations: map[string]*brokerproperties.AddressConfiguration{},
+		SecurityRoles:         map[string]map[string]*brokerproperties.RolePermissions{},
+	}
 
-	// Track all queue names for metrics generation
-	queueNamesForMetrics := make(map[string]bool)
+	metricsRoles := []string{"metrics", metricsRole(AppIdentity(app))}
+	grantQueueMetrics := func(queueName string) {
+		for _, rbacRole := range metricsRoles {
+			cfg.EnsureSecurityRole("mops.queue."+queueName, rbacRole).View = true
+			cfg.EnsureSecurityRole("mops.queue."+queueName+".getMessageCount", rbacRole).View = true
+			cfg.EnsureSecurityRole("mops.queue."+queueName+".getConsumerCount", rbacRole).View = true
+			cfg.EnsureSecurityRole("mops.queue."+queueName+".getDeliveringCount", rbacRole).View = true
+			cfg.EnsureSecurityRole("mops.queue."+queueName+".getPersistentSize", rbacRole).View = true
+		}
+	}
 
+	hasQueues := false
 	for addressName, addr := range addressTracker.names {
-		escapedAddressName := escapeForProperties(addressName)
-
-		var address, queueName string
+		var addressKey, queueKey string
 		fqqn := strings.SplitN(addressName, FQQNSeparator, 2)
 		isFQQN := len(fqqn) > 1
 		if isFQQN {
-			address = escapeForProperties(fqqn[0])
-			queueName = escapeForProperties(fqqn[1])
+			addressKey = fqqn[0]
+			queueKey = fqqn[1]
 		} else {
-			address = escapedAddressName
-			queueName = escapedAddressName
+			addressKey = addressName
+			queueKey = addressName
 		}
 
-		// Only generate routingTypes for addresses owned by this app
-		// (not cross-app references where AppNamespace/AppName are set)
+		addrCfg := cfg.EnsureAddressConfig(addressKey)
+
 		if addr.isOwned {
 			if addr.isMulticast {
-				props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=MULTICAST\n", address)] = ""
+				addrCfg.RoutingTypes = brokerproperties.RoutingTypeMulticast
 			} else {
-				props[fmt.Sprintf("addressConfigurations.\"%s\".routingTypes=ANYCAST\n", address)] = ""
+				addrCfg.RoutingTypes = brokerproperties.RoutingTypeAnycast
 			}
 		}
 
-		// Generate ANYCAST queue configs for all non-multicast addresses
-		// (both owned and referenced with consumer capability)
 		if !addr.isMulticast {
-			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".routingType=ANYCAST\n", address, queueName)] = ""
-			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".address=%s\n", address, queueName, address)] = ""
-			queueNamesForMetrics[queueName] = true
+			qc := addrCfg.EnsureQueueConfig(queueKey)
+			qc.RoutingType = brokerproperties.RoutingTypeAnycast
+			qc.Address = addressKey
+			grantQueueMetrics(queueKey)
+			hasQueues = true
 		}
 
-		// Generate MULTICAST queue configs for FQQN (subscription) addresses
 		if isFQQN {
-			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".routingType=MULTICAST\n", address, queueName)] = ""
-			props[fmt.Sprintf("addressConfigurations.\"%s\".queueConfigs.\"%s\".address=%s\n", address, queueName, address)] = ""
-			queueNamesForMetrics[queueName] = true
+			qc := addrCfg.EnsureQueueConfig(queueKey)
+			qc.RoutingType = brokerproperties.RoutingTypeMulticast
+			qc.Address = addressKey
+			grantQueueMetrics(queueKey)
+			hasQueues = true
 		}
 
-		// Always generate RBAC roles (for both owned and referenced addresses)
-		// use fqqn/escapedAddressName as is for RBAC
 		for _, role := range addr.senderRoles {
-			props[fmt.Sprintf("securityRoles.\"%s\".\"%s\".send=true\n", escapedAddressName, producerRole(role))] = ""
-
+			cfg.EnsureSecurityRole(addressName, producerRole(role)).Send = true
 		}
 		for _, role := range addr.consumerRoles {
-			props[fmt.Sprintf("securityRoles.\"%s\".\"%s\".consume=true\n", escapedAddressName, consumerRole(role))] = ""
+			cfg.EnsureSecurityRole(addressName, consumerRole(role)).Consume = true
 		}
 
 		// 2026-05-12T17:17:22.906184695Z Thread-0 (activemq-brokerservice-mqtt119a) INFO AMQ601264: User test-mqtt-app(test-mqtt-app-consumer,test-mqtt-app-producer)@10.244.12.28:45426 gets security check failure, reason = AMQ229213:
@@ -800,41 +809,24 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 		for _, role := range addr.subscriberRoles {
 			// but security store does not support literal match markers!
 			// https://issues.apache.org/jira/browse/ARTEMIS-6057
-			//			props[fmt.Sprintf("securityRoles.\"(%s)\".\"%s\".consume=true\n", escapedAddressName, consumerRole(role))] = ""
-			props[fmt.Sprintf("securityRoles.\"%s\".\"%s\".consume=true\n", escapedAddressName, consumerRole(role))] = ""
+			cfg.EnsureSecurityRole(addressName, consumerRole(role)).Consume = true
 		}
 	}
 
-	// Generate metrics roles for all queues
-	for queueName := range queueNamesForMetrics {
-		for _, rbacRole := range []string{"metrics", metricsRole(AppIdentity(app))} {
-			// mbean server query
-			props[fmt.Sprintf("securityRoles.\"mops.queue.%s\".\"%s\".view=true\n", queueName, rbacRole)] = ""
-
-			// attributes
-			props[fmt.Sprintf("securityRoles.\"mops.queue.%s.getMessageCount\".\"%s\".view=true\n", queueName, rbacRole)] = ""
-			props[fmt.Sprintf("securityRoles.\"mops.queue.%s.getConsumerCount\".\"%s\".view=true\n", queueName, rbacRole)] = ""
-			props[fmt.Sprintf("securityRoles.\"mops.queue.%s.getDeliveringCount\".\"%s\".view=true\n", queueName, rbacRole)] = ""
-			props[fmt.Sprintf("securityRoles.\"mops.queue.%s.getPersistentSize\".\"%s\".view=true\n", queueName, rbacRole)] = ""
-		}
+	if hasQueues {
+		cfg.EnsureSecurityRole("mops.mbeanserver.queryMBeans", metricsRole(AppIdentity(app))).View = true
 	}
 
-	// queryMBeans only enumerates; the per-queue grants above decide what comes back
-	if len(queueNamesForMetrics) > 0 {
-		props[fmt.Sprintf("securityRoles.\"mops.mbeanserver.queryMBeans\".\"%s\".view=true\n", metricsRole(AppIdentity(app)))] = ""
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("capabilities JSON for %s: %w", AppIdentity(app), err)
 	}
-
-	buf := brokerproperties.NewPropsWithHeader()
-	for _, k := range brokerproperties.SortedKeys(props) {
-		fmt.Fprint(buf, k)
-	}
-
 	if secret.Data == nil {
 		secret.Data = make(map[string][]byte)
 	}
-	secret.Data[AppIdentityPrefixed(app, "capabilities.properties")] = buf.Bytes()
+	secret.Data[AppIdentityPrefixed(app, "capabilities.json")] = data
 
-	return err
+	return nil
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigPropertiesSecret *corev1.Secret, app *broker.BrokerApp) (err error) {
@@ -897,10 +889,6 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 	certRolesCfgKey := UnderscoreAppIdentityPrefixed(app, common.GetCertRolesKey(realmName))
 	serverConfigPropertiesSecret.Data[certRolesCfgKey] = rolesBuf.Bytes()
 
-	acceptorCfgKey := AppIdentityPrefixed(app, "acceptor.properties")
-
-	buf := brokerproperties.NewPropsWithHeader()
-
 	if app.Status.Service == nil {
 		return fmt.Errorf("app %s has no service binding", AppIdentity(app))
 	}
@@ -910,35 +898,50 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 	}
 
 	name := fmt.Sprintf("%d", port)
-	fmt.Fprintln(buf, "# tls acceptor")
+	secretsBase := path.Join(common.SecretPathBase, AppPropertiesSecretName(reconciler.instance.Name))
 
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".factoryClassName=org.apache.activemq.artemis.core.remoting.impl.netty.NettyAcceptorFactory\n", name)
+	acceptorJSON := &brokerproperties.AcceptorJSON{
+		AcceptorConfigurations: map[string]*brokerproperties.AcceptorConfiguration{
+			name: {
+				FactoryClassName: brokerproperties.NettyAcceptorFactory,
+				Params: brokerproperties.AcceptorParams{
+					SecurityDomain: realmName,
+					Host:           "${HOSTNAME}",
+					Port:           port,
+					SslEnabled:     true,
+					NeedClientAuth: true,
+					SaslMechanisms: brokerproperties.SaslExternal,
+					KeyStoreType:   brokerproperties.KeyStoreTypePEMCFG,
+					KeyStorePath:   path.Join(secretsBase, pemCfgkey),
+					TrustStoreType: brokerproperties.TrustStoreTypePEMCA,
+					TrustStorePath: trustStorePath,
+				},
+			},
+		},
+		JaasConfigs: map[string]*brokerproperties.JaasRealmConfig{
+			realmName: {
+				Modules: brokerproperties.JaasModules{
+					Cert: brokerproperties.JaasLoginModule{
+						LoginModuleClass: brokerproperties.TextFileCertLoginModule,
+						ControlFlag:      brokerproperties.ControlFlagRequired,
+						Params: brokerproperties.JaasModuleParams{
+							TextFileDNRole: certRolesCfgKey,
+							TextFileDNUser: certUsersCfgKey,
+							BaseDir:        secretsBase,
+						},
+					},
+				},
+			},
+		},
+	}
 
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.securityDomain=%s\n", name, realmName)
+	acceptorData, err := json.Marshal(acceptorJSON)
+	if err != nil {
+		return fmt.Errorf("acceptor JSON for %s: %w", AppIdentity(app), err)
+	}
+	serverConfigPropertiesSecret.Data[AppIdentityPrefixed(app, "acceptor.json")] = acceptorData
 
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.host=${HOSTNAME}\n", name)
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.port=%d\n", name, port)
-
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.sslEnabled=true\n", name)
-
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.needClientAuth=true\n", name)
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.saslMechanisms=EXTERNAL\n", name)
-
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.keyStoreType=PEMCFG\n", name)
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.keyStorePath=/amq/extra/secrets/%s/%s\n", name, AppPropertiesSecretName(reconciler.instance.Name), pemCfgkey)
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.trustStoreType=PEMCA\n", name)
-	fmt.Fprintf(buf, "acceptorConfigurations.\"%s\".params.trustStorePath=%s\n", name, trustStorePath)
-
-	// need a matching realm
-	fmt.Fprintf(buf, "jaasConfigs.\"%s\".modules.cert.loginModuleClass=org.apache.activemq.artemis.spi.core.security.jaas.TextFileCertificateLoginModule\n", realmName)
-	fmt.Fprintf(buf, "jaasConfigs.\"%s\".modules.cert.controlFlag=required\n", realmName)
-	fmt.Fprintf(buf, "jaasConfigs.\"%s\".modules.cert.params.\"org.apache.activemq.jaas.textfiledn.role\"=%s\n", realmName, certRolesCfgKey)
-	fmt.Fprintf(buf, "jaasConfigs.\"%s\".modules.cert.params.\"org.apache.activemq.jaas.textfiledn.user\"=%s\n", realmName, certUsersCfgKey)
-	fmt.Fprintf(buf, "jaasConfigs.\"%s\".modules.cert.params.baseDir=%s%s\n", realmName, common.SecretPathBase, AppPropertiesSecretName(reconciler.instance.Name))
-
-	serverConfigPropertiesSecret.Data[acceptorCfgKey] = buf.Bytes()
-
-	return err
+	return nil
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) getTrustStorePath(_ *broker.BrokerService) (string, error) {
@@ -968,13 +971,6 @@ func jaasConfigRealmName(app *broker.BrokerApp) string {
 		port = app.Status.Service.AssignedPort
 	}
 	return fmt.Sprintf("port-%d", port)
-}
-
-func escapeForProperties(s string) string {
-	s = strings.Replace(s, "::", "\\:\\:", 1)
-	s = strings.Replace(s, "=", "\\=", -1)
-	s = strings.Replace(s, " ", "\\ ", -1)
-	return s
 }
 
 func producerRole(prefix string) string {

@@ -15,8 +15,9 @@ limitations under the License.
 package controllers
 
 import (
-	"strings"
 	"testing"
+
+	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 )
 
 // Helper functions for paired tests
@@ -39,26 +40,24 @@ func testEmptySubscriptionsArrayMulticastOnly(t *testing.T, useShared bool) {
 		t.Fatalf("processCapabilities failed: %v", err)
 	}
 
-	props := string(secret.Data["test-multicast-app-capabilities.properties"])
-	t.Logf("PROPS: \n%s\n", props)
+	caps := parseCapabilities(t, secret, "multicast-app")
 
-	// Should have addressConfiguration with routing types
-	if !strings.Contains(props, `addressConfigurations."events".routingTypes=`) {
-		t.Error("expected addressConfigurations.routingTypes for owned address 'events'")
+	eventsAddr := caps.AddressConfigurations["events"]
+	if eventsAddr == nil {
+		t.Fatal("expected addressConfigurations for owned address 'events'")
 	}
 
-	// Should contain MULTICAST routing
-	if !strings.Contains(props, `MULTICAST`) {
-		t.Error("expected MULTICAST routing type for empty queues array")
+	if eventsAddr.RoutingTypes != brokerproperties.RoutingTypeMulticast {
+		t.Errorf("expected MULTICAST routing type for empty queues array, got %q", eventsAddr.RoutingTypes)
 	}
 
-	// Should NOT have any queueConfigs (no specific queues declared)
-	if strings.Contains(props, `queueConfigs`) {
+	// Should NOT have any queueConfigs (no specific queues declared for multicast-only)
+	if len(eventsAddr.QueueConfigs) > 0 {
 		t.Error("should NOT have queueConfigs for multicast-only address (empty queues array)")
 	}
 
 	// Should NOT have RBAC since no capabilities
-	if strings.Contains(props, `securityRoles."events"`) {
+	if _, ok := caps.SecurityRoles["events"]; ok {
 		t.Error("should NOT have securityRoles when app has no capabilities")
 	}
 }
@@ -81,32 +80,26 @@ func testSingleQueueAnycastRouting(t *testing.T, useShared bool) {
 		t.Fatalf("processCapabilities failed: %v", err)
 	}
 
-	props := string(secret.Data["test-anycast-app-capabilities.properties"])
-	t.Logf("PROPS: \n%s\n", props)
+	caps := parseCapabilities(t, secret, "anycast-app")
 
-	// Should have addressConfiguration
-	if !strings.Contains(props, `addressConfigurations."orders".routingTypes=`) {
-		t.Error("expected addressConfigurations.routingTypes for owned address 'orders'")
+	ordersAddr := caps.AddressConfigurations["orders"]
+	if ordersAddr == nil {
+		t.Fatal("expected addressConfigurations for owned address 'orders'")
 	}
 
-	// Should contain ANYCAST routing
-	if !strings.Contains(props, `ANYCAST`) {
-		t.Error("expected ANYCAST routing type for address with queues")
+	if ordersAddr.RoutingTypes != brokerproperties.RoutingTypeAnycast {
+		t.Errorf("expected ANYCAST routing type for address with queues, got %q", ordersAddr.RoutingTypes)
 	}
 
-	// Should have queueConfig for the specified queue
-	if !strings.Contains(props, `addressConfigurations."orders".queueConfigs."orders"`) {
-		t.Error("expected queueConfigs for declared queue 'orders'")
+	queueCfg := ordersAddr.QueueConfigs["orders"]
+	if queueCfg == nil {
+		t.Fatal("expected queueConfigs for declared queue 'orders'")
 	}
-
-	// Should have routingType ANYCAST for the queue
-	if !strings.Contains(props, `queueConfigs."orders".routingType=ANYCAST`) {
-		t.Error("expected queueConfigs routingType=ANYCAST for declared queue")
+	if queueCfg.RoutingType != brokerproperties.RoutingTypeAnycast {
+		t.Errorf("expected queueConfigs routingType=ANYCAST for declared queue, got %q", queueCfg.RoutingType)
 	}
-
-	// Should map queue to address
-	if !strings.Contains(props, `queueConfigs."orders".address=orders`) {
-		t.Error("expected queueConfigs address mapping for declared queue")
+	if queueCfg.Address != "orders" {
+		t.Errorf("expected queueConfigs address=orders, got %q", queueCfg.Address)
 	}
 }
 
@@ -128,27 +121,28 @@ func testMultipleSubsAllCreated(t *testing.T, useShared bool) {
 		t.Fatalf("processCapabilities failed: %v", err)
 	}
 
-	props := string(secret.Data["test-multi-queue-app-capabilities.properties"])
-	t.Logf("PROPS: \n%s\n", props)
+	caps := parseCapabilities(t, secret, "multi-queue-app")
 
-	// Should have addressConfiguration
-	if !strings.Contains(props, `addressConfigurations."tasks".routingTypes=`) {
-		t.Error("expected addressConfigurations.routingTypes for owned address 'tasks'")
+	tasksAddr := caps.AddressConfigurations["tasks"]
+	if tasksAddr == nil {
+		t.Fatal("expected addressConfigurations for owned address 'tasks'")
 	}
 
-	// Should have queueConfigs for all three queues
-	queues := []string{"high-priority", "low-priority", "default"}
-	for _, queue := range queues {
-		if !strings.Contains(props, `queueConfigs."`+queue+`"`) {
-			t.Errorf("expected queueConfigs for declared queue '%s'", queue)
-		}
+	if tasksAddr.RoutingTypes != brokerproperties.RoutingTypeMulticast {
+		t.Errorf("expected MULTICAST routing for subscription address, got %q", tasksAddr.RoutingTypes)
+	}
 
-		if !strings.Contains(props, `queueConfigs."`+queue+`".routingType=MULTICAST`) {
-			t.Errorf("expected routingType=MULTICAST for queue '%s' (subscriptions imply pub/sub)", queue)
+	for _, queueName := range []string{"high-priority", "low-priority", "default"} {
+		queueCfg := tasksAddr.QueueConfigs[queueName]
+		if queueCfg == nil {
+			t.Errorf("expected queueConfigs for declared queue %q", queueName)
+			continue
 		}
-
-		if !strings.Contains(props, `queueConfigs."`+queue+`".address=tasks`) {
-			t.Errorf("expected queue '%s' to map to address 'tasks'", queue)
+		if queueCfg.RoutingType != brokerproperties.RoutingTypeMulticast {
+			t.Errorf("expected routingType=MULTICAST for queue %q (subscriptions imply pub/sub), got %q", queueName, queueCfg.RoutingType)
+		}
+		if queueCfg.Address != "tasks" {
+			t.Errorf("expected queue %q to map to address 'tasks', got %q", queueName, queueCfg.Address)
 		}
 	}
 }
@@ -173,26 +167,28 @@ func testSubsWithCapabilitiesSubsAndRBAC(t *testing.T, useShared bool) {
 		t.Fatalf("processCapabilities failed: %v", err)
 	}
 
-	props := string(secret.Data["test-queue-with-caps-capabilities.properties"])
-	t.Logf("PROPS: \n%s\n", props)
+	caps := parseCapabilities(t, secret, "queue-with-caps")
 
-	// Should have addressConfiguration
-	if !strings.Contains(props, `addressConfigurations."commands".routingTypes=`) {
-		t.Error("expected addressConfigurations.routingTypes for owned address 'commands'")
+	commandsAddr := caps.AddressConfigurations["commands"]
+	if commandsAddr == nil {
+		t.Fatal("expected addressConfigurations for 'commands'")
+	}
+	if commandsAddr.RoutingTypes != brokerproperties.RoutingTypeAnycast {
+		t.Errorf("expected ANYCAST routing, got %q", commandsAddr.RoutingTypes)
+	}
+	if commandsAddr.QueueConfigs["commands"] == nil || commandsAddr.QueueConfigs["commands"].RoutingType != brokerproperties.RoutingTypeAnycast {
+		t.Error("expected queueConfigs for declared queue 'commands' with ANYCAST routing")
 	}
 
-	// Should have queueConfig for the declared queue
-	if !strings.Contains(props, `queueConfigs."commands".routingType=ANYCAST`) {
-		t.Error("expected queueConfigs for declared queue 'commands'")
+	commandsRoles := caps.SecurityRoles["commands"]
+	if commandsRoles == nil {
+		t.Fatal("expected securityRoles for 'commands'")
 	}
-
-	// Should have RBAC for both producer and consumer
-	if !strings.Contains(props, `securityRoles."commands"."test-queue-with-caps-producer".send=true`) {
-		t.Error("expected producer RBAC role")
+	if p := commandsRoles["test-queue-with-caps-producer"]; p == nil || !p.Send {
+		t.Error("expected producer RBAC role with send=true")
 	}
-
-	if !strings.Contains(props, `securityRoles."commands"."test-queue-with-caps-consumer".consume=true`) {
-		t.Error("expected consumer RBAC role")
+	if p := commandsRoles["test-queue-with-caps-consumer"]; p == nil || !p.Consume {
+		t.Error("expected consumer RBAC role with consume=true")
 	}
 }
 
@@ -214,22 +210,19 @@ func testNoQueuesFieldInferredFromCapabilities(t *testing.T, useShared bool) {
 		t.Fatalf("processCapabilities failed: %v", err)
 	}
 
-	props := string(secret.Data["test-inferred-queues-capabilities.properties"])
-	t.Logf("PROPS: \n%s\n", props)
+	caps := parseCapabilities(t, secret, "inferred-queues")
 
-	// Should have addressConfiguration
-	if !strings.Contains(props, `addressConfigurations."legacy".routingTypes=`) {
-		t.Error("expected addressConfigurations.routingTypes for owned address 'legacy'")
+	legacyAddr := caps.AddressConfigurations["legacy"]
+	if legacyAddr == nil {
+		t.Fatal("expected addressConfigurations for owned address 'legacy'")
 	}
-
-	// Should have queueConfig inferred from ConsumerOf capability
-	// Current behavior: creates queue with same name as address
-	if !strings.Contains(props, `queueConfigs."legacy"`) {
+	if legacyAddr.RoutingTypes == "" {
+		t.Error("expected routingTypes for owned address 'legacy'")
+	}
+	if legacyAddr.QueueConfigs["legacy"] == nil {
 		t.Error("expected queueConfigs inferred from ConsumerOf capability")
 	}
-
-	// Should have RBAC
-	if !strings.Contains(props, `securityRoles."legacy"`) {
+	if _, ok := caps.SecurityRoles["legacy"]; !ok {
 		t.Error("expected securityRoles from capabilities")
 	}
 }
@@ -258,23 +251,20 @@ func testMixedMulticastAndAnycast(t *testing.T, useShared bool) {
 		t.Fatalf("processCapabilities failed: %v", err)
 	}
 
-	props := string(secret.Data["test-mixed-routing-capabilities.properties"])
-	t.Logf("PROPS: \n%s\n", props)
+	caps := parseCapabilities(t, secret, "mixed-routing")
 
-	// Should have addressConfigurations for both
-	if !strings.Contains(props, `addressConfigurations."events"`) {
+	if caps.AddressConfigurations["events"] == nil {
 		t.Error("expected addressConfigurations for 'events'")
 	}
-	if !strings.Contains(props, `addressConfigurations."commands"`) {
+	if caps.AddressConfigurations["commands"] == nil {
 		t.Error("expected addressConfigurations for 'commands'")
 	}
 
-	// Should have queueConfig only for 'commands' (has queues), not 'events' (empty queues)
-	if strings.Contains(props, `addressConfigurations."events".queueConfigs`) {
+	// Should have queueConfig only for 'commands' (anycast), not 'events' (multicast-only)
+	if len(caps.AddressConfigurations["events"].QueueConfigs) > 0 {
 		t.Error("should NOT have queueConfigs for multicast-only address 'events'")
 	}
-
-	if !strings.Contains(props, `addressConfigurations."commands".queueConfigs."commands"`) {
+	if caps.AddressConfigurations["commands"].QueueConfigs["commands"] == nil {
 		t.Error("expected queueConfigs for anycast address 'commands'")
 	}
 }
@@ -297,33 +287,22 @@ func testSubsWithSubscriberCapability(t *testing.T, useShared bool) {
 		t.Fatalf("processCapabilities failed: %v", err)
 	}
 
-	props := string(secret.Data["test-subscriber-with-queues-capabilities.properties"])
-	t.Logf("PROPS: \n%s\n", props)
+	caps := parseCapabilities(t, secret, "subscriber-with-queues")
 
-	// Should have queueConfigs for both declared queues (email, sms)
-	if !strings.Contains(props, `queueConfigs."email"`) {
-		t.Error("expected queueConfigs for declared queue 'email'")
-	}
-	if !strings.Contains(props, `queueConfigs."sms"`) {
-		t.Error("expected queueConfigs for declared queue 'sms'")
+	notifAddr := caps.AddressConfigurations["notifications"]
+	if notifAddr == nil {
+		t.Fatal("expected addressConfigurations for 'notifications'")
 	}
 
-	// Should also have queueConfig for the FQQN queue from SubscriberOf
-	if !strings.Contains(props, `queueConfigs."push"`) {
-		t.Error("expected queueConfigs for subscriber FQQN queue 'push'")
-	}
-
-	// The FQQN queue should be MULTICAST (from SubscriberOf)
-	if !strings.Contains(props, `queueConfigs."push".routingType=MULTICAST`) {
-		t.Error("expected MULTICAST routing for subscriber FQQN queue")
-	}
-
-	// The declared queues should be ANYCAST (from spec.addresses.queues)
-	if !strings.Contains(props, `queueConfigs."email".routingType=MULTICAST`) {
-		t.Error("expected MULTICAST routing for declared queue 'email'")
-	}
-	if !strings.Contains(props, `queueConfigs."sms".routingType=MULTICAST`) {
-		t.Error("expected MULTICAST routing for declared queue 'sms'")
+	for _, queueName := range []string{"email", "sms", "push"} {
+		queueCfg := notifAddr.QueueConfigs[queueName]
+		if queueCfg == nil {
+			t.Errorf("expected queueConfigs for queue %q", queueName)
+			continue
+		}
+		if queueCfg.RoutingType != brokerproperties.RoutingTypeMulticast {
+			t.Errorf("expected MULTICAST routing for queue %q, got %q", queueName, queueCfg.RoutingType)
+		}
 	}
 }
 

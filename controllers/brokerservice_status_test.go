@@ -511,7 +511,7 @@ var _ = Describe("broker-service status conditions", func() {
 				g.Expect(k8sClient.Get(ctx, secretKey, secret)).Should(Succeed())
 				// Verify both capabilities are present
 
-				addressSettingsKey := AppIdentityPrefixed(createdApp, "capabilities.properties")
+				addressSettingsKey := AppIdentityPrefixed(createdApp, "capabilities.json")
 				data := string(secret.Data[addressSettingsKey])
 				if verbose {
 					fmt.Printf("Address settings for app: %s\n", data)

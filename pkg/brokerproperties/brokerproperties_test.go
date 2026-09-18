@@ -1,6 +1,7 @@
 package brokerproperties
 
 import (
+	"encoding/json"
 	"strings"
 
 	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
@@ -702,5 +703,240 @@ var _ = Describe("AssertSecretContainsOneOf", func() {
 		result := AssertSecretContainsOneOf(secret, []string{"tls.crt", "tls.key"}, "ctx")
 		Expect(result).NotTo(BeNil())
 		Expect(result.Reason).To(Equal(v1beta2.ValidConditionInvalidCertSecretReason))
+	})
+})
+
+func mustRestrictedConfig(brokerName string) []byte {
+	data, err := RestrictedConfigData(brokerName)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	return data
+}
+
+func mustRBACConfig() []byte {
+	data, err := RBACConfigData()
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	return data
+}
+
+var _ = Describe("RestrictedConfigData", func() {
+	It("produces valid JSON", func() {
+		Expect(json.Valid(mustRestrictedConfig("my-broker"))).To(BeTrue())
+	})
+
+	It("sets the broker name", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("my-broker"), &m)).To(Succeed())
+		Expect(m["name"]).To(Equal("my-broker"))
+	})
+
+	It("disables criticalAnalyzer", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["criticalAnalyzer"]).To(BeFalse())
+	})
+
+	It("disables messageCounterEnabled", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["messageCounterEnabled"]).To(BeFalse())
+	})
+
+	It("sets journalDirectory to /app/data", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["journalDirectory"]).To(Equal("/app/data"))
+	})
+
+	It("sets bindingsDirectory to /app/data/bindings", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["bindingsDirectory"]).To(Equal("/app/data/bindings"))
+	})
+
+	It("sets largeMessagesDirectory to /app/data/largemessages", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["largeMessagesDirectory"]).To(Equal("/app/data/largemessages"))
+	})
+
+	It("sets pagingDirectory to /app/data/paging", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["pagingDirectory"]).To(Equal("/app/data/paging"))
+	})
+
+	It("sets literalMatchMarkers to ()", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["literalMatchMarkers"]).To(Equal("()"))
+	})
+
+	It("sets authenticationCacheSize to 0", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		Expect(m["authenticationCacheSize"]).To(BeEquivalentTo(0))
+	})
+
+	It("uses different names for different broker instances", func() {
+		a := mustRestrictedConfig("broker-a")
+		b := mustRestrictedConfig("broker-b")
+		Expect(a).NotTo(Equal(b))
+	})
+})
+
+var _ = Describe("RBACConfigData", func() {
+	type rbacResult struct {
+		SecurityRoles map[string]map[string]map[string]bool `json:"securityRoles"`
+	}
+
+	parse := func() rbacResult {
+		var r rbacResult
+		ExpectWithOffset(1, json.Unmarshal(mustRBACConfig(), &r)).To(Succeed())
+		return r
+	}
+
+	It("produces valid JSON", func() {
+		Expect(json.Valid(mustRBACConfig())).To(BeTrue())
+	})
+
+	It("grants status.view to mops.broker.getStatus", func() {
+		r := parse()
+		Expect(r.SecurityRoles["mops.broker.getStatus"]["status"]["view"]).To(BeTrue())
+	})
+
+	It("grants metrics.view to mops.mbeanserver.queryMBeans", func() {
+		r := parse()
+		Expect(r.SecurityRoles["mops.mbeanserver.queryMBeans"]["metrics"]["view"]).To(BeTrue())
+	})
+
+	It("grants metrics.view to mops.broker (for query filter removal)", func() {
+		r := parse()
+		Expect(r.SecurityRoles["mops.broker"]["metrics"]["view"]).To(BeTrue())
+	})
+
+	It("grants metrics.view to the three getTotalMessage operations", func() {
+		r := parse()
+		for _, op := range []string{
+			"mops.broker.getTotalMessageCount",
+			"mops.broker.getTotalMessagesAcknowledged",
+			"mops.broker.getTotalMessagesAdded",
+		} {
+			Expect(r.SecurityRoles[op]["metrics"]["view"]).To(BeTrue(), "expected metrics.view for %s", op)
+		}
+	})
+
+	It("contains exactly 6 security role entries", func() {
+		r := parse()
+		Expect(r.SecurityRoles).To(HaveLen(6))
+	})
+})
+
+var _ = Describe("AcceptorJSON", func() {
+	build := func() AcceptorJSON {
+		return AcceptorJSON{
+			AcceptorConfigurations: map[string]*AcceptorConfiguration{
+				"61616": {
+					FactoryClassName: NettyAcceptorFactory,
+					Params: AcceptorParams{
+						SecurityDomain: "port-61616",
+						Host:           "${HOSTNAME}",
+						Port:           61616,
+						SslEnabled:     true,
+						NeedClientAuth: true,
+						SaslMechanisms: SaslExternal,
+						KeyStoreType:   KeyStoreTypePEMCFG,
+						KeyStorePath:   "/amq/extra/secrets/my-svc-app-bp/_ns1-my-app-tls.pemcfg",
+						TrustStoreType: TrustStoreTypePEMCA,
+						TrustStorePath: "/amq/extra/secrets/ca-secret/ca.crt",
+					},
+				},
+			},
+			JaasConfigs: map[string]*JaasRealmConfig{
+				"port-61616": {
+					Modules: JaasModules{
+						Cert: JaasLoginModule{
+							LoginModuleClass: TextFileCertLoginModule,
+							ControlFlag:      ControlFlagRequired,
+							Params: JaasModuleParams{
+								TextFileDNRole: "_ns1-my-app-cert_roles.port-61616.properties",
+								TextFileDNUser: "_ns1-my-app-cert_users.port-61616.properties",
+								BaseDir:        "/amq/extra/secrets/my-svc-app-bp",
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	It("produces valid JSON", func() {
+		data, err := json.Marshal(build())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(json.Valid(data)).To(BeTrue())
+	})
+
+	It("sets the acceptor factory class", func() {
+		data, err := json.Marshal(build())
+		Expect(err).NotTo(HaveOccurred())
+		var m map[string]any
+		Expect(json.Unmarshal(data, &m)).To(Succeed())
+		cfgs := m["acceptorConfigurations"].(map[string]any)
+		acc := cfgs["61616"].(map[string]any)
+		Expect(acc["factoryClassName"]).To(Equal(NettyAcceptorFactory))
+	})
+
+	It("sets SSL and client auth params", func() {
+		data, err := json.Marshal(build())
+		Expect(err).NotTo(HaveOccurred())
+		var m map[string]any
+		Expect(json.Unmarshal(data, &m)).To(Succeed())
+		params := m["acceptorConfigurations"].(map[string]any)["61616"].(map[string]any)["params"].(map[string]any)
+		Expect(params["sslEnabled"]).To(BeTrue())
+		Expect(params["needClientAuth"]).To(BeTrue())
+		Expect(params["saslMechanisms"]).To(Equal(SaslExternal))
+	})
+
+	It("sets the acceptor port and host", func() {
+		data, err := json.Marshal(build())
+		Expect(err).NotTo(HaveOccurred())
+		var m map[string]any
+		Expect(json.Unmarshal(data, &m)).To(Succeed())
+		params := m["acceptorConfigurations"].(map[string]any)["61616"].(map[string]any)["params"].(map[string]any)
+		Expect(params["host"]).To(Equal("${HOSTNAME}"))
+		Expect(params["port"]).To(BeEquivalentTo(61616))
+	})
+
+	It("sets keystore and truststore config", func() {
+		data, err := json.Marshal(build())
+		Expect(err).NotTo(HaveOccurred())
+		var m map[string]any
+		Expect(json.Unmarshal(data, &m)).To(Succeed())
+		params := m["acceptorConfigurations"].(map[string]any)["61616"].(map[string]any)["params"].(map[string]any)
+		Expect(params["keyStoreType"]).To(Equal(KeyStoreTypePEMCFG))
+		Expect(params["keyStorePath"]).To(Equal("/amq/extra/secrets/my-svc-app-bp/_ns1-my-app-tls.pemcfg"))
+		Expect(params["trustStoreType"]).To(Equal(TrustStoreTypePEMCA))
+		Expect(params["trustStorePath"]).To(Equal("/amq/extra/secrets/ca-secret/ca.crt"))
+	})
+
+	It("sets the JAAS login module config", func() {
+		data, err := json.Marshal(build())
+		Expect(err).NotTo(HaveOccurred())
+		var m map[string]any
+		Expect(json.Unmarshal(data, &m)).To(Succeed())
+		jaas := m["jaasConfigs"].(map[string]any)["port-61616"].(map[string]any)
+		modules := jaas["modules"].(map[string]any)["cert"].(map[string]any)
+		Expect(modules["loginModuleClass"]).To(Equal(TextFileCertLoginModule))
+		Expect(modules["controlFlag"]).To(Equal(ControlFlagRequired))
+	})
+
+	It("sets the JAAS cert file params", func() {
+		data, err := json.Marshal(build())
+		Expect(err).NotTo(HaveOccurred())
+		var m map[string]any
+		Expect(json.Unmarshal(data, &m)).To(Succeed())
+		params := m["jaasConfigs"].(map[string]any)["port-61616"].(map[string]any)["modules"].(map[string]any)["cert"].(map[string]any)["params"].(map[string]any)
+		Expect(params["org.apache.activemq.jaas.textfiledn.role"]).To(Equal("_ns1-my-app-cert_roles.port-61616.properties"))
+		Expect(params["org.apache.activemq.jaas.textfiledn.user"]).To(Equal("_ns1-my-app-cert_users.port-61616.properties"))
+		Expect(params["baseDir"]).To(Equal("/amq/extra/secrets/my-svc-app-bp"))
 	})
 })
