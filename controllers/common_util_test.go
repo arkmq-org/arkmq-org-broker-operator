@@ -624,6 +624,12 @@ func LogsOfPod(podWithOrdinal string, brokerName string, namespace string, g Gom
 }
 
 func ExecOnPod(podWithOrdinal string, brokerName string, namespace string, command []string, g Gomega) string {
+	return ExecOnPodContainer(podWithOrdinal, brokerName+"-container", namespace, command, g)
+}
+
+// ExecOnPodContainer is ExecOnPod for pods the operator does not own, whose
+// container is not named after a broker CR.
+func ExecOnPodContainer(podName string, containerName string, namespace string, command []string, g Gomega) string {
 
 	gvk := schema.GroupVersionKind{
 		Group:   "",
@@ -639,10 +645,10 @@ func ExecOnPod(podWithOrdinal string, brokerName string, namespace string, comma
 		Post().
 		Namespace(namespace).
 		Resource("pods").
-		Name(podWithOrdinal).
+		Name(podName).
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
-			Container: brokerName + "-container",
+			Container: containerName,
 			Command:   command,
 			Stdin:     false,
 			Stdout:    true,
@@ -1012,6 +1018,50 @@ func UninstallCertManager() error {
 	cmd = exec.Command(kubeTool, "delete", "namespace", "cert-manager")
 	err = cmd.Run()
 	return err
+}
+
+// PrometheusStackInstalled reports whether the prometheus stack is present. The
+// E2E suite requires it the same way it requires cert-manager: the operator
+// generates scrape wiring for every BrokerService and BrokerApp, so a cluster
+// without it cannot exercise a first class part of the operator's behaviour.
+func PrometheusStackInstalled() bool {
+	deployment := &appsv1.Deployment{}
+	key := types.NamespacedName{Name: "kube-prometheus-stack-operator", Namespace: prometheusNamespace}
+	return k8sClient.Get(ctx, key, deployment) == nil
+}
+
+// InstallPrometheusStack installs the same chart the tutorials use, minus the
+// pieces no test looks at. The selectors are opened up so the Prometheus picks up
+// whatever the operator generates without anything having to be labelled for the
+// chart's release.
+func InstallPrometheusStack() error {
+	fmt.Printf("Installing the prometheus stack using %s\n", helmCmd)
+
+	cmd := exec.Command(helmCmd, "repo", "add", "prometheus-community", "https://prometheus-community.github.io/helm-charts", "--force-update")
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	cmd = exec.Command(helmCmd, "upgrade", "-i", "-n", prometheusNamespace,
+		"kube-prometheus-stack", "prometheus-community/kube-prometheus-stack",
+		"--set", "grafana.enabled=false",
+		"--set", "alertmanager.enabled=false",
+		"--set", "nodeExporter.enabled=false",
+		"--set", "kubeStateMetrics.enabled=false",
+		"--set", "prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false",
+		"--set", "prometheus.prometheusSpec.scrapeConfigSelectorNilUsesHelmValues=false",
+		"--create-namespace", "--wait")
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("error installing the prometheus stack %v\n", err)
+		return err
+	}
+
+	return nil
+}
+
+func UninstallPrometheusStack() error {
+	cmd := exec.Command(helmCmd, "uninstall", "-n", prometheusNamespace, "kube-prometheus-stack")
+	return cmd.Run()
 }
 
 func CertManagerInstalled() bool {

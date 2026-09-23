@@ -24,6 +24,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -31,6 +32,8 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	monitoringv1alpha1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1alpha1"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -40,6 +43,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	brokerv1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/monitoring"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/ingresses"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
 	svc "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/services"
@@ -63,6 +67,12 @@ var _ = Describe("broker-service", func() {
 			if !CertManagerInstalled() {
 				Expect(InstallCertManager()).To(Succeed())
 				installedCertManager = true
+			}
+
+			// required, not optional: the operator generates scrape wiring for every
+			// service and app, so the E2E cluster has to be able to run it
+			if !PrometheusStackInstalled() {
+				Expect(InstallPrometheusStack()).To(Succeed())
 			}
 
 			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
@@ -414,6 +424,16 @@ var _ = Describe("broker-service", func() {
 				})
 			}
 
+			By("installing prometheus cert")
+			InstallCert(common.DefaultPrometheusCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = common.DefaultPrometheusCertSecretName
+				candidate.Spec.CommonName = "prometheus"
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
+
 			By("deploying app-alpha (produces/consumes on alpha-topic)")
 			Expect(k8sClient.Create(ctx, &appAlpha)).Should(Succeed())
 
@@ -574,6 +594,86 @@ var _ = Describe("broker-service", func() {
 				g.Expect(body).Should(MatchRegexp(`broker_queue_message_count.*queue="beta-client\.beta-topic"`))
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
+			// The scraper side of the same story: the operator generates the wiring a
+			// Prometheus needs, and that wiring reproduces the isolation asserted
+			// above without anyone hand writing a target, a serverName or a cert ref.
+			By("the operator generating a ScrapeConfig for the service, targeting the broker pod")
+			serviceScrapeConfig := &monitoringv1alpha1.ScrapeConfig{}
+			wiringKey := types.NamespacedName{Name: serviceName + monitoring.WiringSuffix, Namespace: defaultNamespace}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, wiringKey, serviceScrapeConfig)).Should(Succeed())
+				g.Expect(serviceScrapeConfig.Labels).Should(HaveKeyWithValue(common.LabelMonitoring, "true"))
+
+				g.Expect(serviceScrapeConfig.Spec.StaticConfigs).Should(HaveLen(1))
+				g.Expect(serviceScrapeConfig.Spec.StaticConfigs[0].Targets).Should(HaveLen(1))
+				g.Expect(string(serviceScrapeConfig.Spec.StaticConfigs[0].Targets[0])).Should(
+					Equal(fmt.Sprintf("%s:%d", serverName, monitoring.Port)))
+
+				g.Expect(serviceScrapeConfig.Spec.TLSConfig).ShouldNot(BeNil())
+				// only the wildcard SAN covers the fully qualified pod name, so
+				// the bare service DNS name would not verify
+				g.Expect(serviceScrapeConfig.Spec.TLSConfig.ServerName).Should(Equal(serverName))
+				g.Expect(serviceScrapeConfig.Spec.TLSConfig.Cert.Secret).ShouldNot(BeNil())
+				g.Expect(serviceScrapeConfig.Spec.TLSConfig.Cert.Secret.Name).Should(
+					Equal(common.DefaultPrometheusCertSecretName),
+					"the service scrapes as prometheus, which the broker grants the broad metrics role")
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("the operator generating a ScrapeConfig per app, targeting the broker pod")
+			for _, app := range []*brokerv1beta2.BrokerApp{&appAlpha, &appBeta} {
+				Eventually(func(g Gomega) {
+					scrapeConfig := generatedScrapeConfig(g, app)
+
+					g.Expect(scrapeConfig.Spec.StaticConfigs).Should(HaveLen(1))
+					g.Expect(scrapeConfig.Spec.StaticConfigs[0].Targets).Should(HaveLen(1))
+					g.Expect(string(scrapeConfig.Spec.StaticConfigs[0].Targets[0])).Should(
+						Equal(fmt.Sprintf("%s:%d", serverName, monitoring.Port)),
+						"the app scrapes the broker pod directly, not the messaging host from its binding secret")
+
+					g.Expect(scrapeConfig.Spec.TLSConfig).ShouldNot(BeNil())
+					g.Expect(scrapeConfig.Spec.TLSConfig.ServerName).Should(Equal(serverName))
+					g.Expect(scrapeConfig.Spec.TLSConfig.Cert.Secret).ShouldNot(BeNil())
+					g.Expect(scrapeConfig.Spec.TLSConfig.Cert.Secret.Name).Should(
+						Equal(app.Name+common.AppCertSecretSuffix),
+						"the app's own identity, read from the app's own namespace")
+				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+			}
+
+			// Everything below is driven purely from the generated spec: a wrong
+			// serverName, or a cert reference resolved in the wrong namespace,
+			// fails here instead of producing a Prometheus target stuck in "down".
+			By("app-alpha's generated ScrapeConfig seeing only alpha's queues")
+			Eventually(func(g Gomega) {
+				body := scrapeFromScrapeConfig(g, generatedScrapeConfig(g, &appAlpha))
+
+				g.Expect(body).Should(MatchRegexp(`broker_queue_message_count.*queue="alpha-client\.alpha-topic"`))
+				g.Expect(body).ShouldNot(MatchRegexp(`queue="beta-client\.beta-topic"`))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("app-beta's generated ScrapeConfig seeing only beta's queues")
+			Eventually(func(g Gomega) {
+				body := scrapeFromScrapeConfig(g, generatedScrapeConfig(g, &appBeta))
+
+				g.Expect(body).Should(MatchRegexp(`broker_queue_message_count.*queue="beta-client\.beta-topic"`))
+				g.Expect(body).ShouldNot(MatchRegexp(`queue="alpha-client\.alpha-topic"`))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("the service's generated ScrapeConfig seeing every app's queues")
+			Eventually(func(g Gomega) {
+				body := scrapeFromScrapeConfig(g, serviceScrapeConfig)
+
+				g.Expect(body).Should(MatchRegexp(`broker_queue_message_count.*queue="alpha-client\.alpha-topic"`))
+				g.Expect(body).Should(MatchRegexp(`broker_queue_message_count.*queue="beta-client\.beta-topic"`))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("the generated objects not being rewritten on every reconcile")
+			wiringVersion := serviceScrapeConfig.ResourceVersion
+			Consistently(func(g Gomega) {
+				current := &monitoringv1alpha1.ScrapeConfig{}
+				g.Expect(k8sClient.Get(ctx, wiringKey, current)).Should(Succeed())
+				g.Expect(current.ResourceVersion).Should(Equal(wiringVersion))
+			}, time.Second*30, time.Second*5).Should(Succeed())
+
 			alphaClient.Disconnect(250)
 			betaClient.Disconnect(250)
 
@@ -607,6 +707,7 @@ var _ = Describe("broker-service", func() {
 
 			UninstallCert(appAlpha.Name+common.AppCertSecretSuffix, defaultNamespace)
 			UninstallCert(appBeta.Name+common.AppCertSecretSuffix, defaultNamespace)
+			UninstallCert(common.DefaultPrometheusCertSecretName, defaultNamespace)
 			UninstallCert(sharedOperandCertName, defaultNamespace)
 		})
 	})
@@ -669,4 +770,90 @@ func appClientCert(g Gomega, namespace, appName string) func(*tls.CertificateReq
 	return func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 		return &keyPair, nil
 	}
+}
+
+// generatedScrapeConfig fetches the ScrapeConfig the operator generated for an app.
+func generatedScrapeConfig(g Gomega, app *brokerv1beta2.BrokerApp) *monitoringv1alpha1.ScrapeConfig {
+	scrapeConfig := &monitoringv1alpha1.ScrapeConfig{}
+	g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+		Name:      app.Name + monitoring.WiringSuffix,
+		Namespace: app.Namespace,
+	}, scrapeConfig)).Should(Succeed())
+	return scrapeConfig
+}
+
+// scrapeFromScrapeConfig performs the scrape the generated ScrapeConfig describes,
+// taking every input from the object itself. Nothing here re-derives a host, a
+// server name or a secret reference: if the operator generated the wrong value the
+// scrape fails, which is the point.
+func scrapeFromScrapeConfig(g Gomega, scrapeConfig *monitoringv1alpha1.ScrapeConfig) string {
+	g.Expect(scrapeConfig.Spec.StaticConfigs).Should(HaveLen(1))
+	g.Expect(scrapeConfig.Spec.StaticConfigs[0].Targets).Should(HaveLen(1))
+
+	target := string(scrapeConfig.Spec.StaticConfigs[0].Targets[0])
+
+	path := monitoring.Path
+	if scrapeConfig.Spec.MetricsPath != nil {
+		path = *scrapeConfig.Spec.MetricsPath
+	}
+	scheme := "https"
+	if scrapeConfig.Spec.Scheme != nil {
+		scheme = strings.ToLower(*scrapeConfig.Spec.Scheme)
+	}
+
+	return scrapeUrl(g, scheme+"://"+target+path,
+		tlsConfigFromSafeTLS(g, scrapeConfig.Spec.TLSConfig, scrapeConfig.Namespace))
+}
+
+// tlsConfigFromSafeTLS resolves a generated SafeTLSConfig the way
+// prometheus-operator would: every secret reference is read from the namespace of
+// the object that declared it.
+func tlsConfigFromSafeTLS(g Gomega, safeTLS *monitoringv1.SafeTLSConfig, namespace string) *tls.Config {
+	g.Expect(safeTLS).ShouldNot(BeNil())
+
+	readKey := func(secretName, key string) []byte {
+		secret, err := secrets.RetriveSecret(
+			types.NamespacedName{Namespace: namespace, Name: secretName},
+			make(map[string]string), k8sClient)
+		g.Expect(err).Should(BeNil(), "secret %s referenced in namespace %s", secretName, namespace)
+		g.Expect(secret.Data).Should(HaveKey(key))
+		return secret.Data[key]
+	}
+
+	tlsConfig := &tls.Config{
+		ServerName:         safeTLS.ServerName,
+		InsecureSkipVerify: safeTLS.InsecureSkipVerify,
+	}
+
+	g.Expect(safeTLS.CA.Secret).ShouldNot(BeNil(), "generated tlsConfig must reference a CA secret")
+	caPool := x509.NewCertPool()
+	g.Expect(caPool.AppendCertsFromPEM(readKey(safeTLS.CA.Secret.Name, safeTLS.CA.Secret.Key))).Should(BeTrue())
+	tlsConfig.RootCAs = caPool
+
+	g.Expect(safeTLS.Cert.Secret).ShouldNot(BeNil(), "generated tlsConfig must reference a client cert")
+	g.Expect(safeTLS.KeySecret).ShouldNot(BeNil(), "generated tlsConfig must reference a client key")
+	keyPair, err := tls.X509KeyPair(
+		readKey(safeTLS.Cert.Secret.Name, safeTLS.Cert.Secret.Key),
+		readKey(safeTLS.KeySecret.Name, safeTLS.KeySecret.Key))
+	g.Expect(err).Should(BeNil())
+	tlsConfig.Certificates = []tls.Certificate{keyPair}
+
+	return tlsConfig
+}
+
+func scrapeUrl(g Gomega, url string, tlsConfig *tls.Config) string {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = tlsConfig
+
+	httpClient := http.Client{Transport: transport, Timeout: time.Second * 5}
+
+	resp, err := httpClient.Get(url)
+	g.Expect(err).Should(Succeed())
+	g.Expect(resp).ShouldNot(BeNil())
+	defer func() { _ = resp.Body.Close() }()
+	g.Expect(resp.StatusCode).Should(Equal(200))
+
+	body, err := io.ReadAll(resp.Body)
+	g.Expect(err).Should(Succeed())
+	return string(body)
 }

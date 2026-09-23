@@ -219,7 +219,9 @@ kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx
 minikube delete --profile aiprofile
 ```
 
-**Note:** cert-manager will be auto-installed by tests if not present.
+**Note:** cert-manager and the prometheus stack will be auto-installed by tests if
+not present. Metrics scrape wiring is generated for every service and app, so the
+cluster needs `monitoring.coreos.com` served for the E2E suite to pass.
 
 ### Full E2E Test Suite Setup
 
@@ -251,13 +253,25 @@ kubectl get deployment ingress-nginx-controller -n ingress-nginx \
   -o jsonpath='{.spec.template.spec.containers[0].args}' | grep "enable-ssl-passthrough"
 ```
 
-**3. Install Development Tools**
+**3. Install the prometheus stack**
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
+helm upgrade -i -n prometheus kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  --set grafana.enabled=false --set alertmanager.enabled=false \
+  --set nodeExporter.enabled=false --set kubeStateMetrics.enabled=false \
+  --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+  --set prometheus.prometheusSpec.scrapeConfigSelectorNilUsesHelmValues=false \
+  --create-namespace --wait
+```
+
+**4. Install Development Tools**
 
 ```bash
 make helm controller-gen envtest
 ```
 
-**4. Generate and Install CRDs**
+**5. Generate and Install CRDs**
 
 ```bash
 # Generate CRDs and code
@@ -270,7 +284,7 @@ make install
 kubectl get crds | grep broker.amq.io
 ```
 
-**5. Run Test Suite**
+**6. Run Test Suite**
 
 ```bash
 # Run all tests (excludes deployed operator tests)
@@ -306,6 +320,9 @@ make test-mk-do-fast-v
 
 **Cert-Manager Auto-Installation:**
 Tests automatically install cert-manager via Helm if not present and clean it up afterward. Pre-existing installations are left unchanged. See `controllers/common_util_test.go`.
+
+**Prometheus Stack Auto-Installation:**
+The E2E suite requires the prometheus stack, the same way it requires cert-manager. The operator generates scrape wiring for every `BrokerService` and `BrokerApp`, so a cluster without `monitoring.coreos.com` cannot exercise a first class part of its behaviour, and those specs fail rather than skip. Tests install `kube-prometheus-stack` via Helm if it is not present, with Grafana, Alertmanager, node-exporter and kube-state-metrics disabled and the monitor selectors opened up. See `controllers/common_util_test.go`.
 
 ### Running Specific Test Suites
 
