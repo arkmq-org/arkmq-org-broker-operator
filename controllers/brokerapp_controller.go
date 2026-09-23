@@ -145,6 +145,10 @@ func (reconciler BrokerAppInstanceReconciler) validateSpec() error {
 		return err
 	}
 
+	if err := reconciler.validateServiceSelector(); err != nil {
+		return err
+	}
+
 	// Validate capability address types (structural checks only)
 	if err := reconciler.verifyCapabilityAddressType(); err != nil {
 		return err
@@ -157,6 +161,20 @@ func (reconciler BrokerAppInstanceReconciler) validateSpec() error {
 
 	// Validate that declared addresses match their usage in capabilities
 	return reconciler.validateAddressCapabilityConsistency()
+}
+
+func (reconciler BrokerAppInstanceReconciler) validateServiceSelector() error {
+	if reconciler.instance.Spec.ServiceSelector == nil {
+		return NewValidationError(
+			broker.ValidConditionServiceSelectorError,
+			"spec.ServiceSelector must be non nil")
+	}
+	if len(reconciler.instance.Spec.ServiceSelector.MatchLabels)+len(reconciler.instance.Spec.ServiceSelector.MatchExpressions) == 0 {
+		return NewValidationError(
+			broker.ValidConditionServiceSelectorError,
+			"spec.ServiceSelector must contain a non empty MatchLabels or MatchExpressions")
+	}
+	return nil
 }
 
 // verifyAppCert checks the app's client certificate is present and readable.

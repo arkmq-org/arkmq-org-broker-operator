@@ -82,7 +82,7 @@ type AddressRef struct {
 	PubSub *bool `json:"pubSub,omitempty"`
 
 	// Subscriptions declares subscription queue names for an address.
-	// Typical values will be of the form <client id>.<subscription nname>
+	// Typical values will be of the form <client id>.<subscription name>
 	// +optional
 	Subscriptions []string `json:"subscriptions,omitempty"`
 }
@@ -160,3 +160,7 @@ type BrokerAppList struct {
 func init() {
 	SchemeBuilder.Register(&BrokerApp{}, &BrokerAppList{})
 }
+
+const (
+	ValidConditionServiceSelectorError = "ServiceSelectorError"
+)

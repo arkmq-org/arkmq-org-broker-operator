@@ -514,6 +514,72 @@ func TestReconcileInvalidSelectorSyntax(t *testing.T) {
 	assert.Contains(t, validCondition.Message, "Selector")
 }
 
+func TestReconcileInvalidServiceSelector(t *testing.T) {
+	ns := "default"
+	appName := "my-app"
+
+	app := NewBrokerApp(appName, ns).
+		WithServiceSelector(&v1.LabelSelector{
+			MatchExpressions: []v1.LabelSelectorRequirement{},
+		}).
+		Build()
+
+	env := NewTestEnvironment(ns, app)
+	r := env.Reconciler
+	cl := env.Client
+
+	// Reconcile
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+	_, err := r.Reconcile(context.TODO(), req)
+	// ValidationError results in no error returned (no retry until spec changes)
+	assert.NoError(t, err)
+
+	// Verify BrokerApp status
+	updatedApp := &v1beta2.BrokerApp{}
+	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+	assert.NoError(t, err)
+
+	// Check Valid condition
+	validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.ValidConditionType)
+	assert.NotNil(t, validCondition)
+	assert.Equal(t, v1.ConditionFalse, validCondition.Status)
+	assert.Equal(t, v1beta2.ValidConditionServiceSelectorError, validCondition.Reason)
+	assert.Contains(t, validCondition.Message, "Selector")
+}
+
+func TestReconcileInvalidServiceSelectorEmptyMatchLabel(t *testing.T) {
+	ns := "default"
+	appName := "my-app"
+
+	app := NewBrokerApp(appName, ns).
+		WithServiceSelector(&v1.LabelSelector{
+			MatchLabels: map[string]string{},
+		}).
+		Build()
+
+	env := NewTestEnvironment(ns, app)
+	r := env.Reconciler
+	cl := env.Client
+
+	// Reconcile
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+	_, err := r.Reconcile(context.TODO(), req)
+	// ValidationError results in no error returned (no retry until spec changes)
+	assert.NoError(t, err)
+
+	// Verify BrokerApp status
+	updatedApp := &v1beta2.BrokerApp{}
+	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+	assert.NoError(t, err)
+
+	// Check Valid condition
+	validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.ValidConditionType)
+	assert.NotNil(t, validCondition)
+	assert.Equal(t, v1.ConditionFalse, validCondition.Status)
+	assert.Equal(t, v1beta2.ValidConditionServiceSelectorError, validCondition.Reason)
+	assert.Contains(t, validCondition.Message, "Selector")
+}
+
 func TestReconcileMatchedServiceNotFound(t *testing.T) {
 	ns := "default"
 	svcName := "my-broker-service"

@@ -92,7 +92,7 @@ spec:
                           subscriptions:
                             description: |-
                               Subscriptions declares subscription queue names for an address.
-                              Typical values will be of the form <client id>.<subscription nname>
+                              Typical values will be of the form <client id>.<subscription name>
                             items:
                               type: string
                             type: array
@@ -122,7 +122,7 @@ spec:
                           subscriptions:
                             description: |-
                               Subscriptions declares subscription queue names for an address.
-                              Typical values will be of the form <client id>.<subscription nname>
+                              Typical values will be of the form <client id>.<subscription name>
                             items:
                               type: string
                             type: array
