@@ -18730,6 +18730,17 @@ rules:
 - apiGroups:
   - monitoring.coreos.com
   resources:
+  - scrapeconfigs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
   - servicemonitors
   verbs:
   - create

@@ -19,6 +19,8 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/monitoring"
+	monitoringv1alpha1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1alpha1"
 	"reflect"
 	"strings"
 
@@ -220,6 +222,67 @@ func (reconciler BrokerAppInstanceReconciler) processBindingSecret() error {
 	return nil
 }
 
+// processScrapeConfig generates what a Prometheus needs to scrape this app's own
+// queues, and only those: the app presents its own certificate, whose common name
+// the broker maps to the <namespace>-<app>-metrics role.
+//
+// The target is static rather than discovered: the broker pod is addressed by its
+// fully qualified name, which resolves from any namespace, so one code path
+// covers an app bound to a service in its own namespace and one bound across
+// namespaces.
+func (reconciler BrokerAppInstanceReconciler) processScrapeConfig() {
+	// nothing to scrape until the app is bound, same gate as the binding secret
+	if reconciler.status.Service == nil {
+		return
+	}
+
+	if !monitoring.IsPrometheusAvailable(reconciler.RESTMapper()) {
+		reconciler.log.V(1).Info("prometheus-operator is not available, skipping scrape config generation",
+			"app", reconciler.instance.Name)
+		return
+	}
+
+	caRef := monitoring.CARef(reconciler.Client)
+	if caRef == nil {
+		reconciler.log.V(1).Info("no ca bundle, generating no ScrapeConfig", "app", reconciler.instance.Name)
+		return
+	}
+
+	instance := reconciler.instance
+	service := reconciler.status.Service
+
+	labels := monitoring.Labels("broker-app", instance.Name, service.Name)
+	labels[common.LabelBrokerApp] = instance.Name
+
+	var existing *monitoringv1alpha1.ScrapeConfig
+	if obj := reconciler.CloneOfDeployed(reflect.TypeOf(monitoringv1alpha1.ScrapeConfig{}), monitoring.WiringName(instance.Name)); obj != nil {
+		existing = obj.(*monitoringv1alpha1.ScrapeConfig)
+	}
+
+	reconciler.TrackDesired(monitoring.BuildScrapeConfig(monitoring.ScrapeTarget{
+		Owner: instance,
+		// The broker pod, addressed directly. Not the host from the binding
+		// secret: that is where consumers send messages, and by the time the
+		// scrape config is written the exact pod to scrape is already known.
+		Host: common.OrdinalFQDNS(service.Name, service.Namespace, 0),
+		Port: monitoring.Port,
+		// see the note in processMonitoring: only the wildcard SAN covers a fully
+		// qualified pod name
+		ServerName: common.OrdinalFQDNS(service.Name, service.Namespace, 0),
+		// the app certificate is what scopes the scrape, and verifyAppCert has
+		// already established it exists and parses
+		ClientCertSecret: instance.Name + common.AppCertSecretSuffix,
+		CA:               caRef,
+		Labels:           labels,
+		SeriesLabels: map[string]string{
+			"brokerapp":               instance.Name,
+			"brokerapp_namespace":     instance.Namespace,
+			"brokerservice":           service.Name,
+			"brokerservice_namespace": service.Namespace,
+		},
+	}, existing))
+}
+
 func NewBrokerAppReconciler(client client.Client, scheme *runtime.Scheme, config *rest.Config, logger logr.Logger) *BrokerAppReconciler {
 	reconciler := BrokerAppReconciler{ReconcilerLoop: &ReconcilerLoop{KubeBits: &KubeBits{
 		Client: client, Scheme: scheme, Config: config, log: logger}}}
@@ -230,6 +293,7 @@ func NewBrokerAppReconciler(client client.Client, scheme *runtime.Scheme, config
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices,verbs=get;list;watch;update
+//+kubebuilder:rbac:groups=monitoring.coreos.com,namespace=arkmq-org-broker-operator,resources=scrapeconfigs,verbs=get;list;watch;create;update;delete
 
 func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
 	reqLogger := reconciler.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "BrokerApp")
@@ -260,6 +324,7 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 			if err = processor.resolveBrokerService(); err == nil {
 				if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
 					if err = processor.processBindingSecret(); err == nil {
+						processor.processScrapeConfig()
 						err = processor.SyncDesiredWithDeployed(processor.instance)
 					}
 				}
@@ -290,13 +355,22 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 
 // instance specifics for a reconciler loop
 func (r *BrokerAppReconciler) getOwned() []client.ObjectList {
-	return []client.ObjectList{&corev1.SecretList{}}
+	owned := []client.ObjectList{&corev1.SecretList{}}
+
+	// only when the kind is served: read.ListAll errors outright on one that is
+	// not, which would abort the reconcile
+	if monitoring.IsPrometheusAvailable(r.RESTMapper()) {
+		owned = append(owned, &monitoringv1alpha1.ScrapeConfigList{})
+	}
+
+	return owned
 }
 
 func (r *BrokerAppReconciler) getOrderedTypeList() []reflect.Type {
-	types := make([]reflect.Type, 1)
-	types[0] = reflect.TypeOf(corev1.Secret{})
-	return types
+	return []reflect.Type{
+		reflect.TypeOf(corev1.Secret{}),
+		reflect.TypeOf(monitoringv1alpha1.ScrapeConfig{}),
+	}
 }
 
 func (reconciler *BrokerAppInstanceReconciler) resolveBrokerService() error {
@@ -1532,7 +1606,7 @@ func hasAddressRefTo(app *broker.BrokerApp, targetApp types.NamespacedName) bool
 
 func (r *BrokerAppReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Note: Namespace informer is set up in main.go for CEL evaluation
-	return ctrl.NewControllerManagedBy(mgr).
+	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&broker.BrokerApp{}).
 		Owns(&corev1.Secret{}).
 		Watches(&broker.BrokerService{}, r.enqueueAppsForService()).
@@ -1540,6 +1614,15 @@ func (r *BrokerAppReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WithOptions(controller.Options{
 			// capacity allocation requires serial processing
 			MaxConcurrentReconciles: 1,
-		}).
-		Complete(r)
+		})
+
+	// Owns starts an informer at manager start, and one for a kind the API server
+	// does not serve never syncs and takes the manager down with it. Probed once
+	// here, so installing prometheus-operator later needs an operator restart to
+	// regain drift correction; the resync period covers the gap.
+	if monitoring.IsPrometheusAvailable(mgr.GetRESTMapper()) {
+		builder = builder.Owns(&monitoringv1alpha1.ScrapeConfig{})
+	}
+
+	return builder.Complete(r)
 }

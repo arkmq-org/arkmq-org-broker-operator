@@ -116,9 +116,9 @@ graph TD
         end
 
         subgraph monitoring ["Monitoring Stack"]
-            ServiceMonitor["ServiceMonitor<br/>(messaging-service-monitor)"]
-            ArtemisProm["Artemis-Prometheus"]
-            DefaultProm["Default Prometheus<br/>(kube-prometheus-stack)"]
+            SvcScrape["ScrapeConfig<br/>(messaging-service-metrics)"]
+            AppScrape["ScrapeConfig<br/>(first-app-metrics)"]
+            Prom["Prometheus<br/>(kube-prometheus-stack)"]
             Grafana["Grafana"]
         end
     end
@@ -131,11 +131,14 @@ graph TD
     SAProducer -->|"Sends (mTLS, port from binding)"| BrokerSvc
     SAConsumer -->|"Receives (mTLS, port from binding)"| BrokerSvc
 
-    ServiceMonitor -->|"Configures"| ArtemisProm
-    ArtemisProm -->|"Scrapes /metrics (mTLS CN: prometheus)"| BrokerSvc
-    DefaultProm -->|"Scrapes pod/node metrics"| BrokerSvc
-    Grafana -->|"Queries broker metrics"| ArtemisProm
-    Grafana -->|"Queries CPU/Memory"| DefaultProm
+    Operator -->|"Generates"| SvcScrape
+    Operator -->|"Generates"| AppScrape
+    SvcScrape -->|"Configures"| Prom
+    AppScrape -->|"Configures"| Prom
+    Prom -->|"Scrapes all queues (mTLS CN: prometheus)"| BrokerSvc
+    Prom -->|"Scrapes own queues (mTLS CN: first-app)"| BrokerSvc
+    Prom -->|"Scrapes pod/node metrics"| BrokerSvc
+    Grafana -->|"Queries broker and infra metrics"| Prom
 
     style sa_scenario fill:#a5d6a7,stroke:#2e7d32,stroke-width:2px,color:#ffffff
     style monitoring fill:#ffcc02,stroke:#f57c00,stroke-width:2px,color:#ffffff
@@ -253,11 +256,10 @@ minikube profile secure-monitoring-tutorial
 minikube addons enable metrics-server --profile secure-monitoring-tutorial
 ```
 ```shell markdown_runner
-* [secure-monitoring-tutorial] minikube v1.38.1 on Fedora 44
-* Automatically selected the docker driver. Other choices: kvm2, qemu2, ssh
-* Using Docker driver with root privileges
+* [secure-monitoring-tutorial] minikube v1.37.0 on Fedora 44
+  - MINIKUBE_ROOTLESS=true
+* Automatically selected the kvm2 driver. Other choices: qemu2, podman, ssh
 * Starting "secure-monitoring-tutorial" primary control-plane node in "secure-monitoring-tutorial" cluster
-* Pulling base image v0.0.50 ...
 * Configuring bridge CNI (Container Networking Interface) ...
 * Verifying Kubernetes components...
   - Using image gcr.io/k8s-minikube/storage-provisioner:v5
@@ -266,9 +268,8 @@ minikube addons enable metrics-server --profile secure-monitoring-tutorial
 * minikube profile was successfully set to secure-monitoring-tutorial
 * metrics-server is an addon maintained by Kubernetes. For any concerns contact minikube on GitHub.
 You can view the list of minikube maintainers at: https://github.com/kubernetes/minikube/blob/master/OWNERS
-  - Using image registry.k8s.io/metrics-server/metrics-server:v0.8.1
+  - Using image registry.k8s.io/metrics-server/metrics-server:v0.8.0
 * The 'metrics-server' addon is enabled
-! Starting v1.39.0, minikube will default to "containerd" container runtime. See #21973 for more info.
 ```
 
 The `--memory=8192 --cpus=4` allocation covers all components deployed in this
@@ -288,9 +289,9 @@ minikube kubectl -- patch deployment -n ingress-nginx ingress-nginx-controller -
 ```shell markdown_runner
 * ingress is an addon maintained by Kubernetes. For any concerns contact minikube on GitHub.
 You can view the list of minikube maintainers at: https://github.com/kubernetes/minikube/blob/master/OWNERS
-  - Using image registry.k8s.io/ingress-nginx/controller:v1.14.3
-  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.7
-  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.7
+  - Using image registry.k8s.io/ingress-nginx/controller:v1.13.2
+  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.2
+  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.2
 * Verifying ingress addon...
 * The 'ingress' addon is enabled
 deployment.apps/ingress-nginx-controller patched
@@ -329,6 +330,10 @@ The `kube-prometheus-stack` Helm chart installs Prometheus, Grafana, and the
 Prometheus Operator in one step. This is needed for the `Broker` monitoring
 section later.
 
+The `SelectorNilUsesHelmValues=false` flags are what let this Prometheus pick up
+the scrape wiring the operator generates. By default the chart restricts it to
+objects labelled with its own Helm release, which would exclude them.
+
 ```bash {"stage":"init", "runtime":"bash", "label":"install the prometheus operator"}
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm upgrade -i prometheus prometheus-community/kube-prometheus-stack \
@@ -337,6 +342,8 @@ helm upgrade -i prometheus prometheus-community/kube-prometheus-stack \
   --set grafana.sidecar.dashboards.enabled=true \
   --set grafana.sidecar.datasources.enabled=true \
   --set grafana.sidecar.datasources.label=grafana_datasource \
+  --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+  --set prometheus.prometheusSpec.scrapeConfigSelectorNilUsesHelmValues=false \
   --set kubeEtcd.enabled=false \
   --set kubeControllerManager.enabled=false \
   --set kubeScheduler.enabled=false \
@@ -346,7 +353,7 @@ helm upgrade -i prometheus prometheus-community/kube-prometheus-stack \
 "prometheus-community" already exists with the same configuration, skipping
 Release "prometheus" does not exist. Installing it now.
 NAME: prometheus
-LAST DEPLOYED: Fri Aug 28 14:52:06 2026
+LAST DEPLOYED: Wed Sep 23 15:08:15 2026
 NAMESPACE: broker-tutorial
 STATUS: deployed
 REVISION: 1
@@ -371,6 +378,25 @@ Get your grafana admin user password by running:
 
 
 Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
+I0923 15:08:13.946021 1238998 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0923 15:08:13.946045 1238998 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0923 15:08:14.080813 1238998 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0923 15:08:14.080829 1238998 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0923 15:08:14.151236 1238998 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0923 15:08:14.151251 1238998 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0923 15:08:14.185326 1238998 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0923 15:08:14.356489 1238998 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0923 15:08:14.356506 1238998 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0923 15:08:14.576550 1238998 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0923 15:08:14.576567 1238998 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0923 15:08:14.599356 1238998 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0923 15:08:14.768905 1238998 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0923 15:08:14.768923 1238998 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0923 15:08:14.815155 1238998 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0923 15:08:14.962719 1238998 warnings.go:107] "Warning: unrecognized format \"int32\""
+I0923 15:08:14.962752 1238998 warnings.go:107] "Warning: unrecognized format \"int64\""
+I0923 15:08:22.656871 1238998 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
+I0923 15:08:22.658202 1238998 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
 ```
 
 ### Install Cert-Manager
@@ -428,17 +454,37 @@ deployment.apps/cert-manager created
 deployment.apps/cert-manager-webhook created
 mutatingwebhookconfiguration.admissionregistration.k8s.io/cert-manager-webhook created
 validatingwebhookconfiguration.admissionregistration.k8s.io/cert-manager-webhook created
+Warning: unrecognized format "int32"
+Warning: unrecognized format "int64"
 ```
 
 Wait for cert-manager to be ready.
 
 ```bash {"stage":"init", "runtime":"bash", "label":"wait for cert-manager"}
 kubectl wait pod --all --for=condition=Ready --namespace=cert-manager --timeout=600s
+
+# The webhook deployment reports Available before it accepts connections, and
+# trust-manager's Certificate and Issuer are rejected until it does. Probe it with
+# a server-side dry run, which is validated by the webhook but creates nothing.
+until kubectl apply --dry-run=server -f - >/dev/null 2>&1 <<'EOF'
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: webhook-readiness-probe
+  namespace: cert-manager
+spec:
+  selfSigned: {}
+EOF
+do
+  echo "Waiting for the cert-manager webhook to answer" && sleep 5
+done
+echo "cert-manager webhook is answering"
 ```
 ```shell markdown_runner
-pod/cert-manager-67596fb4d7-6gnjq condition met
-pod/cert-manager-cainjector-5fcbcd7fb-r5np8 condition met
-pod/cert-manager-webhook-864d6c4d87-zn9sk condition met
+pod/cert-manager-66487b786-7mqkn condition met
+pod/cert-manager-cainjector-65fdc9b9d7-prnm6 condition met
+pod/cert-manager-webhook-7d96469bf8-krxqm condition met
+cert-manager webhook is answering
 ```
 
 ### Install Trust Manager
@@ -460,7 +506,7 @@ helm upgrade trust-manager jetstack/trust-manager --install --namespace cert-man
 ```shell markdown_runner
 Release "trust-manager" does not exist. Installing it now.
 NAME: trust-manager
-LAST DEPLOYED: Fri Aug 28 14:53:38 2026
+LAST DEPLOYED: Wed Sep 23 15:09:30 2026
 NAMESPACE: cert-manager
 STATUS: deployed
 REVISION: 1
@@ -470,7 +516,7 @@ NOTES:
 ⚠️  WARNING: Consider increasing the Helm value `replicaCount` to 2 if you require high availability.
 ⚠️  WARNING: Consider setting the Helm value `podDisruptionBudget.enabled` to true if you require high availability.
 
-trust-manager v0.24.0 has been deployed successfully!
+trust-manager v0.25.0 has been deployed successfully!
 Your installation includes a default CA package, using the following
 default CA package image:
 
@@ -482,6 +528,7 @@ with creating your first bundle, check out the documentation on the
 cert-manager website:
 
 https://cert-manager.io/docs/projects/trust-manager/
+I0923 15:09:30.969869 1240659 warnings.go:107] "Warning: unrecognized format \"int64\""
 ```
 
 Wait for the Bundles CRD to be ready.
@@ -492,10 +539,10 @@ kubectl wait pod --all --for=condition=Ready --namespace=cert-manager --timeout=
 ```
 ```shell markdown_runner
 customresourcedefinition.apiextensions.k8s.io/bundles.trust.cert-manager.io condition met
-pod/cert-manager-67596fb4d7-6gnjq condition met
-pod/cert-manager-cainjector-5fcbcd7fb-r5np8 condition met
-pod/cert-manager-webhook-864d6c4d87-zn9sk condition met
-pod/trust-manager-64dfc6649-mgpzq condition met
+pod/cert-manager-66487b786-7mqkn condition met
+pod/cert-manager-cainjector-65fdc9b9d7-prnm6 condition met
+pod/cert-manager-webhook-7d96469bf8-krxqm condition met
+pod/trust-manager-84d8595f6b-h224t condition met
 ```
 
 ### Deploy the Operator
@@ -508,9 +555,9 @@ From the root of the operator repository, install the operator into the
 ```
 ```shell markdown_runner
 Deploying operator to watch single namespace
-Client Version: 4.22.4
-Kustomize Version: v5.7.1
-Kubernetes Version: v1.35.1
+Client Version: 4.18.5
+Kustomize Version: v5.4.2
+Kubernetes Version: v1.34.0
 customresourcedefinition.apiextensions.k8s.io/activemqartemises.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisaddresses.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisscaledowns.broker.amq.io created
@@ -526,6 +573,8 @@ role.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-role created
 rolebinding.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-rolebinding created
 networkpolicy.networking.k8s.io/arkmq-org-broker-controller-manager-netpol created
 deployment.apps/arkmq-org-broker-controller-manager created
+Warning: unrecognized format "int32"
+Warning: unrecognized format "int64"
 ```
 
 Wait for the operator pod to become ready.
@@ -537,12 +586,12 @@ kubectl wait pod --all --for=condition=Ready --namespace=broker-tutorial --timeo
 ```shell markdown_runner
 deployment.apps/arkmq-org-broker-controller-manager condition met
 pod/alertmanager-prometheus-kube-prometheus-alertmanager-0 condition met
-pod/arkmq-org-broker-controller-manager-67bdbdf78d-9v9md condition met
-pod/prometheus-grafana-6445977db5-9qbj5 condition met
-pod/prometheus-kube-prometheus-operator-b489bc45c-m2p28 condition met
-pod/prometheus-kube-state-metrics-58b7869c8f-8sfcb condition met
+pod/arkmq-org-broker-controller-manager-864b6ff96b-lpt5w condition met
+pod/prometheus-grafana-99dcf6544-x5wdn condition met
+pod/prometheus-kube-prometheus-operator-5fc4886d9d-d6dzv condition met
+pod/prometheus-kube-state-metrics-86f6f77478-k9mp6 condition met
 pod/prometheus-prometheus-kube-prometheus-prometheus-0 condition met
-pod/prometheus-prometheus-node-exporter-cszx2 condition met
+pod/prometheus-prometheus-node-exporter-tn9tn condition met
 ```
 
 ## Create Certificate Authority and Issuers
@@ -1023,137 +1072,53 @@ job.batch/sa-consumer condition met
 ## Configure Prometheus Scraping
 
 The `BrokerService` already manages a running broker pod
-(`messaging-service-ss-0`) with a Prometheus metrics endpoint on port `8888`.
-We now deploy a dedicated Prometheus instance and configure it to scrape those
-metrics over mTLS, using the certificate created in the
-[PKI section](#create-certificate-authority-and-issuers).
+(`messaging-service-ss-0`) with a Prometheus metrics endpoint on port `8888`, and
+the operator has already generated everything needed to scrape it: a
+`ScrapeConfig` for the service, and another for the app. The Prometheus installed by
+`kube-prometheus-stack` picks them up on its own, because of the two selector
+flags set at [install time](#install-prometheus-operator) — there is nothing to
+deploy here and nothing to parametrize per service or per app.
 
-### Configure and Deploy Prometheus
+### Inspect what the operator generated
 
-```bash {"stage":"scrape", "runtime":"bash", "label":"set broker fqdn"}
-export BROKER_FQDN=messaging-service-ss-0.messaging-service-hdls-svc.broker-tutorial.svc.cluster.local
+```bash {"stage":"scrape", "runtime":"bash", "label":"show generated scrape wiring"}
+kubectl get scrapeconfig -n broker-tutorial -l broker.arkmq.org/monitoring=true
 ```
 ```shell markdown_runner
-
+NAME                        AGE
+first-app-metrics           29s
+messaging-service-metrics   47s
 ```
 
-Create the metrics `Service` selecting the `BrokerService`-managed pod, a
-`ServiceMonitor` that tells Prometheus how to scrape it with mTLS, a dedicated
-`Prometheus` instance, and a service for it so Grafana can target it directly
-without load-balancing across instances.
+`messaging-service-metrics` presents the `prometheus-cert` created in the
+[PKI section](#create-the-prometheus-certificate), which the broker grants the
+broad `metrics` role, so it sees every app's queues. `first-app-metrics` presents
+`first-app-app-cert`, so it sees only `first-app`'s queues. Both are labelled
+`broker.arkmq.org/monitoring: "true"`, and both address the broker pod directly
+by its fully qualified name.
 
-```bash {"stage":"scrape", "runtime":"bash", "label":"create prometheus resources"}
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Service
-metadata:
-  name: messaging-service-metrics
-  namespace: broker-tutorial
-  labels:
-    app: messaging-service
-spec:
-  selector:
-    ActiveMQArtemis: messaging-service
-  ports:
-    - name: metrics
-      port: 8888
-      targetPort: 8888
-      protocol: TCP
----
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: messaging-service-monitor
-  namespace: broker-tutorial
-  labels:
-    app: messaging-service
-spec:
-  selector:
-    matchLabels:
-      app: messaging-service
-  endpoints:
-  - port: metrics
-    scheme: https
-    tlsConfig:
-      serverName: '${BROKER_FQDN}'
-      ca:
-        secret:
-          name: arkmq-org-broker-manager-ca
-          key: ca.pem
-      cert:
-        secret:
-          name: prometheus-cert
-          key: tls.crt
-      keySecret:
-        name: prometheus-cert
-        key: tls.key
----
-apiVersion: monitoring.coreos.com/v1
-kind: Prometheus
-metadata:
-  name: artemis-prometheus
-  namespace: broker-tutorial
-spec:
-  replicas: 1
-  serviceAccountName: prometheus-kube-prometheus-prometheus
-  version: v2.53.0
-  serviceMonitorSelector:
-    matchLabels:
-      app: messaging-service
-  serviceMonitorNamespaceSelector: {}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: artemis-prometheus-svc
-  namespace: broker-tutorial
-spec:
-  selector:
-    prometheus: artemis-prometheus
-  ports:
-    - name: web
-      port: 9090
-      targetPort: 9090
-      protocol: TCP
-EOF
+### Confirm the targets are up
+
+Both generated targets must be scraping before any dashboard can show data. This
+is also the check to run first if a panel stays empty.
+
+The Prometheus image carries no shell, so query it from a throwaway pod rather
+than with `kubectl exec`.
+
+```bash {"stage":"scrape", "runtime":"bash", "label":"wait for targets up"}
+until [ "$(kubectl run prom-targets-$$ --rm -i --restart=Never --quiet \
+  --image=curlimages/curl:latest -n broker-tutorial -- \
+  curl -s -G --data-urlencode 'query=up{job=~"messaging-service-metrics|first-app-metrics"}==1' \
+  http://prometheus-kube-prometheus-prometheus:9090/api/v1/query 2>/dev/null \
+  | grep -o '"job":"[^"]*"' | sort -u | wc -l)" -ge 2 ]; do
+  echo "Waiting for the generated targets to come up" && sleep 5
+done
+echo "both generated targets are up"
 ```
 ```shell markdown_runner
-service/messaging-service-metrics created
-servicemonitor.monitoring.coreos.com/messaging-service-monitor created
-prometheus.monitoring.coreos.com/artemis-prometheus created
-service/artemis-prometheus-svc created
-```
-
-Grant the Prometheus ServiceAccount the permissions it needs for service
-discovery.
-
-```bash {"stage":"scrape", "runtime":"bash", "label":"grant prometheus permissions"}
-kubectl apply -f - <<EOF
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: prometheus-cluster-role-binding
-subjects:
-- kind: ServiceAccount
-  name: prometheus-kube-prometheus-prometheus
-  namespace: broker-tutorial
-roleRef:
-  kind: ClusterRole
-  name: prometheus-kube-prometheus-prometheus
-  apiGroup: rbac.authorization.k8s.io
-EOF
-```
-```shell markdown_runner
-clusterrolebinding.rbac.authorization.k8s.io/prometheus-cluster-role-binding created
-```
-
-```bash {"stage":"scrape", "runtime":"bash", "label":"wait for prometheus"}
-sleep 5
-kubectl rollout status statefulset/prometheus-artemis-prometheus -n broker-tutorial --timeout=300s
-```
-```shell markdown_runner
-Waiting for 1 pods to be ready...
-statefulset rolling update complete 1 pods at revision prometheus-artemis-prometheus-6698fbd945...
+Waiting for the generated targets to come up
+Waiting for the generated targets to come up
+both generated targets are up
 ```
 
 ## Deploy and Configure Grafana
@@ -1179,7 +1144,7 @@ data:
     - name: Artemis-Prometheus
       type: prometheus
       access: proxy
-      url: http://artemis-prometheus-svc:9090
+      url: http://prometheus-kube-prometheus-prometheus:9090
       isDefault: false
       editable: false
       uid: artemis-prometheus
@@ -1204,24 +1169,14 @@ Waiting for deployment "prometheus-grafana" rollout to finish: 1 old replicas ar
 deployment "prometheus-grafana" successfully rolled out
 ```
 
-Wait a moment and verify both Prometheus instances and datasources:
+Wait a moment and verify Prometheus and the Grafana datasources:
 
 ``` bash {"stage":"grafana", "runtime":"bash", "label":"test prometheus connectivity"}
 echo "Testing Prometheus and Grafana datasource configuration..."
 echo ""
 
-# Test 1: Artemis-Prometheus connectivity
-echo "✓ Test 1: Artemis-Prometheus is reachable"
-ARTEMIS_PROM_STATUS=$(kubectl run test-artemis-prom --rm -i --restart=Never --image=curlimages/curl:latest --image-pull-policy=Always -n broker-tutorial -- \
-  curl -s http://artemis-prometheus-svc:9090/api/v1/query?query=up --max-time 5 2>/dev/null | grep -o '"status":"success"' || echo "")
-if [ -z "$ARTEMIS_PROM_STATUS" ]; then
-  echo "  ✗ FAILED: Cannot connect to artemis-prometheus-svc:9090"
-  exit 1
-fi
-echo "  artemis-prometheus-svc:9090 is responding"
-
-# Test 2: Cluster-Prometheus connectivity
-echo "✓ Test 2: Cluster-Prometheus is reachable"
+# Test 1: Prometheus connectivity
+echo "✓ Test 1: Prometheus is reachable"
 CLUSTER_PROM_STATUS=$(kubectl run test-cluster-prom --rm -i --restart=Never --image=curlimages/curl:latest --image-pull-policy=Always -n broker-tutorial -- \
   curl -s http://prometheus-kube-prometheus-prometheus:9090/api/v1/query?query=up --max-time 5 2>/dev/null | grep -o '"status":"success"' || echo "")
 if [ -z "$CLUSTER_PROM_STATUS" ]; then
@@ -1230,34 +1185,34 @@ if [ -z "$CLUSTER_PROM_STATUS" ]; then
 fi
 echo "  prometheus-kube-prometheus-prometheus:9090 is responding"
 
-# Test 3: Broker metrics availability (retry until Prometheus has scraped at least once)
-echo "✓ Test 3: Broker metrics are available in Artemis-Prometheus"
+# Test 2: Broker metrics availability (retry until Prometheus has scraped at least once)
+echo "✓ Test 2: Broker metrics are available"
 BROKER_METRICS=""
 for i in $(seq 1 24); do
   BROKER_METRICS=$(kubectl run test-broker-metrics-${i} --rm -i --restart=Never --image=curlimages/curl:latest --image-pull-policy=Always -n broker-tutorial -- \
-    curl -s 'http://artemis-prometheus-svc:9090/api/v1/query?query=broker_queue_message_count' --max-time 5 2>/dev/null | grep -o '"status":"success"' || echo "")
+    curl -s 'http://prometheus-kube-prometheus-prometheus:9090/api/v1/query?query=broker_queue_message_count' --max-time 5 2>/dev/null | grep -o '"status":"success"' || echo "")
   [ -n "$BROKER_METRICS" ] && break
-  echo "  Waiting for Artemis-Prometheus to scrape broker metrics (attempt $i/24)..."
+  echo "  Waiting for Prometheus to scrape broker metrics (attempt $i/24)..."
   sleep 5
 done
 if [ -z "$BROKER_METRICS" ]; then
-  echo "  ✗ FAILED: Broker metrics not found in Artemis-Prometheus after 2 minutes"
+  echo "  ✗ FAILED: Broker metrics not found after 2 minutes"
   exit 1
 fi
 echo "  broker_queue_message_count is present"
 
-# Test 4: CPU/Memory metrics availability
-echo "✓ Test 4: Infrastructure metrics are available in Cluster-Prometheus"
+# Test 3: CPU/Memory metrics availability
+echo "✓ Test 3: Infrastructure metrics are available"
 CPU_METRICS=$(kubectl run test-cpu-metrics --rm -i --restart=Never --image=curlimages/curl:latest --image-pull-policy=Always -n broker-tutorial -- \
   curl -s 'http://prometheus-kube-prometheus-prometheus:9090/api/v1/query?query=container_cpu_usage_seconds_total' --max-time 5 2>/dev/null | grep -o '"status":"success"' || echo "")
 if [ -z "$CPU_METRICS" ]; then
-  echo "  ✗ FAILED: CPU metrics not found in Cluster-Prometheus"
+  echo "  ✗ FAILED: CPU metrics not found"
   exit 1
 fi
 echo "  container_cpu_usage_seconds_total is queryable"
 
-# Test 5: Grafana datasources
-echo "✓ Test 5: Grafana has both datasources configured"
+# Test 4: Grafana datasources
+echo "✓ Test 4: Grafana has both datasources configured"
 
 # Get the Grafana admin password from the secret
 export GRAFANA_PASSWORD=$(kubectl get secret -n broker-tutorial prometheus-grafana -o jsonpath="{.data.admin-password}" | base64 --decode)
@@ -1297,16 +1252,17 @@ echo "  Found: Prometheus (uid: prometheus)"
 ```shell markdown_runner
 Testing Prometheus and Grafana datasource configuration...
 
-✓ Test 1: Artemis-Prometheus is reachable
-  artemis-prometheus-svc:9090 is responding
-✓ Test 2: Cluster-Prometheus is reachable
+✓ Test 1: Prometheus is reachable
   prometheus-kube-prometheus-prometheus:9090 is responding
-✓ Test 3: Broker metrics are available in Artemis-Prometheus
+✓ Test 2: Broker metrics are available
   broker_queue_message_count is present
-✓ Test 4: Infrastructure metrics are available in Cluster-Prometheus
+✓ Test 3: Infrastructure metrics are available
   container_cpu_usage_seconds_total is queryable
-✓ Test 5: Grafana has both datasources configured
+✓ Test 4: Grafana has both datasources configured
   Waiting for Grafana to be fully initialized...
+pod/test-grafana-ds created
+pod/test-grafana-ds condition met
+pod "test-grafana-ds" deleted from broker-tutorial namespace
   Grafana is ready and authenticated
   Found: Artemis-Prometheus (uid: artemis-prometheus)
   Found: Prometheus (uid: prometheus)
@@ -1437,6 +1393,7 @@ kubectl rollout status deployment prometheus-grafana -n broker-tutorial --timeou
 ```shell markdown_runner
 configmap/artemis-dashboard condition met
 deployment.apps/prometheus-grafana restarted
+Waiting for deployment "prometheus-grafana" rollout to finish: 0 out of 1 new replicas have been updated...
 Waiting for deployment "prometheus-grafana" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "prometheus-grafana" rollout to finish: 1 old replicas are pending termination...
 deployment "prometheus-grafana" successfully rolled out
@@ -1514,6 +1471,12 @@ done
 ```shell markdown_runner
 Testing Artemis Broker Metrics dashboard configuration...
 
+pod/test-grafana-search created
+pod/test-grafana-search condition met
+pod "test-grafana-search" deleted from broker-tutorial namespace
+pod/test-grafana-dashboard created
+pod/test-grafana-dashboard condition met
+pod "test-grafana-dashboard" deleted from broker-tutorial namespace
 ✓ Test 1: Dashboard exists with correct title
   Title: Artemis Broker Metrics
 ✓ Test 2: Dashboard has exactly 6 panels
@@ -1568,8 +1531,7 @@ GRAFANA_HOST=grafana.broker-tutorial.${CLUSTER_IP}.nip.io
 until curl -s "http://${GRAFANA_HOST}/api/health" --max-time 3 | grep -q 'database.*ok' &> /dev/null; do echo "Waiting for Grafana Ingress" && sleep 2; done
 ```
 ```shell markdown_runner
-Waiting for Grafana Ingress
-Waiting for Grafana Ingress
+
 ```
 
 Open `http://${GRAFANA_HOST}` in your browser. The username is `admin`. Retrieve
@@ -1743,18 +1705,24 @@ kubectl logs -l ActiveMQArtemis=messaging-service -n broker-tutorial | grep -i c
 
 ### Prometheus Connection Issues
 
-**Problem:** Prometheus shows broker target as "DOWN"
+**Problem:** Prometheus shows a broker target as "DOWN"
+
+The scrape wiring is generated by the operator, so start by confirming it exists
+and that the metrics service has endpoints:
 ```bash
-kubectl describe servicemonitor messaging-service-monitor -n broker-tutorial
-kubectl get endpoints messaging-service-metrics -n broker-tutorial
+kubectl get scrapeconfig -n broker-tutorial -l broker.arkmq.org/monitoring=true
 ```
 
-**Solution:** Verify the service selector matches broker pod labels and the metrics port (8888) is accessible:
+If nothing is listed, the operator generated nothing: either the
+`monitoring.coreos.com` CRDs are not installed, or (for the service) the
+`prometheus-cert` secret is missing. The operator logs which at verbosity 1.
+
+**Solution:** If the objects exist but the target is down, ask Prometheus why. The
+`lastError` is usually a TLS failure, which means the certificate presented does
+not match what the broker authorises:
 ```bash
-kubectl run test-metrics --rm -i --restart=Never --image=curlimages/curl:latest -n broker-tutorial -- \
-  curl -sk https://messaging-service-ss-0.messaging-service-hdls-svc.broker-tutorial.svc.cluster.local:8161/metrics
-kubectl run test-prom --rm -i --restart=Never --image=curlimages/curl:latest -n broker-tutorial -- \
-  curl -s http://artemis-prometheus-svc:9090/api/v1/targets | grep artemis
+kubectl run prom-targets --rm -i --restart=Never --image=curlimages/curl:latest -n broker-tutorial -- \
+  curl -s 'http://prometheus-kube-prometheus-prometheus:9090/api/v1/targets?state=active'
 ```
 
 **Problem:** Dashboard panels flickering or showing wrong data
@@ -1762,8 +1730,10 @@ kubectl run test-prom --rm -i --restart=Never --image=curlimages/curl:latest -n 
 kubectl get prometheus -n broker-tutorial
 ```
 
-**Solution:** Ensure the `artemis-prometheus` datasource uses `http://artemis-prometheus-svc:9090`
-(not `prometheus-operated`, which load-balances between both Prometheus instances).
+**Solution:** Ensure the `artemis-prometheus` datasource uses
+`http://prometheus-kube-prometheus-prometheus:9090`. If the datasource is fine,
+the scrape wiring itself is the next thing to check — see
+[Prometheus Connection Issues](#prometheus-connection-issues).
 
 ### Broker Startup Issues
 
@@ -1833,9 +1803,7 @@ deployed workloads.
 minikube delete --profile secure-monitoring-tutorial 
 ```
 ```shell markdown_runner
-* Deleting "secure-monitoring-tutorial" in docker ...
-* Deleting container "secure-monitoring-tutorial" ...
-* Removing /home/robbo04/.minikube/machines/secure-monitoring-tutorial ...
+* Deleting "secure-monitoring-tutorial" in kvm2 ...
 * Removed all traces of the "secure-monitoring-tutorial" cluster.
 ```
 
@@ -1858,15 +1826,20 @@ platform on Kubernetes. You now understand how to:
 
 * `BrokerService` and `Broker` always enforce mTLS — no anonymous access
 * The operator auto-configures the control plane (Jolokia, Prometheus) from discovered certificates
-* `ServiceMonitor` resources enable secure metrics collection
+* The operator generates the `ScrapeConfig` objects that enable secure metrics
+  collection, so no scrape config is written by hand
+* Each identity sees only what the broker authorises it to: the prometheus
+  certificate sees every queue, an app certificate sees only that app's
 * Separate certificates for different components (operator, Prometheus, app clients)
 
 **Monitoring architecture:**
 
-* **Dual Prometheus setup:** One instance for cluster metrics (CPU/Memory), one
-  for broker metrics (messages/throughput)
-* **Dedicated service:** `artemis-prometheus-svc` prevents load-balancing issues
-  between Prometheus instances
+* **Operator generated scrape config:** both `ScrapeConfig` objects are created by
+  the operator, so no scrape target, server name or certificate reference is
+  written by hand
+* **One selector:** a Prometheus adopts them by matching
+  `broker.arkmq.org/monitoring: "true"`, naming no service and no app, so further
+  services and apps are picked up with no change
 * **Explicit datasource references:** Dashboard panels specify datasource UIDs
   to eliminate flickering
 
