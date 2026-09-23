@@ -19,8 +19,8 @@ const (
 	LatestVersion        = "2.57.0"
 	CompactLatestVersion = "2570"
 
-	LatestKubeImage = "quay.io/arkmq-org/activemq-artemis-broker-kubernetes:artemis." + LatestVersion
-	LatestInitImage = "quay.io/arkmq-org/activemq-artemis-broker-init:artemis." + LatestVersion
+	LatestKubeImage = "quay.io/arkmq-org/arkmq-org-broker-kubernetes:artemis." + LatestVersion
+	LatestInitImage = "quay.io/arkmq-org/arkmq-org-broker-init:artemis." + LatestVersion
 )
 
 var (
