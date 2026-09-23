@@ -1149,7 +1149,7 @@ In order for the operator to be able to use mtls to connect to the Broker CR ope
 The default operator cert secret name is `arkmq-org-broker-manager-cert` and the default operator trust bundle secret name is `arkmq-org-broker-manager-ca`.
 If either of these secrets need to be named differently, an enviroment variable can provide the alternative name using key ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME or ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME.
 
-The Broker CR automatically configures control plane authentication for common services. For Prometheus metrics scraping, the operator reads the certificate from a prometheus cert secret and configures the broker to grant metrics access to that certificate's Common Name (CN). The operator first checks for a CR-specific secret `[cr-name]-[base-name]` (allowing per-CR isolation), then falls back to the shared `[base-name]` secret. The base name defaults to `prometheus-cert` but can be overridden using the BASE_PROMETHEUS_CERT_SECRET_NAME environment variable (e.g., if set to `custom-prometheus`, it checks `my-broker-custom-prometheus` then `custom-prometheus`).
+The Broker CR automatically configures control plane authentication for common services. For Prometheus metrics scraping, the operator reads the certificate from a prometheus cert secret and configures the broker to grant metrics access to that certificate's Common Name (CN). The operator first checks for a CR-specific secret `[cr-name]-[base-name]` (allowing per-CR isolation), then falls back to the shared `[base-name]` secret. The base name defaults to `prometheus-cert` but can be overridden using the BASE_PROMETHEUS_CERT_SECRET_NAME environment variable (e.g., if set to `custom-prometheus`, it checks `my-broker-custom-prometheus` then `custom-prometheus`). The same resolution decides which secret the generated `ScrapeConfig` references, so the override carries through to the scrape.
 
 ## Locking down a broker deployment
 
@@ -1227,6 +1227,71 @@ spec:
   - port: console-jolokia
 ```
 For a complete example please refer to this [arkmq-org example](https://github.com/arkmq-org/arkmq-examples/tree/main/operator/prometheus).
+
+### Scraping a BrokerService and its BrokerApps
+
+The section above is the manual route, for the `Broker` CR and its non-mTLS
+`console-jolokia` port. A `BrokerService` and a `BrokerApp` need none of it: the
+operator generates the scrape wiring for them.
+
+The operator generates the scrape wiring but never enables monitoring itself. On
+OpenShift, user-workload-monitoring must already be enabled by a cluster admin
+(`enableUserWorkload: true` in the `cluster-monitoring-config` ConfigMap in
+`openshift-monitoring`); on other clusters a Prometheus instance selecting the
+label below must already be running. Without one, the generated objects are
+correct but nothing scrapes them.
+
+Deploying a `BrokerService` generates, in its namespace, a `ScrapeConfig` named
+`<service>-metrics`. It targets the broker pod directly by its fully qualified
+name on the mTLS metrics port `8888`, and presents the prometheus certificate. The broker grants that identity the broad `metrics` role, so this
+scrape sees every app's queues.
+
+Deploying a `BrokerApp` generates, in *its* namespace, a `ScrapeConfig` named
+`<app>-metrics`. It targets the broker pod of the service the app is bound to,
+addressed by the same fully qualified name, and presents the app's own
+`<app>-app-cert`. Note this is not the host from the app's binding secret: that
+one is where the app's clients send messages, on the app's assigned port. The broker maps that
+certificate's Common Name to the `<namespace>-<app>-metrics` role, so this scrape
+sees that app's queues and no others.
+
+Both sides generate the same shape, differing only in which certificate they
+present. A `ScrapeConfig` rather than a `ServiceMonitor` because an app may be
+bound to a service in another namespace, while a `ServiceMonitor` can only select
+`Service` objects in its own; and a static target addresses the broker pod
+directly, rather than whichever one endpoint discovery happens to route to.
+
+Every generated object carries `broker.arkmq.org/monitoring: "true"`. That is the
+only selector a Prometheus needs, and it never has to name a service or an app:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: artemis-prometheus
+spec:
+  scrapeConfigSelector:
+    matchLabels:
+      broker.arkmq.org/monitoring: "true"
+  scrapeConfigNamespaceSelector: {}
+```
+
+An empty namespace selector means *all* namespaces; omitting it would restrict
+discovery to the Prometheus' own namespace, which would miss any app bound to a
+service elsewhere.
+
+Generation is silently skipped, logged at verbosity 1, when the cluster does not
+serve the `monitoring.coreos.com` `ScrapeConfig` kind or when the certificate to
+scrape as cannot be resolved.
+
+**Install Prometheus and issue the certificates before creating a
+`BrokerService`.** Generation happens while reconciling, and the operator does
+not watch for prometheus-operator or the certificates appearing later, so a
+service created first keeps no scrape configuration. Restart the operator to pick
+them up:
+
+```bash
+kubectl rollout restart deployment/arkmq-org-broker-controller-manager -n <operator namespace>
+```
 
 ## Enabling Operator Metrics
 
