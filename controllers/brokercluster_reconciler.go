@@ -79,7 +79,7 @@ const (
 	jaasConfigSuffix                 = "-jaas-config"
 	loggingConfigSuffix              = "-logging-config"
 
-	cfgMapPathBase = "/amq/extra/configmaps/"
+	cfgMapPathBase = common.ConfigPathBase
 
 	OrdinalPrefix            = "broker-"
 	OrdinalPrefixSep         = "."
@@ -2515,6 +2515,13 @@ func (reconciler *BrokerClusterReconcilerImpl) brokerPropertiesConfigSystemPropV
 		}
 	}
 
+	for _, extraConfigName := range reconciler.customResource.Spec.DeploymentPlan.ExtraMounts.ConfigMaps {
+		if strings.HasSuffix(extraConfigName, common.BrokerPropsSuffix) {
+			// append to ordinal path
+			result = fmt.Sprintf("%s,%s%s/,%s%s/%s${STATEFUL_SET_ORDINAL}/", result, common.ConfigPathBase, extraConfigName, common.ConfigPathBase, extraConfigName, OrdinalPrefix)
+		}
+	}
+
 	if reconciler.CrConfiguredForControllerManagedScaleDown() {
 		// this is a better way to do ordinal config because it does not require an additional mount point, needs image > 2.45.0
 		result = fmt.Sprintf("%s,%s%s/?filter=.*\\.%s${STATEFUL_SET_ORDINAL}%s", result, mountPoint, resourceName, OrdinalPropertiesSuffix, OrdinalPropertiesSuffixEnd)
@@ -3335,6 +3342,28 @@ func (reconciler *BrokerClusterReconcilerImpl) AssertBrokerPropertiesStatus(cr *
 		}
 	}
 
+	if errorStatus == nil {
+		for _, extraConfigName := range cr.Spec.DeploymentPlan.ExtraMounts.ConfigMaps {
+			if strings.HasSuffix(extraConfigName, common.BrokerPropsSuffix) {
+				configProjection, err := reconciler.getConfigMapProjection(types.NamespacedName{Name: extraConfigName, Namespace: cr.Namespace}, client)
+				if err != nil {
+					reqLogger.V(2).Info("error retrieving -bp extra mount configmap resource.")
+					return NewArtemisStatusError(err, false)
+				}
+				errorStatus = reconciler.checkProjectionStatus(cr, client, configProjection, func(BrokerStatus *brokerStatus, FileName string) (propertiesStatus, bool) {
+					current, present := BrokerStatus.BrokerConfigStatus.PropertiesStatus[FileName]
+					return current, present
+				})
+				if errorStatus == nil {
+					updateExtraConfigStatus(cr, configProjection)
+				} else {
+					// report the first error
+					break
+				}
+			}
+		}
+	}
+
 	return errorStatus
 }
 
@@ -3599,6 +3628,26 @@ func (reconciler *BrokerClusterReconcilerImpl) getSecretProjection(secretName ty
 		}
 	}
 	return newProjectionFromByteValues(resource.ObjectMeta, resource.Data), nil
+}
+
+func (reconciler *BrokerClusterReconcilerImpl) getConfigMapProjection(configName types.NamespacedName, client rtclient.Client) (*projection, error) {
+	resourceConfig := &corev1.ConfigMap{}
+
+	// check our latest desired content
+	desired := reconciler.getFromDesired(reflect.TypeOf(resourceConfig), configName.Name)
+	if desired != nil {
+		resourceConfig = desired.(*corev1.ConfigMap)
+	} else {
+		err := client.Get(context.TODO(), configName, resourceConfig)
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to retrieve config projection")
+		}
+	}
+	byteData := make(map[string][]byte, len(resourceConfig.Data))
+	for fileName, fileContent := range resourceConfig.Data {
+		byteData[fileName] = []byte(fileContent)
+	}
+	return newProjectionFromByteValues(resourceConfig.ObjectMeta, byteData), nil
 }
 
 func (reconciler *BrokerClusterReconcilerImpl) getConfigMappedJaasProperties(cr *v1beta2.BrokerCluster, client rtclient.Client) (*projection, error) {
@@ -4075,6 +4124,8 @@ func validateExtraMounts(customResource *v1beta2.BrokerCluster, client rtclient.
 				Message: fmt.Sprintf("%v entry %v with suffix %v must be a secret", ContextMessage, cm, jaasConfigSuffix),
 			}
 			retry = false // Cr needs an update
+		} else if strings.HasSuffix(cm, common.BrokerPropsSuffix) {
+			Condition = brokerproperties.AssertNoDupKeyInPropertiesConfigMap(configMap, ContextMessage)
 		}
 		if Condition != nil {
 			return Condition, retry
