@@ -221,7 +221,9 @@ kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx
 minikube delete --profile aiprofile
 ```
 
-**Note:** cert-manager will be auto-installed by tests if not present.
+**Note:** cert-manager and the prometheus stack will be auto-installed by tests if
+not present. Metrics scrape wiring is generated for every service and app, so the
+cluster needs `monitoring.coreos.com` served for the E2E suite to pass.
 
 ### Full E2E Test Suite Setup
 
@@ -269,13 +271,24 @@ kubectl wait --for=condition=Established \
   crd/tlsroutes.gateway.networking.k8s.io --timeout=60s
 ```
 
-**4. Install Development Tools**
+**4. Install the prometheus stack**
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
+helm upgrade -i -n prometheus kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  --set grafana.enabled=false --set alertmanager.enabled=false \
+  --set nodeExporter.enabled=false --set kubeStateMetrics.enabled=false \
+  --set prometheus.prometheusSpec.probeSelectorNilUsesHelmValues=false \
+  --create-namespace --wait
+```
+
+**5. Install Development Tools**
 
 ```bash
 make helm controller-gen envtest
 ```
 
-**5. Generate and Install CRDs**
+**6. Generate and Install CRDs**
 
 ```bash
 # Generate CRDs and code
@@ -288,7 +301,7 @@ make install
 kubectl get crds | grep broker.amq.io
 ```
 
-**6. Run Test Suite**
+**7. Run Test Suite**
 
 ```bash
 # Run all tests (excludes deployed operator tests)
@@ -324,6 +337,9 @@ make test-mk-do-fast-v
 
 **Cert-Manager Auto-Installation:**
 Tests automatically install cert-manager via Helm if not present and clean it up afterward. Pre-existing installations are left unchanged. See `controllers/common_util_test.go`.
+
+**Prometheus Stack Auto-Installation:**
+The E2E suite requires the prometheus stack, the same way it requires cert-manager. The operator generates scrape wiring for every `BrokerService` and `BrokerApp`, so a cluster without `monitoring.coreos.com` cannot exercise a first class part of its behaviour, and those specs fail rather than skip. Tests install `kube-prometheus-stack` via Helm when the cluster does not serve the `Probe` kind, leaving a cluster that ships its own prometheus-operator, such as OpenShift, alone. The chart is installed with Grafana, Alertmanager, node-exporter and kube-state-metrics disabled and the Probe selector opened up. See `controllers/common_util_test.go`.
 
 ### Running Specific Test Suites
 

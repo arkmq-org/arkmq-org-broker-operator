@@ -75,6 +75,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/ingresses"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	tm "github.com/cert-manager/trust-manager/pkg/apis/trust/v1alpha1"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
@@ -90,6 +91,7 @@ import (
 // Define utility constants for object names and testing timeouts/durations and intervals.
 const (
 	defaultNamespace                   = "test"
+	prometheusNamespace                = "prometheus"
 	otherNamespace                     = "other"
 	restrictedNamespace                = "restricted"
 	timeout                            = time.Second * 60
@@ -855,6 +857,9 @@ func setUpK8sClient() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = tm.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = monitoringv1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	err = brokerv2alpha5.AddToScheme(scheme.Scheme)
