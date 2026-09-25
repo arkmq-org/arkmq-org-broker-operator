@@ -88,6 +88,7 @@ const (
 	// BrokerService and BrokerApp controller constants
 	BrokerPropsSuffix = "-bp"
 	SecretPathBase    = "/amq/extra/secrets/"
+	ConfigPathBase    = "/amq/extra/configmaps/"
 
 	// Standard Kubernetes label keys
 	LabelAppKubernetesInstance  = "app.kubernetes.io/instance"

@@ -940,3 +940,62 @@ var _ = Describe("AcceptorJSON", func() {
 		Expect(params["baseDir"]).To(Equal("/amq/extra/secrets/my-svc-app-bp"))
 	})
 })
+
+var _ = Describe("AssertNoDupKeyInPropertiesConfigMap", func() {
+	It("returns nil when the configmap has no duplicate keys", func() {
+		configMap := corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-configmap"},
+			Data: map[string]string{
+				BrokerPropertiesName: "a=1\nb=2\n",
+			},
+		}
+		Expect(AssertNoDupKeyInPropertiesConfigMap(configMap, "")).To(BeNil())
+	})
+
+	It("returns a condition when a .properties entry has a duplicate key", func() {
+		configMap := corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-configmap"},
+			Data: map[string]string{
+				BrokerPropertiesName: "a=1\na=2\n",
+			},
+		}
+		result := AssertNoDupKeyInPropertiesConfigMap(configMap, "ctx")
+		Expect(result).NotTo(BeNil())
+		Expect(result.Status).To(Equal(metav1.ConditionFalse))
+		Expect(result.Message).To(ContainSubstring("my-configmap"))
+		Expect(result.Message).To(ContainSubstring("a"))
+	})
+
+	It("skips keys that start with the unchecked prefix", func() {
+		configMap := corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-configmap"},
+			Data: map[string]string{
+				UncheckedPrefix + BrokerPropertiesName: "a=1\na=2\n",
+			},
+		}
+		Expect(AssertNoDupKeyInPropertiesConfigMap(configMap, "")).To(BeNil())
+	})
+
+	It("skips keys that do not end with .properties", func() {
+		configMap := corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-configmap"},
+			Data: map[string]string{
+				"login.config": "a=1\na=2\n",
+			},
+		}
+		Expect(AssertNoDupKeyInPropertiesConfigMap(configMap, "")).To(BeNil())
+	})
+
+	It("detects duplicates in one entry while another entry is clean", func() {
+		configMap := corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "multi-entry"},
+			Data: map[string]string{
+				"clean.properties":   "x=1\ny=2\n",
+				BrokerPropertiesName: "a=1\na=2\n",
+			},
+		}
+		result := AssertNoDupKeyInPropertiesConfigMap(configMap, "ctx")
+		Expect(result).NotTo(BeNil())
+		Expect(result.Message).To(ContainSubstring("a"))
+	})
+})

@@ -383,6 +383,117 @@ func TestNewPodTemplateSpecForCR_IncludesDebugArgs(t *testing.T) {
 	assert.Contains(t, newSpec.Spec.Containers[0].Env, expectedEnv)
 }
 
+func TestNewPodTemplateSpecForCR_IncludesBpConfigMapPath(t *testing.T) {
+
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
+			DeploymentPlan: v1beta2.DeploymentPlanType{
+				ExtraMounts: v1beta2.ExtraMountsType{
+					ConfigMaps: []string{
+						"my-config-bp",
+					},
+				},
+			},
+		},
+	}
+
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+	fakeClient := fake.NewClientBuilder().Build()
+
+	newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, fakeClient)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, newSpec)
+
+	found := false
+	for _, env := range newSpec.Spec.Containers[0].Env {
+		if env.Name == jdkJavaOptionsEnvVarName {
+			assert.Contains(t, env.Value, "/amq/extra/configmaps/my-config-bp/")
+			assert.Contains(t, env.Value, "/amq/extra/configmaps/my-config-bp/broker-${STATEFUL_SET_ORDINAL}/")
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected JDK_JAVA_OPTIONS env var with configmap -bp path")
+}
+
+func TestNewPodTemplateSpecForCR_IncludesBpConfigMapAndSecretPaths(t *testing.T) {
+
+	bpSecret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-secret-bp",
+			Namespace: "",
+		},
+		Data: map[string][]byte{
+			"address.properties": []byte("addressConfigurations.test.routingTypes=ANYCAST\n"),
+		},
+	}
+
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
+			DeploymentPlan: v1beta2.DeploymentPlanType{
+				ExtraMounts: v1beta2.ExtraMountsType{
+					ConfigMaps: []string{
+						"my-config-bp",
+					},
+					Secrets: []string{
+						"my-secret-bp",
+					},
+				},
+			},
+		},
+	}
+
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+	fakeClient := fake.NewClientBuilder().WithObjects(bpSecret).Build()
+
+	newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, fakeClient)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, newSpec)
+
+	for _, env := range newSpec.Spec.Containers[0].Env {
+		if env.Name == jdkJavaOptionsEnvVarName {
+			assert.Contains(t, env.Value, "/amq/extra/configmaps/my-config-bp/")
+			assert.Contains(t, env.Value, "/amq/extra/secrets/my-secret-bp/")
+			break
+		}
+	}
+}
+
+func TestNewPodTemplateSpecForCR_NonBpConfigMapNotInBrokerProperties(t *testing.T) {
+
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
+			DeploymentPlan: v1beta2.DeploymentPlanType{
+				ExtraMounts: v1beta2.ExtraMountsType{
+					ConfigMaps: []string{
+						"my-plain-configmap",
+					},
+				},
+			},
+		},
+	}
+
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+	fakeClient := fake.NewClientBuilder().Build()
+
+	newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, fakeClient)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, newSpec)
+
+	for _, env := range newSpec.Spec.Containers[0].Env {
+		if env.Name == jdkJavaOptionsEnvVarName {
+			assert.NotContains(t, env.Value, "my-plain-configmap")
+			break
+		}
+	}
+}
+
 func TestProcess_TemplateIncludesLabelsServiceAndSecret(t *testing.T) {
 
 	var kindMatch string = "Secret"
@@ -2023,4 +2134,97 @@ func TestMakeNamersUsesActiveMQArtemisTrackingLabel(t *testing.T) {
 	assert.Equal(t, "ex-aao-app", labels[selectors.LabelAppKey])
 	_, hasBroker := labels[selectors.LabelBrokerKey]
 	assert.False(t, hasBroker)
+}
+
+func TestNewProjectionFromStringValues(t *testing.T) {
+	resourceMeta := metav1.ObjectMeta{
+		Name:            "test-config",
+		ResourceVersion: "12345",
+		Generation:      3,
+	}
+
+	t.Run("properties file", func(t *testing.T) {
+		data := map[string]string{
+			"address.properties": "addressConfigurations.myQueue.routingTypes=ANYCAST\n",
+		}
+
+		proj := newProjectionFromStringValues(resourceMeta, data)
+
+		assert.Equal(t, "test-config", proj.Name)
+		assert.Equal(t, "12345", proj.ResourceVersion)
+		assert.Equal(t, int64(3), proj.Generation)
+		assert.Contains(t, proj.Files, "address.properties")
+		assert.NotEmpty(t, proj.Files["address.properties"].Alder32)
+		assert.NotEmpty(t, proj.Files["address.properties"].FileAlder32)
+	})
+
+	t.Run("json file", func(t *testing.T) {
+		data := map[string]string{
+			"broker.json": `{"key":"value"}`,
+		}
+
+		proj := newProjectionFromStringValues(resourceMeta, data)
+
+		assert.Contains(t, proj.Files, "broker.json")
+		assert.NotEmpty(t, proj.Files["broker.json"].Alder32)
+		assert.NotEmpty(t, proj.Files["broker.json"].FileAlder32)
+	})
+
+	t.Run("invalid json file is skipped", func(t *testing.T) {
+		data := map[string]string{
+			"broker.json": `{"key":`,
+		}
+
+		proj := newProjectionFromStringValues(resourceMeta, data)
+
+		assert.NotContains(t, proj.Files, "broker.json")
+	})
+
+	t.Run("matches newProjectionFromByteValues", func(t *testing.T) {
+		stringData := map[string]string{
+			"address.properties": "addressConfigurations.myQueue.routingTypes=ANYCAST\n",
+			"broker.json":        `{"key":"value"}`,
+		}
+
+		byteData := make(map[string][]byte, len(stringData))
+		for k, v := range stringData {
+			byteData[k] = []byte(v)
+		}
+
+		projString := newProjectionFromStringValues(resourceMeta, stringData)
+		projBytes := newProjectionFromByteValues(resourceMeta, byteData)
+
+		assert.Equal(t, projBytes.Name, projString.Name)
+		assert.Equal(t, projBytes.ResourceVersion, projString.ResourceVersion)
+		assert.Equal(t, projBytes.Generation, projString.Generation)
+
+		for fileName := range stringData {
+			assert.Equal(
+				t,
+				projBytes.Files[fileName].Alder32,
+				projString.Files[fileName].Alder32,
+				"Alder32 mismatch for %s",
+				fileName,
+			)
+			assert.Equal(
+				t,
+				projBytes.Files[fileName].FileAlder32,
+				projString.Files[fileName].FileAlder32,
+				"FileAlder32 mismatch for %s",
+				fileName,
+			)
+		}
+	})
+
+	t.Run("empty data", func(t *testing.T) {
+		proj := newProjectionFromStringValues(
+			resourceMeta,
+			map[string]string{},
+		)
+
+		assert.Equal(t, "test-config", proj.Name)
+		assert.Equal(t, "12345", proj.ResourceVersion)
+		assert.Equal(t, int64(3), proj.Generation)
+		assert.Empty(t, proj.Files)
+	})
 }

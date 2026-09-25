@@ -21,8 +21,13 @@ import (
 	. "github.com/onsi/gomega"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	brokerv1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
 )
 
@@ -82,6 +87,124 @@ var _ = Describe("broker controller", func() {
 				By("cleaning up")
 				CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
 			}
+		})
+	})
+})
+
+var _ = Describe("brokercluster configmap bp", func() {
+
+	BeforeEach(func() {
+		BeforeEachSpec()
+	})
+
+	AfterEach(func() {
+		AfterEachSpec()
+	})
+
+	Context("configmap with -bp suffix", func() {
+		It("round-trip: broker picks up properties from ConfigMap and reloads on update", func() {
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				return
+			}
+
+			queueName := "cm-bp-queue"
+			cmName := NextSpecResourceName() + common.BrokerPropsSuffix
+
+			By("creating a ConfigMap with -bp suffix containing broker properties")
+			configMap := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      cmName,
+					Namespace: defaultNamespace,
+				},
+				Data: map[string]string{
+					"address.properties": "addressConfigurations." + queueName + ".queueConfigs." + queueName + ".routingType=ANYCAST\n" +
+						"addressConfigurations." + queueName + ".routingTypes=ANYCAST\n",
+				},
+			}
+			Expect(k8sClient.Create(ctx, configMap)).Should(Succeed())
+
+			By("deploying a BrokerCluster CR referencing the ConfigMap via extraMounts")
+			brokerCr, createdBrokerCr := DeployCustomBrokerV1(defaultNamespace, func(c *brokerv1beta2.BrokerCluster) {
+				c.Spec.DeploymentPlan.ExtraMounts.ConfigMaps = []string{cmName}
+			})
+
+			By("waiting for the broker pod to be ready")
+			WaitForPod(brokerCr.Name)
+
+			ssKey := types.NamespacedName{
+				Name:      namer.CrToSS(brokerCr.Name),
+				Namespace: defaultNamespace,
+			}
+			currentSS := &appsv1.StatefulSet{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, ssKey, currentSS)).Should(Succeed())
+				g.Expect(currentSS.Status.ReadyReplicas).Should(BeEquivalentTo(1))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("verifying the queue from ConfigMap properties exists in the broker")
+			podName := namer.CrToSS(brokerCr.Name) + "-0"
+			CheckQueueExistInPod(brokerCr.Name, podName, queueName, defaultNamespace)
+
+			By("updating the ConfigMap with a new queue property")
+			updatedQueueName := "cm-bp-queue-updated"
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      cmName,
+					Namespace: defaultNamespace,
+				}, configMap)).Should(Succeed())
+				configMap.Data["address.properties"] =
+					"addressConfigurations." + updatedQueueName + ".queueConfigs." + updatedQueueName + ".routingType=ANYCAST\n" +
+						"addressConfigurations." + updatedQueueName + ".routingTypes=ANYCAST\n"
+				g.Expect(k8sClient.Update(ctx, configMap)).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			// Capture the ResourceVersion assigned by the API server after the update.
+			updatedResourceVersion := configMap.ResourceVersion
+
+			By("waiting for CR status to reflect the updated ConfigMap resource version")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      brokerCr.Name,
+					Namespace: defaultNamespace,
+				}, createdBrokerCr)).Should(Succeed())
+
+				configApplied := meta.FindStatusCondition(
+					createdBrokerCr.Status.Conditions,
+					brokerv1beta2.ConfigAppliedConditionType,
+				)
+				g.Expect(configApplied).NotTo(BeNil())
+				g.Expect(configApplied.Reason).To(
+					Equal(brokerv1beta2.ConfigAppliedConditionSynchedReason),
+				)
+
+				var foundConfig *brokerv1beta2.ExternalConfigStatus
+				for i := range createdBrokerCr.Status.ExternalConfigs {
+					if createdBrokerCr.Status.ExternalConfigs[i].Name == cmName {
+						foundConfig = &createdBrokerCr.Status.ExternalConfigs[i]
+						break
+					}
+				}
+				g.Expect(foundConfig).NotTo(BeNil(),
+					"ExternalConfigs should contain the ConfigMap entry")
+				g.Expect(foundConfig.ResourceVersion).To(Equal(updatedResourceVersion))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("verifying the updated queue appears in the broker after ConfigMap reload")
+			command := []string{
+				"amq-broker/bin/artemis",
+				"queue",
+				"stat",
+				"--url",
+				"tcp://" + podName + ":61616",
+			}
+			Eventually(func(g Gomega) {
+				stdOutContent := ExecOnPod(podName, brokerCr.Name, defaultNamespace, command, g)
+				g.Expect(stdOutContent).Should(ContainSubstring(updatedQueueName))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("cleaning up")
+			CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
+			CleanResource(configMap, cmName, defaultNamespace)
 		})
 	})
 })

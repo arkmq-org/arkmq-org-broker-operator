@@ -961,12 +961,12 @@ at runtime (e.g. written by a Vault agent sidecar as in the
 > Therefore, their application and synchronization state are **not** tracked in
 > `CR.Status.Condition[BrokerPropertiesApplied]` or `status.externalConfigs`.
 
-## Providing additional brokerProperties configuration from a secret
-In order to provide a way to split or organise these properties by file or by secret, an extra mount can be used to provide a secret that will be treated as an additional source of broker properties configuration.
+## Providing additional brokerProperties configuration from a secret or ConfigMap
+In order to provide a way to split or organise these properties by file or by secret, an extra mount can be used to provide a secret or ConfigMap that will be treated as an additional source of broker properties configuration.
 
-Using an **extraMounts** secret with a suffix "-bp" will cause the operator to auto mount the secret and make the broker aware of its location. In addition, the CR.Status.Condition[BrokerPropertiesApplied] will reflect the content of this secret.
+Using an **extraMounts** secret or ConfigMap with a suffix "-bp" will cause the operator to auto mount it and make the broker aware of its location. In addition, the CR.Status.Condition[BrokerPropertiesApplied] will reflect the content of this secret or ConfigMap.
 
-Broker properties are applied in order, starting with the CR.brokerProperties and then with the "-bp" auto mounts in turn. Keys (or property files) from secrets are applied in alphabetical order and the supported formats are text and JSON.
+Broker properties are applied in order: first the CR.brokerProperties, then -bp extra-mount Secrets in the order they are listed in extraMounts.secrets, then -bp extra-mount ConfigMaps in the order they are listed in extraMounts.configMaps. Within each Secret or ConfigMap, keys (property files) are applied in alphabetical order. The supported formats are text and JSON.
 
 To configure the global max size with text brokerProperties configuration from a "-bp" secret:
 
@@ -1060,6 +1060,36 @@ spec:
       - "config-2-bp"
 ```
 When the CR is deployed the broker in pod 0 broker will get `globalMaxSize=512M` and pod 1 broker will get `globalMaxSize=12M`. While both will get properties from `journal1.properties` of secret **config-1-bp** and `journal2.properties` from secret **config-2-bp**.
+
+### Using a ConfigMap for additional brokerProperties configuration
+
+A ConfigMap with a "-bp" suffix can be used in the same way as a Secret. This is useful in GitOps workflows where storing a ConfigMap in source control is preferred over a Secret.
+
+To configure the global max size using a ConfigMap:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-bp
+data:
+  globalMem.properties: |
+    globalMaxSize=512M
+```
+
+```yaml
+apiVersion: broker.arkmq.org/v1beta2
+kind: BrokerCluster
+metadata:
+  name: ex-aao
+spec:
+  deploymentPlan:
+    extraMounts:
+      configMaps:
+      - "config-bp"
+```
+
+The same JSON format and per-instance `broker-N` key prefix that work for secrets also apply to ConfigMaps.
 
 ## Replace ActiveMQArtemisAddress and ActiveMQArtemisSecurity CRDs with broker properties
 The ActiveMQArtemisAddress and ActiveMQArtemisSecurity CRDs are deprecated in favour of the configuration via broker properties. It is possible to replace the use of the activemqartemisaddresses CRD and much of the activemqartemissecurities CRD with configuration via broker properties.
