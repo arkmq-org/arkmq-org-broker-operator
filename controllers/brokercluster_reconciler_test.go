@@ -382,6 +382,117 @@ func TestNewPodTemplateSpecForCR_IncludesDebugArgs(t *testing.T) {
 	assert.Contains(t, newSpec.Spec.Containers[0].Env, expectedEnv)
 }
 
+func TestNewPodTemplateSpecForCR_IncludesBpConfigMapPath(t *testing.T) {
+
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
+			DeploymentPlan: v1beta2.DeploymentPlanType{
+				ExtraMounts: v1beta2.ExtraMountsType{
+					ConfigMaps: []string{
+						"my-config-bp",
+					},
+				},
+			},
+		},
+	}
+
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+	fakeClient := fake.NewClientBuilder().Build()
+
+	newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, fakeClient)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, newSpec)
+
+	found := false
+	for _, env := range newSpec.Spec.Containers[0].Env {
+		if env.Name == jdkJavaOptionsEnvVarName {
+			assert.Contains(t, env.Value, "/amq/extra/configmaps/my-config-bp/")
+			assert.Contains(t, env.Value, "/amq/extra/configmaps/my-config-bp/broker-${STATEFUL_SET_ORDINAL}/")
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected JDK_JAVA_OPTIONS env var with configmap -bp path")
+}
+
+func TestNewPodTemplateSpecForCR_IncludesBpConfigMapAndSecretPaths(t *testing.T) {
+
+	bpSecret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-secret-bp",
+			Namespace: "",
+		},
+		Data: map[string][]byte{
+			"address.properties": []byte("addressConfigurations.test.routingTypes=ANYCAST\n"),
+		},
+	}
+
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
+			DeploymentPlan: v1beta2.DeploymentPlanType{
+				ExtraMounts: v1beta2.ExtraMountsType{
+					ConfigMaps: []string{
+						"my-config-bp",
+					},
+					Secrets: []string{
+						"my-secret-bp",
+					},
+				},
+			},
+		},
+	}
+
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+	fakeClient := fake.NewClientBuilder().WithObjects(bpSecret).Build()
+
+	newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, fakeClient)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, newSpec)
+
+	for _, env := range newSpec.Spec.Containers[0].Env {
+		if env.Name == jdkJavaOptionsEnvVarName {
+			assert.Contains(t, env.Value, "/amq/extra/configmaps/my-config-bp/")
+			assert.Contains(t, env.Value, "/amq/extra/secrets/my-secret-bp/")
+			break
+		}
+	}
+}
+
+func TestNewPodTemplateSpecForCR_NonBpConfigMapNotInBrokerProperties(t *testing.T) {
+
+	cr := &v1beta2.BrokerCluster{
+		Spec: v1beta2.BrokerClusterSpec{
+			DeploymentPlan: v1beta2.DeploymentPlanType{
+				ExtraMounts: v1beta2.ExtraMountsType{
+					ConfigMaps: []string{
+						"my-plain-configmap",
+					},
+				},
+			},
+		},
+	}
+
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+	fakeClient := fake.NewClientBuilder().Build()
+
+	newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, fakeClient)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, newSpec)
+
+	for _, env := range newSpec.Spec.Containers[0].Env {
+		if env.Name == jdkJavaOptionsEnvVarName {
+			assert.NotContains(t, env.Value, "my-plain-configmap")
+			break
+		}
+	}
+}
+
 func TestProcess_TemplateIncludesLabelsServiceAndSecret(t *testing.T) {
 
 	var kindMatch string = "Secret"

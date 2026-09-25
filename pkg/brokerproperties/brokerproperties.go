@@ -286,6 +286,22 @@ func AssertNoDupKeyInProperties(secret corev1.Secret, contextMessage string) *me
 	return nil
 }
 
+func AssertNoDupKeyInPropertiesConfigMap(config corev1.ConfigMap, contextMessage string) *metav1.Condition {
+	for key, data := range config.Data {
+		if !strings.HasPrefix(key, UncheckedPrefix) && strings.HasSuffix(key, PropertiesSuffix) {
+			if duplicateKey := DuplicateKeyInContent([]byte(data)); duplicateKey != "" {
+				return &metav1.Condition{
+					Type:    v1beta2.ValidConditionType,
+					Status:  metav1.ConditionFalse,
+					Reason:  v1beta2.ValidConditionFailedExtraMountReason,
+					Message: fmt.Sprintf("%s properties configMap %v entry %v has a duplicate key for %v", contextMessage, config.Name, key, duplicateKey),
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func AssertSecretContainsKey(secret corev1.Secret, key string, contextMessage string) *metav1.Condition {
 	isCertSecret, isValid := certutil.IsSecretFromCert(&secret)
 	if isCertSecret {
