@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/monitoring"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"path"
 	"reflect"
 	"sort"
@@ -69,6 +71,7 @@ func NewBrokerServiceReconciler(client client.Client, scheme *runtime.Scheme, co
 
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=monitoring.coreos.com,namespace=arkmq-org-broker-operator,resources=probes,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps,verbs=get;list;watch
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps/status,verbs=get;list;watch
 
@@ -134,10 +137,18 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 
 // instance specifics for a reconciler loop
 func (r *BrokerServiceReconciler) getOwned() []client.ObjectList {
-	return []client.ObjectList{
+	owned := []client.ObjectList{
 		&corev1.SecretList{},
 		&broker.BrokerList{},
 		&corev1.ServiceList{}}
+
+	// only when the kind is served: read.ListAll errors outright on one that is
+	// not, which would abort the reconcile
+	if monitoring.IsPrometheusAvailable(r.RESTMapper()) {
+		owned = append(owned, &monitoringv1.ProbeList{})
+	}
+
+	return owned
 }
 
 func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
@@ -145,7 +156,8 @@ func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
 	return []reflect.Type{
 		reflect.TypeOf(corev1.Secret{}),
 		reflect.TypeOf(broker.Broker{}),
-		reflect.TypeOf(corev1.Service{})}
+		reflect.TypeOf(corev1.Service{}),
+		reflect.TypeOf(monitoringv1.Probe{})}
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
@@ -166,13 +178,75 @@ func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
 	return nil
 }
 
+// processMonitoring generates what a Prometheus needs to scrape this service's
+// brokers under the prometheus identity, which the broker grants the broad
+// "metrics" role and which therefore sees every app's queues.
+//
+// Silently generates nothing when the Probe kind is not served; the
+// BrokerService is perfectly functional without it.
+func (reconciler *BrokerServiceInstanceReconciler) processMonitoring() {
+	instance := reconciler.instance
+
+	if !monitoring.IsPrometheusAvailable(reconciler.RESTMapper()) {
+		reconciler.log.V(1).Info("prometheus-operator is not available, skipping Probe generation",
+			"service", instance.Name)
+		return
+	}
+
+	// Without a prometheus certificate there is no identity to scrape as, and the
+	// broker would reject the connection. Not an error: the same absence is
+	// tolerated when resolving the control plane CNs.
+	promCertSecret := common.GetPrometheusCertSecretNameFor(instance.Name, instance.Namespace, reconciler.Client)
+	if _, err := common.GetNamespacedSecret(reconciler.Client, promCertSecret, instance.Namespace); err != nil {
+		reconciler.log.V(1).Info("no prometheus cert, generating no Probe",
+			"service", instance.Name, "secret", promCertSecret)
+		return
+	}
+
+	caRef := monitoring.CARef(reconciler.Client)
+	if caRef == nil {
+		reconciler.log.V(1).Info("no ca bundle, generating no Probe", "service", instance.Name)
+		return
+	}
+
+	var existing *monitoringv1.Probe
+	if obj := reconciler.CloneOfDeployed(reflect.TypeOf(monitoringv1.Probe{}), monitoring.WiringName(instance.Name)); obj != nil {
+		existing = obj.(*monitoringv1.Probe)
+	}
+
+	reconciler.TrackDesired(monitoring.BuildProbe(monitoring.ScrapeTarget{
+		Owner: instance,
+		// a BrokerService owns a single Broker, pinned to peer index 0 by
+		// processBroker, so the pod is addressed directly by its ordinal name
+		Host: common.OrdinalFQDNS(instance.Name, instance.Namespace, 0),
+		Port: monitoring.Port,
+		// The operand certificate is issued for the service name and for
+		// *.<svc>-hdls-svc.<ns>.svc.<domain>. Only the wildcard covers a fully
+		// qualified pod name, so this is the one name that verifies.
+		ServerName:       common.OrdinalFQDNS(instance.Name, instance.Namespace, 0),
+		ClientCertSecret: promCertSecret,
+		CA:               caRef,
+		Labels:           monitoring.Labels("broker-service", instance.Name, instance.Name),
+		SeriesLabels: map[string]string{
+			"brokerservice":           instance.Name,
+			"brokerservice_namespace": instance.Namespace,
+		},
+	}, existing))
+}
+
 func (reconciler *BrokerServiceInstanceReconciler) processSpec() (err error) {
 	if err = reconciler.processBroker(); err != nil {
 		return err
 	}
 
 	// Process service
-	return reconciler.processService()
+	if err := reconciler.processService(); err != nil {
+		return err
+	}
+
+	reconciler.processMonitoring()
+
+	return nil
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
@@ -598,11 +672,18 @@ func (r *BrokerServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
-	return ctrl.NewControllerManagedBy(mgr).
+	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&broker.BrokerService{}).
 		Owns(&broker.Broker{}).
-		Watches(&broker.BrokerApp{}, &appToServiceHandler{}).
-		Complete(r)
+		Watches(&broker.BrokerApp{}, &appToServiceHandler{})
+
+	// see the note in the BrokerApp reconciler: Owns on a kind the API server does
+	// not serve takes the manager down at start
+	if monitoring.IsPrometheusAvailable(mgr.GetRESTMapper()) {
+		builder = builder.Owns(&monitoringv1.Probe{})
+	}
+
+	return builder.Complete(r)
 }
 
 type AddressConfig struct {
