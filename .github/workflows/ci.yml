@@ -177,6 +177,17 @@ jobs:
           helm upgrade -i -n cert-manager cert-manager jetstack/cert-manager --set installCRDs=true --create-namespace --wait
           helm upgrade -i -n cert-manager trust-manager jetstack/trust-manager --set secretTargets.enabled=true --set secretTargets.authorizedSecretsAll=true --wait
 
+      - name: Install the prometheus stack
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
+          helm upgrade -i -n prometheus kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+            --set grafana.enabled=false \
+            --set alertmanager.enabled=false \
+            --set nodeExporter.enabled=false \
+            --set kubeStateMetrics.enabled=false \
+            --set prometheus.prometheusSpec.probeSelectorNilUsesHelmValues=false \
+            --create-namespace --wait
+
       - name: Run PR-scoped E2E tests
         if: ${{ github.event_name == 'pull_request' }}
         run: make test-mk-pr-v
@@ -260,6 +271,17 @@ jobs:
           helm repo add jetstack https://charts.jetstack.io --force-update
           helm upgrade -i -n cert-manager cert-manager jetstack/cert-manager --set installCRDs=true --create-namespace --wait
           helm upgrade -i -n cert-manager trust-manager jetstack/trust-manager --set secretTargets.enabled=true --set secretTargets.authorizedSecretsAll=true --wait
+
+      - name: Install the prometheus stack
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
+          helm upgrade -i -n prometheus kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+            --set grafana.enabled=false \
+            --set alertmanager.enabled=false \
+            --set nodeExporter.enabled=false \
+            --set kubeStateMetrics.enabled=false \
+            --set prometheus.prometheusSpec.probeSelectorNilUsesHelmValues=false \
+            --create-namespace --wait
       
       - name: Install OLM
         run: |

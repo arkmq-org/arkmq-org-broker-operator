@@ -42,6 +42,7 @@ import (
 	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
 	brokerv1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/monitoring"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
@@ -1013,6 +1014,50 @@ func UninstallCertManager() error {
 	cmd = exec.Command(kubeTool, "delete", "namespace", "cert-manager")
 	err = cmd.Run()
 	return err
+}
+
+// PrometheusStackInstalled reports whether the cluster serves the kind the
+// operator generates. The E2E suite requires it the same way it requires
+// cert-manager: the operator generates scrape wiring for every BrokerService and
+// BrokerApp, so a cluster without it cannot exercise a first class part of the
+// operator's behaviour. Asking for the kind rather than for the chart leaves a
+// cluster that ships its own prometheus-operator, as OpenShift does, alone.
+func PrometheusStackInstalled() bool {
+	monitoring.ResetAvailability()
+	return monitoring.IsPrometheusAvailable(k8sClient.RESTMapper())
+}
+
+// InstallPrometheusStack installs the same chart the tutorials use, minus the
+// pieces no test looks at. The Probe selector is opened up so the
+// Prometheus picks up whatever the operator generates without anything having to
+// be labelled for the chart's release.
+func InstallPrometheusStack() error {
+	fmt.Printf("Installing the prometheus stack using %s\n", helmCmd)
+
+	cmd := exec.Command(helmCmd, "repo", "add", "prometheus-community", "https://prometheus-community.github.io/helm-charts", "--force-update")
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	cmd = exec.Command(helmCmd, "upgrade", "-i", "-n", prometheusNamespace,
+		"kube-prometheus-stack", "prometheus-community/kube-prometheus-stack",
+		"--set", "grafana.enabled=false",
+		"--set", "alertmanager.enabled=false",
+		"--set", "nodeExporter.enabled=false",
+		"--set", "kubeStateMetrics.enabled=false",
+		"--set", "prometheus.prometheusSpec.probeSelectorNilUsesHelmValues=false",
+		"--create-namespace", "--wait")
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("error installing the prometheus stack %v\n", err)
+		return err
+	}
+
+	return nil
+}
+
+func UninstallPrometheusStack() error {
+	cmd := exec.Command(helmCmd, "uninstall", "-n", prometheusNamespace, "kube-prometheus-stack")
+	return cmd.Run()
 }
 
 func CertManagerInstalled() bool {
