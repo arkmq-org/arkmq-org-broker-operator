@@ -55,6 +55,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/log"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/sdkk8sutil"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 
 	brokerv1alpha1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1alpha1"
@@ -221,6 +222,15 @@ func main() {
 		}
 	}
 
+	// Limit the Pod informer cache to operator-managed broker pods
+	// (application in (Artemis, Broker)). Controllers sharing this manager will
+	// only see Pods matching that selector.
+	mgrOptions.Cache.ByObject = map[client.Object]cache.ByObject{
+		&corev1.Pod{}: {
+			Label: selectors.OperatorPodLabelSelector(),
+		},
+	}
+
 	defaultNamespaces := make([]string, 0, len(mgrOptions.Cache.DefaultNamespaces))
 	for defaultNamespace := range mgrOptions.Cache.DefaultNamespaces {
 		defaultNamespaces = append(defaultNamespaces, defaultNamespace)
@@ -228,6 +238,7 @@ func main() {
 
 	setupLog.Info("Manager options",
 		"Namespaces", defaultNamespaces,
+		"PodCacheLabelSelector", selectors.OperatorPodLabelSelector().String(),
 		"MetricsBindAddress", mgrOptions.Metrics.BindAddress,
 		"HealthProbeBindAddress", mgrOptions.HealthProbeBindAddress,
 		"LeaderElection", mgrOptions.LeaderElection,

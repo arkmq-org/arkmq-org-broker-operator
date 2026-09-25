@@ -164,7 +164,7 @@ func TestMakeNamersForBrokerUsesBrokerTrackingLabel(t *testing.T) {
 	labels := namer.LabelBuilder.Labels()
 
 	assert.Equal(t, "my-broker", labels[selectors.LabelBrokerKey])
-	assert.Equal(t, "my-broker-app", labels[selectors.LabelAppKey])
+	assert.Equal(t, selectors.LabelAppValueBroker, labels[selectors.LabelAppKey])
 	_, hasActiveMQArtemis := labels[selectors.LabelActiveMQArtemisKey]
 	assert.False(t, hasActiveMQArtemis)
 

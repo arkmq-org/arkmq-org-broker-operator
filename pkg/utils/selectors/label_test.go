@@ -19,34 +19,51 @@ package selectors
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	k8slabels "k8s.io/apimachinery/pkg/labels"
 )
 
 var _ = Describe("Labeler", func() {
-	It("uses ActiveMQArtemis tracking label for ActiveMQArtemis labeler", func() {
+	It("uses ActiveMQArtemis tracking label and Artemis application value", func() {
 		labeler := NewActiveMQArtemisLabeler()
 		labeler.Base("my-broker").Suffix("app").Generate()
-		labels := labeler.Labels()
+		generated := labeler.Labels()
 
-		Expect(labels).To(HaveKeyWithValue(LabelActiveMQArtemisKey, "my-broker"))
-		Expect(labels).To(HaveKeyWithValue(LabelAppKey, "my-broker-app"))
-		Expect(labels).NotTo(HaveKey(LabelBrokerKey))
+		Expect(generated).To(HaveKeyWithValue(LabelActiveMQArtemisKey, "my-broker"))
+		Expect(generated).To(HaveKeyWithValue(LabelAppKey, LabelAppValueArtemis))
+		Expect(generated).NotTo(HaveKey(LabelBrokerKey))
 	})
 
-	It("uses Broker tracking label for Broker labeler", func() {
+	It("uses Broker tracking label and Broker application value", func() {
 		labeler := NewBrokerLabeler()
 		labeler.Base("my-broker").Suffix("app").Generate()
-		labels := labeler.Labels()
+		generated := labeler.Labels()
 
-		Expect(labels).To(HaveKeyWithValue(LabelBrokerKey, "my-broker"))
-		Expect(labels).To(HaveKeyWithValue(LabelAppKey, "my-broker-app"))
-		Expect(labels).NotTo(HaveKey(LabelActiveMQArtemisKey))
+		Expect(generated).To(HaveKeyWithValue(LabelBrokerKey, "my-broker"))
+		Expect(generated).To(HaveKeyWithValue(LabelAppKey, LabelAppValueBroker))
+		Expect(generated).NotTo(HaveKey(LabelActiveMQArtemisKey))
 	})
 
 	It("keeps ActiveMQArtemis as default in GetLabels", func() {
-		labels := GetLabels("ex-aao")
+		generated := GetLabels("ex-aao")
 
-		Expect(labels).To(HaveKeyWithValue(LabelActiveMQArtemisKey, "ex-aao"))
-		Expect(labels).To(HaveKeyWithValue(LabelAppKey, "ex-aao-app"))
-		Expect(labels).NotTo(HaveKey(LabelBrokerKey))
+		Expect(generated).To(HaveKeyWithValue(LabelActiveMQArtemisKey, "ex-aao"))
+		Expect(generated).To(HaveKeyWithValue(LabelAppKey, LabelAppValueArtemis))
+		Expect(generated).NotTo(HaveKey(LabelBrokerKey))
+	})
+
+	It("builds a Pod cache selector for application in (Artemis, Broker)", func() {
+		selector := OperatorPodLabelSelector()
+
+		Expect(selector.Matches(k8slabels.Set{
+			LabelAppKey:             LabelAppValueArtemis,
+			LabelActiveMQArtemisKey: "my-broker",
+		})).To(BeTrue())
+		Expect(selector.Matches(k8slabels.Set{
+			LabelAppKey:    LabelAppValueBroker,
+			LabelBrokerKey: "my-broker",
+		})).To(BeTrue())
+		Expect(selector.Matches(k8slabels.Set{
+			LabelAppKey: "unrelated",
+		})).To(BeFalse())
 	})
 })

@@ -74,6 +74,7 @@ import (
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/ingresses"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	tm "github.com/cert-manager/trust-manager/pkg/apis/trust/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -523,6 +524,12 @@ func createControllerManager(disableMetrics bool, watchNamespace string) {
 		} else {
 			ctrl.Log.Info("setting up operator to watch all namespaces")
 		}
+	}
+
+	mgrOptions.Cache.ByObject = map[client.Object]cache.ByObject{
+		&corev1.Pod{}: {
+			Label: selectors.OperatorPodLabelSelector(),
+		},
 	}
 
 	if disableMetrics {
