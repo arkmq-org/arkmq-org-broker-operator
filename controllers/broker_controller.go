@@ -1202,6 +1202,8 @@ func (reconciler *BrokerReconcilerImpl) brokerPropertiesConfigSystemPropValue(mo
 		}
 	}
 
+	result += ",$(" + extraBrokerPropertiesEnvVarName + ")"
+
 	return result
 }
 
@@ -1654,6 +1656,8 @@ func MakeEnvVarArrayForCRForBroker(customResource *v1beta2.Broker, namer common.
 
 	envVarArrayForMetricsPlugin := environments.AddEnvVarForMetricsPlugin(metricsPluginEnabled)
 	envVar = append(envVar, envVarArrayForMetricsPlugin...)
+
+	envVar = append(envVar, corev1.EnvVar{Name: extraBrokerPropertiesEnvVarName, Value: ""})
 
 	// Env from CR will override
 	envVar = environments.ReplaceOrAppend(envVar, customResource.Spec.Env...)

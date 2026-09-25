@@ -553,6 +553,45 @@ func TestPodTemplateSpecForCR_SidecarInitContainer(t *testing.T) {
 		operatorURI := path.Join(sidecarSecretPath, LoggingConfigKey)
 		assert.Contains(t, jdkOpts, log4j2ConfigurationFileFlag+operatorURI)
 	})
+
+	t.Run("JDK_JAVA_OPTIONS contains EXTRA_BROKER_PROPERTIES reference", func(t *testing.T) {
+		var jdkOpts string
+		for _, env := range pts.Spec.Containers[0].Env {
+			if env.Name == jdkJavaOptionsEnvVarName {
+				jdkOpts = env.Value
+				break
+			}
+		}
+		assert.Contains(t, jdkOpts, "$("+extraBrokerPropertiesEnvVarName+")")
+	})
+
+	t.Run("EXTRA_BROKER_PROPERTIES env var exists with empty default", func(t *testing.T) {
+		found := false
+		for _, env := range pts.Spec.Containers[0].Env {
+			if env.Name == extraBrokerPropertiesEnvVarName {
+				assert.Equal(t, "", env.Value)
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "EXTRA_BROKER_PROPERTIES env var should be present")
+	})
+
+	t.Run("EXTRA_BROKER_PROPERTIES appears before JDK_JAVA_OPTIONS in env list", func(t *testing.T) {
+		extraIdx := -1
+		jdkIdx := -1
+		for i, env := range pts.Spec.Containers[0].Env {
+			if env.Name == extraBrokerPropertiesEnvVarName && extraIdx == -1 {
+				extraIdx = i
+			}
+			if env.Name == jdkJavaOptionsEnvVarName && jdkIdx == -1 {
+				jdkIdx = i
+			}
+		}
+		assert.NotEqual(t, -1, extraIdx, "EXTRA_BROKER_PROPERTIES should be in env list")
+		assert.NotEqual(t, -1, jdkIdx, "JDK_JAVA_OPTIONS should be in env list")
+		assert.Less(t, extraIdx, jdkIdx, "EXTRA_BROKER_PROPERTIES must appear before JDK_JAVA_OPTIONS for Kubernetes variable resolution")
+	})
 }
 
 func mustTestKeyPair(t *testing.T) (certPEM, keyPEM []byte) {

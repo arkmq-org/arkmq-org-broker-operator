@@ -603,6 +603,59 @@ func Test_Respect_existing_JAVA_OPTS_properties_def(t *testing.T) {
 	assert.True(t, strings.Contains(newSS.Spec.Template.Spec.InitContainers[0].Env[index].Value, "properties"))
 }
 
+func Test_EXTRA_BROKER_PROPERTIES_in_system_prop_value(t *testing.T) {
+
+	cr := &v1beta2.BrokerCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
+		Spec:       v1beta2.BrokerClusterSpec{},
+	}
+
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_EXTRA_BROKER_PROPERTIES"), isOpenshift)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+
+	namer := MakeNamers(cr)
+	newSS, _ := reconciler.ProcessStatefulSet(cr, *namer, nil)
+
+	t.Run("JDK_JAVA_OPTIONS contains EXTRA_BROKER_PROPERTIES reference", func(t *testing.T) {
+		var jdkOpts string
+		for _, env := range newSS.Spec.Template.Spec.Containers[0].Env {
+			if env.Name == jdkJavaOptionsEnvVarName {
+				jdkOpts = env.Value
+				break
+			}
+		}
+		assert.Contains(t, jdkOpts, "$("+extraBrokerPropertiesEnvVarName+")")
+	})
+
+	t.Run("EXTRA_BROKER_PROPERTIES env var exists with empty default", func(t *testing.T) {
+		found := false
+		for _, env := range newSS.Spec.Template.Spec.Containers[0].Env {
+			if env.Name == extraBrokerPropertiesEnvVarName {
+				assert.Equal(t, "", env.Value)
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "EXTRA_BROKER_PROPERTIES env var should be present")
+	})
+
+	t.Run("EXTRA_BROKER_PROPERTIES appears before JDK_JAVA_OPTIONS", func(t *testing.T) {
+		extraIdx := -1
+		jdkIdx := -1
+		for i, env := range newSS.Spec.Template.Spec.Containers[0].Env {
+			if env.Name == extraBrokerPropertiesEnvVarName && extraIdx == -1 {
+				extraIdx = i
+			}
+			if env.Name == jdkJavaOptionsEnvVarName && jdkIdx == -1 {
+				jdkIdx = i
+			}
+		}
+		assert.NotEqual(t, -1, extraIdx)
+		assert.NotEqual(t, -1, jdkIdx)
+		assert.Less(t, extraIdx, jdkIdx, "EXTRA_BROKER_PROPERTIES must appear before JDK_JAVA_OPTIONS for Kubernetes variable resolution")
+	})
+}
+
 func TestProcess_TemplateKeyValue(t *testing.T) {
 
 	var kindMatch string = "Service"

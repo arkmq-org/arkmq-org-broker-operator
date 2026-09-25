@@ -101,6 +101,8 @@ const (
 	javaOptsEnvVarName       = "JAVA_OPTS"
 	jdkJavaOptionsEnvVarName = "JDK_JAVA_OPTIONS"
 
+	extraBrokerPropertiesEnvVarName = "EXTRA_BROKER_PROPERTIES"
+
 	PrometheusConfigFileName = "_prometheus_exporter_config"
 
 	ScaleDownConfigTrigger        = "HAPolicyConfiguration.scaleDownConfiguration.enabled=false"
@@ -2520,6 +2522,8 @@ func (reconciler *BrokerClusterReconcilerImpl) brokerPropertiesConfigSystemPropV
 		result = fmt.Sprintf("%s,%s%s/?filter=.*\\.%s${STATEFUL_SET_ORDINAL}%s", result, mountPoint, resourceName, OrdinalPropertiesSuffix, OrdinalPropertiesSuffixEnd)
 	}
 
+	result += ",$(" + extraBrokerPropertiesEnvVarName + ")"
+
 	return result
 }
 
@@ -3074,6 +3078,8 @@ func MakeEnvVarArrayForCR(customResource *v1beta2.BrokerCluster, namer common.Na
 
 	envVarArrayForMetricsPlugin := environments.AddEnvVarForMetricsPlugin(metricsPluginEnabled)
 	envVar = append(envVar, envVarArrayForMetricsPlugin...)
+
+	envVar = append(envVar, corev1.EnvVar{Name: extraBrokerPropertiesEnvVarName, Value: ""})
 
 	// Env from CR will override
 	envVar = environments.ReplaceOrAppend(envVar, customResource.Spec.Env...)
