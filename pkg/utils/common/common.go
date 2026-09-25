@@ -94,9 +94,19 @@ const (
 	LabelAppKubernetesComponent = "app.kubernetes.io/component"
 	LabelAppKubernetesManagedBy = "app.kubernetes.io/managed-by"
 
+	// OperatorName is the app.kubernetes.io/managed-by value on everything the
+	// operator creates.
+	OperatorName = "arkmq-org-broker-operator"
+
 	// Domain-specific label keys
 	LabelBrokerService   = "broker.arkmq.org/service"
 	LabelBrokerPeerIndex = "broker.arkmq.org/peer-index"
+	LabelBrokerApp       = "broker.arkmq.org/app"
+
+	// LabelMonitoring marks the scrape wiring the operator generates. It is the
+	// single selector a Prometheus instance needs, so nothing has to be
+	// parametrized per service or per app.
+	LabelMonitoring = "broker.arkmq.org/monitoring"
 )
 
 var lastStatusMap map[types.NamespacedName]olm.DeploymentStatus = make(map[types.NamespacedName]olm.DeploymentStatus)
@@ -941,13 +951,20 @@ func ResolveControlPlaneCNs(client rtclient.Client, cr *v1beta2.Broker) (Control
 }
 
 func GetPrometheusCertSecretName(cr *v1beta2.Broker, client rtclient.Client) string {
+	return GetPrometheusCertSecretNameFor(cr.Name, cr.Namespace, client)
+}
+
+// GetPrometheusCertSecretNameFor is GetPrometheusCertSecretName for callers that
+// hold a name and namespace rather than a Broker, such as the BrokerService
+// generating scrape wiring.
+func GetPrometheusCertSecretNameFor(name string, namespace string, client rtclient.Client) string {
 	// Determine the base secret name (from env or default)
 	if prometheusCertSecretName == nil {
 		prometheusCertSecretName = fromEnv("BASE_PROMETHEUS_CERT_SECRET_NAME", DefaultPrometheusCertSecretName)
 	}
 	baseSecretName := *prometheusCertSecretName
 
-	secret, _ := ResolveSecret(cr.Name, cr.Namespace, baseSecretName, client)
+	secret, _ := ResolveSecret(name, namespace, baseSecretName, client)
 	if secret != nil {
 		return secret.Name
 	}
