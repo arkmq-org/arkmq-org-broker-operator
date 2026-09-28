@@ -25,6 +25,7 @@ import (
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/templates"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -1655,4 +1656,53 @@ func newServiceReconcilerWithClient(cl client.Client) *BrokerServiceInstanceReco
 			},
 		},
 	}
+}
+
+func ownerApp(namespace, name string, capabilities ...v1beta2.AppCapabilityType) v1beta2.BrokerApp {
+	return v1beta2.BrokerApp{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec:       v1beta2.BrokerAppSpec{Capabilities: capabilities},
+	}
+}
+
+func TestQueueOwnersGiveAnOwnedAnycastQueueToItsApp(t *testing.T) {
+	owners := queueOwners([]v1beta2.BrokerApp{
+		ownerApp("ns-a", "producer", v1beta2.AppCapabilityType{ProducerOf: []v1beta2.AddressRef{{Address: "ORDERS"}}}),
+	}, logr.Discard())
+
+	assert.Equal(t, templates.QueueOwner{OwnerNamespace: "ns-a", OwnerApp: "producer"}, owners["ORDERS"])
+}
+
+func TestQueueOwnersGiveAReferencedAnycastQueueToTheAppItNames(t *testing.T) {
+	owners := queueOwners([]v1beta2.BrokerApp{
+		ownerApp("ns-b", "consumer", v1beta2.AppCapabilityType{ConsumerOf: []v1beta2.AddressRef{
+			{Address: "ORDERS", AppName: "producer", AppNamespace: "ns-a"},
+			{Address: "LOCAL.REF", AppName: "sibling"},
+		}}),
+	}, logr.Discard())
+
+	assert.Equal(t, templates.QueueOwner{OwnerNamespace: "ns-a", OwnerApp: "producer"}, owners["ORDERS"],
+		"the referencing app does not own the queue it consumes from")
+	assert.Equal(t, templates.QueueOwner{OwnerNamespace: "ns-b", OwnerApp: "sibling"}, owners["LOCAL.REF"],
+		"a reference without a namespace names an app beside the referencing one")
+}
+
+func TestQueueOwnersGiveASubscriptionQueueToTheSubscriber(t *testing.T) {
+	owners := queueOwners([]v1beta2.BrokerApp{
+		ownerApp("ns-b", "subscriber", v1beta2.AppCapabilityType{ConsumerOf: []v1beta2.AddressRef{
+			{Address: "NEWS", AppName: "publisher", AppNamespace: "ns-a", Subscriptions: []string{"sub-client.news"}},
+		}}),
+	}, logr.Discard())
+
+	assert.Equal(t, templates.QueueOwner{OwnerNamespace: "ns-b", OwnerApp: "subscriber"}, owners["NEWS"+FQQNSeparator+"sub-client.news"])
+	assert.NotContains(t, owners, "NEWS", "a multicast address is not a queue")
+}
+
+func TestQueueOwnersKeepTheFirstClaimWhateverTheOrder(t *testing.T) {
+	first := ownerApp("ns-a", "first", v1beta2.AppCapabilityType{ProducerOf: []v1beta2.AddressRef{{Address: "SHARED"}}})
+	second := ownerApp("ns-b", "second", v1beta2.AppCapabilityType{ProducerOf: []v1beta2.AddressRef{{Address: "SHARED"}}})
+
+	assert.Equal(t, queueOwners([]v1beta2.BrokerApp{first, second}, logr.Discard()),
+		queueOwners([]v1beta2.BrokerApp{second, first}, logr.Discard()))
+	assert.Equal(t, "first", queueOwners([]v1beta2.BrokerApp{second, first}, logr.Discard())["SHARED"].OwnerApp)
 }

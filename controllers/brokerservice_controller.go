@@ -1010,38 +1010,7 @@ func (reconciler *BrokerServiceInstanceReconciler) controlPlaneOverrideSecretNam
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSecret(validApps []broker.BrokerApp) error {
-	// Collect all unique ConsumerOf and ProducerOf addresses from validated apps only
-	appQueues := make(map[string]bool)
-	for _, app := range validApps {
-		for _, capability := range app.Spec.Capabilities {
-			// Collect ConsumerOf addresses for metrics
-			for _, addressRef := range capability.ConsumerOf {
-				if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-					// ANYCAST - direct queue address
-					appQueues[addressRef.Address] = true
-				} else {
-					// MULTICAST - generate FQQN for each multicast queue
-					for _, queueName := range addressRef.Subscriptions {
-						fqqn := addressRef.Address + FQQNSeparator + queueName
-						appQueues[fqqn] = true
-					}
-				}
-			}
-			// Also collect ProducerOf addresses for metrics
-			for _, addressRef := range capability.ProducerOf {
-				if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-					// ANYCAST - direct queue address
-					appQueues[addressRef.Address] = true
-				} else {
-					// MULTICAST - generate FQQN for each multicast queue
-					for _, queueName := range addressRef.Subscriptions {
-						fqqn := addressRef.Address + FQQNSeparator + queueName
-						appQueues[fqqn] = true
-					}
-				}
-			}
-		}
-	}
+	appQueues := queueOwners(validApps, reconciler.log)
 
 	// Get or create the control-plane-override secret
 	resourceName := types.NamespacedName{
@@ -1143,7 +1112,60 @@ func (reconciler *BrokerServiceInstanceReconciler) appCertCN(app *broker.BrokerA
 	return subject.CommonName, nil
 }
 
-func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]bool) ([]byte, error) {
+// queueOwners maps every queue the validated apps produce to or consume from to
+// the app that owns it, whose namespace its series are labelled with. An
+// anycast queue belongs to the app that declares the address, which a
+// referencing app names in its AddressRef. A subscription queue is created for
+// the subscriber and named by it, so it belongs to the subscriber, whoever owns
+// the address.
+func queueOwners(validApps []broker.BrokerApp, log logr.Logger) map[string]templates.QueueOwner {
+	apps := make([]*broker.BrokerApp, len(validApps))
+	for i := range validApps {
+		apps[i] = &validApps[i]
+	}
+	// the first claim wins, so claims are made in a stable order
+	sort.Slice(apps, func(i, j int) bool { return AppIdentity(apps[i]) < AppIdentity(apps[j]) })
+
+	owners := make(map[string]templates.QueueOwner)
+	claim := func(queue string, owner templates.QueueOwner) {
+		if current, found := owners[queue]; found {
+			if current != owner {
+				log.V(1).Info("queue claimed by more than one app, keeping the first",
+					"queue", queue, "kept", current, "ignored", owner)
+			}
+			return
+		}
+		owners[queue] = owner
+	}
+
+	for _, app := range apps {
+		self := templates.QueueOwner{OwnerNamespace: app.Namespace, OwnerApp: app.Name}
+		for _, capability := range app.Spec.Capabilities {
+			for _, refs := range [][]broker.AddressRef{capability.ConsumerOf, capability.ProducerOf} {
+				for _, addressRef := range refs {
+					if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
+						for _, queueName := range addressRef.Subscriptions {
+							claim(addressRef.Address+FQQNSeparator+queueName, self)
+						}
+						continue
+					}
+					owner := self
+					if addressRef.AppName != "" {
+						owner.OwnerApp = addressRef.AppName
+						if addressRef.AppNamespace != "" {
+							owner.OwnerNamespace = addressRef.AppNamespace
+						}
+					}
+					claim(addressRef.Address, owner)
+				}
+			}
+		}
+	}
+
+	return owners
+}
+
+func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]templates.QueueOwner) ([]byte, error) {
 	var caSecret, caSecretKey string
 	if caCertSecret, err := common.GetOperatorCASecret(reconciler.Client); err == nil {
 		caSecret = caCertSecret.Name
