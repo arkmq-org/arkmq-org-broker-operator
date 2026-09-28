@@ -30,6 +30,7 @@ import (
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/templates"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	"github.com/go-logr/logr"
@@ -122,6 +123,13 @@ func newServiceReconcilerWithClient(cl client.Client) *BrokerServiceInstanceReco
 				KubeBits: &KubeBits{Client: cl, log: logr.Discard()},
 			},
 		},
+	}
+}
+
+func ownerApp(namespace, name string, capabilities ...v1beta2.AppCapabilityType) v1beta2.BrokerApp {
+	return v1beta2.BrokerApp{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec:       v1beta2.BrokerAppSpec{Capabilities: capabilities},
 	}
 }
 
@@ -1572,5 +1580,46 @@ var _ = Describe("brokerservice controller unit", func() {
 		appsProv := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.AppsProvisionedConditionType)
 		Expect(appsProv).NotTo(BeNil())
 		Expect(appsProv.Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("queue owners give an owned anycast queue to its app", Label(unitLabel), func() {
+		owners := queueOwners([]v1beta2.BrokerApp{
+			ownerApp("ns-a", "producer", v1beta2.AppCapabilityType{ProducerOf: []v1beta2.AddressRef{{Address: "ORDERS"}}}),
+		}, logr.Discard())
+
+		Expect(owners["ORDERS"]).To(Equal(templates.QueueOwner{OwnerNamespace: "ns-a", OwnerApp: "producer"}))
+	})
+
+	It("queue owners give a referenced anycast queue to the app it names", Label(unitLabel), func() {
+		owners := queueOwners([]v1beta2.BrokerApp{
+			ownerApp("ns-b", "consumer", v1beta2.AppCapabilityType{ConsumerOf: []v1beta2.AddressRef{
+				{Address: "ORDERS", AppName: "producer", AppNamespace: "ns-a"},
+				{Address: "LOCAL.REF", AppName: "sibling"},
+			}}),
+		}, logr.Discard())
+
+		Expect(owners["ORDERS"]).To(Equal(templates.QueueOwner{OwnerNamespace: "ns-a", OwnerApp: "producer"}),
+			"the referencing app does not own the queue it consumes from")
+		Expect(owners["LOCAL.REF"]).To(Equal(templates.QueueOwner{OwnerNamespace: "ns-b", OwnerApp: "sibling"}),
+			"a reference without a namespace names an app beside the referencing one")
+	})
+
+	It("queue owners give a subscription queue to the subscriber", Label(unitLabel), func() {
+		owners := queueOwners([]v1beta2.BrokerApp{
+			ownerApp("ns-b", "subscriber", v1beta2.AppCapabilityType{ConsumerOf: []v1beta2.AddressRef{
+				{Address: "NEWS", AppName: "publisher", AppNamespace: "ns-a", Subscriptions: []string{"sub-client.news"}},
+			}}),
+		}, logr.Discard())
+
+		Expect(owners["NEWS"+FQQNSeparator+"sub-client.news"]).To(Equal(templates.QueueOwner{OwnerNamespace: "ns-b", OwnerApp: "subscriber"}))
+		Expect(owners).NotTo(HaveKey("NEWS"), "a multicast address is not a queue")
+	})
+
+	It("queue owners keep the first claim whatever the order", Label(unitLabel), func() {
+		first := ownerApp("ns-a", "first", v1beta2.AppCapabilityType{ProducerOf: []v1beta2.AddressRef{{Address: "SHARED"}}})
+		second := ownerApp("ns-b", "second", v1beta2.AppCapabilityType{ProducerOf: []v1beta2.AddressRef{{Address: "SHARED"}}})
+
+		Expect(queueOwners([]v1beta2.BrokerApp{second, first}, logr.Discard())).To(Equal(queueOwners([]v1beta2.BrokerApp{first, second}, logr.Discard())))
+		Expect(queueOwners([]v1beta2.BrokerApp{second, first}, logr.Discard())["SHARED"].OwnerApp).To(Equal("first"))
 	})
 })

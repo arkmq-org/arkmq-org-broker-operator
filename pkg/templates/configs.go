@@ -4,7 +4,9 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 	"text/template"
 )
 
@@ -145,6 +147,26 @@ type QueueEntry struct {
 	Address     string
 	RoutingType string
 	Queue       string
+
+	// Pattern matches this queue's MBean alone, with the same capture groups as
+	// the generic rule. It is YAML single-quote safe.
+	Pattern string
+
+	QueueOwner
+}
+
+// QueueOwner is the app a queue's series belong to. Its namespace becomes the
+// series' namespace label, which is what decides who may read them.
+type QueueOwner struct {
+	OwnerNamespace string
+	OwnerApp       string
+}
+
+func queuePattern(broker, address, routingType, queue string) string {
+	q := regexp.QuoteMeta
+	pattern := fmt.Sprintf(`org.apache.activemq.artemis<broker="(%s)", component=addresses, address="(%s)", subcomponent=queues, routing-type="(%s)", queue="(%s)"><>([^:]+):`,
+		q(broker), q(address), q(routingType), q(queue))
+	return strings.ReplaceAll(pattern, "'", "''")
 }
 
 func Render(name string, cfg any) ([]byte, error) {
@@ -168,7 +190,7 @@ func RenderLogging() []byte {
 	return loggingBytes
 }
 
-func RenderServicePrometheus(cfg ServicePrometheusConfig, appQueues map[string]bool) ([]byte, error) {
+func RenderServicePrometheus(cfg ServicePrometheusConfig, appQueues map[string]QueueOwner) ([]byte, error) {
 	if len(appQueues) > 0 {
 		addresses := make([]string, 0, len(appQueues))
 		for address := range appQueues {
@@ -176,12 +198,12 @@ func RenderServicePrometheus(cfg ServicePrometheusConfig, appQueues map[string]b
 		}
 		sort.Strings(addresses)
 		for _, address := range addresses {
-			fqqn := splitFQQN(address)
-			if len(fqqn) > 1 {
-				cfg.Queues = append(cfg.Queues, QueueEntry{Address: fqqn[0], RoutingType: "multicast", Queue: fqqn[1]})
-			} else {
-				cfg.Queues = append(cfg.Queues, QueueEntry{Address: address, RoutingType: "anycast", Queue: address})
+			entry := QueueEntry{Address: address, RoutingType: "anycast", Queue: address, QueueOwner: appQueues[address]}
+			if fqqn := splitFQQN(address); len(fqqn) > 1 {
+				entry.Address, entry.RoutingType, entry.Queue = fqqn[0], "multicast", fqqn[1]
 			}
+			entry.Pattern = queuePattern(cfg.BrokerName, entry.Address, entry.RoutingType, entry.Queue)
+			cfg.Queues = append(cfg.Queues, entry)
 		}
 	}
 	return Render(ServicePrometheus, cfg)

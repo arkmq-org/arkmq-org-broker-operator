@@ -11,7 +11,7 @@ func mustRender(name string, cfg any) string {
 	return string(data)
 }
 
-func mustRenderServicePrometheus(cfg ServicePrometheusConfig, appQueues map[string]bool) string {
+func mustRenderServicePrometheus(cfg ServicePrometheusConfig, appQueues map[string]QueueOwner) string {
 	data, err := RenderServicePrometheus(cfg, appQueues)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred())
 	return string(data)
@@ -215,7 +215,7 @@ var _ = Describe("ServicePrometheusConfigData", func() {
 	})
 
 	It("includes queue-level includeObjectNameAttributes when appQueues is non-empty", func() {
-		queues := map[string]bool{"MY.QUEUE": true}
+		queues := map[string]QueueOwner{"MY.QUEUE": {}}
 		data := mustRenderServicePrometheus(ServicePrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/ca", BrokerName: "svc"}, queues)
 		Expect(data).To(ContainSubstring("includeObjectNameAttributes:"))
 		Expect(data).To(ContainSubstring("MY.QUEUE"))
@@ -227,7 +227,7 @@ var _ = Describe("ServicePrometheusConfigData", func() {
 	})
 
 	It("routes multicast addresses (with ::) to multicast routing-type", func() {
-		queues := map[string]bool{"MY.TOPIC::MY.SUBSCRIPTION": true}
+		queues := map[string]QueueOwner{"MY.TOPIC::MY.SUBSCRIPTION": {}}
 		data := mustRenderServicePrometheus(ServicePrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/ca", BrokerName: "svc"}, queues)
 		Expect(data).To(ContainSubstring(`routing-type="multicast"`))
 		Expect(data).To(ContainSubstring(`address="MY.TOPIC"`))
@@ -235,14 +235,14 @@ var _ = Describe("ServicePrometheusConfigData", func() {
 	})
 
 	It("routes plain addresses (no ::) to anycast routing-type", func() {
-		queues := map[string]bool{"MY.QUEUE": true}
+		queues := map[string]QueueOwner{"MY.QUEUE": {}}
 		data := mustRenderServicePrometheus(ServicePrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/ca", BrokerName: "svc"}, queues)
 		Expect(data).To(ContainSubstring(`routing-type="anycast"`))
 		Expect(data).To(ContainSubstring(`address="MY.QUEUE"`))
 	})
 
 	It("produces queue attributes in deterministic order", func() {
-		queues := map[string]bool{"B.QUEUE": true, "A.QUEUE": true}
+		queues := map[string]QueueOwner{"B.QUEUE": {}, "A.QUEUE": {}}
 		first := mustRenderServicePrometheus(ServicePrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/ca", BrokerName: "svc"}, queues)
 		second := mustRenderServicePrometheus(ServicePrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/ca", BrokerName: "svc"}, queues)
 		Expect(first).To(Equal(second))
@@ -255,6 +255,30 @@ var _ = Describe("ServicePrometheusConfigData", func() {
 	It("includes the broker_queue rules pattern", func() {
 		data := mustRenderServicePrometheus(ServicePrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/ca", BrokerName: "svc"}, nil)
 		Expect(data).To(ContainSubstring("broker_queue_$5"))
+	})
+
+	It("labels each app queue with its owner, ahead of the generic rule", func() {
+		queues := map[string]QueueOwner{
+			"orders":            {OwnerNamespace: "ns-a", OwnerApp: "app-a"},
+			"news::client.news": {OwnerNamespace: "ns-b", OwnerApp: "app-b"},
+		}
+		data := mustRenderServicePrometheus(ServicePrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/ca", BrokerName: "svc"}, queues)
+
+		Expect(data).To(ContainSubstring(`- pattern: 'org.apache.activemq.artemis<broker="(svc)", component=addresses, address="(orders)", subcomponent=queues, routing-type="(anycast)", queue="(orders)"><>([^:]+):'`))
+		Expect(data).To(ContainSubstring(`address="(news)", subcomponent=queues, routing-type="(multicast)", queue="(client\.news)"`))
+		Expect(data).To(MatchRegexp(`queue="\(orders\)"[^\n]*\n(.*\n){9}      namespace: "ns-a"\n      brokerapp: "app-a"`))
+		Expect(data).To(MatchRegexp(`queue="\(client\\\.news\)"[^\n]*\n(.*\n){9}      namespace: "ns-b"\n      brokerapp: "app-b"`))
+
+		generic := indexOfString(data, `broker=\"([^\"]+)\"`)
+		Expect(generic).To(BeNumerically(">", indexOfString(data, `queue="(orders)"`)),
+			"the exporter stops at the first matching rule, so the generic one comes last")
+	})
+
+	It("quotes queue names so they match literally and stay valid YAML", func() {
+		queues := map[string]QueueOwner{"it's.a+queue": {OwnerNamespace: "ns", OwnerApp: "app"}}
+		data := mustRenderServicePrometheus(ServicePrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/ca", BrokerName: "svc"}, queues)
+
+		Expect(data).To(ContainSubstring(`queue="(it''s\.a\+queue)"`))
 	})
 })
 
