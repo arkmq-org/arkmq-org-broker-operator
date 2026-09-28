@@ -9,6 +9,12 @@ import (
 const (
 	NameEnvVar             = "AMQ_NAME"
 	NameEnvVarDefaultValue = "amq-broker"
+
+	// ExtraBrokerPropertiesEnvVar is a user-facing env var that can be set in Spec.Env
+	// with a comma-separated list of extra broker.properties paths (files or directories).
+	// When present, the operator appends ,$(EXTRA_BROKER_PROPERTIES) to the
+	// -Dbroker.properties= JVM argument so the kubelet expands it at pod start-up.
+	ExtraBrokerPropertiesEnvVar = "EXTRA_BROKER_PROPERTIES"
 )
 
 func ResolveBrokerNameFromEnvs(envs []corev1.EnvVar, defaultValue string) string {
@@ -312,6 +318,23 @@ func Find(envs []corev1.EnvVar, envVarName string) *corev1.EnvVar {
 		}
 	}
 	return retEnvVar
+}
+
+// HasExtraBrokerProperties reports whether the given env list declares the
+// EXTRA_BROKER_PROPERTIES variable (value, valueFrom, or empty-value).
+func HasExtraBrokerProperties(envs []corev1.EnvVar) bool {
+	return Find(envs, ExtraBrokerPropertiesEnvVar) != nil
+}
+
+// AppendExtraBrokerPropertiesToken appends ,$(EXTRA_BROKER_PROPERTIES) to value
+// when EXTRA_BROKER_PROPERTIES is declared in envs, and returns the result.
+// This avoids duplicating both the guard condition and the literal token string
+// at every call site.
+func AppendExtraBrokerPropertiesToken(value string, envs []corev1.EnvVar) string {
+	if HasExtraBrokerProperties(envs) {
+		return value + ",$(EXTRA_BROKER_PROPERTIES)"
+	}
+	return value
 }
 
 func Update(containers []corev1.Container, envVar *corev1.EnvVar) {

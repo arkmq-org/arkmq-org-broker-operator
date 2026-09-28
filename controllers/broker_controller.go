@@ -1202,6 +1202,9 @@ func (reconciler *BrokerReconcilerImpl) brokerPropertiesConfigSystemPropValue(mo
 		}
 	}
 
+	// append $(EXTRA_BROKER_PROPERTIES) only when the var is defined in spec.Env
+	result = environments.AppendExtraBrokerPropertiesToken(result, reconciler.customResource.Spec.Env)
+
 	return result
 }
 

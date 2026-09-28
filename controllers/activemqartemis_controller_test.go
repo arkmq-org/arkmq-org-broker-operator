@@ -9168,6 +9168,222 @@ var _ = Describe("artemis controller", func() {
 		CleanResource(createdCrd, createdCrd.Name, defaultNamespace)
 	})
 
+	It("EXTRA_BROKER_PROPERTIES extends broker properties paths", Label("extra-broker-properties"), func() {
+		ctx := context.Background()
+		const extraPaths = "/tmp/"
+
+		By("creating a CR with EXTRA_BROKER_PROPERTIES set")
+		crd, createdCrd := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
+			candidate.Spec.Env = []corev1.EnvVar{
+				{
+					Name:  "EXTRA_BROKER_PROPERTIES",
+					Value: extraPaths,
+				},
+			}
+		})
+
+		ssKey := types.NamespacedName{Name: namer.CrToSS(createdCrd.Name), Namespace: defaultNamespace}
+		createdSs := &appsv1.StatefulSet{}
+
+		By("checking EXTRA_BROKER_PROPERTIES has user value and precedes JDK_JAVA_OPTIONS")
+		Eventually(func(g Gomega) {
+			g.Expect(k8sClient.Get(ctx, ssKey, createdSs)).Should(Succeed())
+
+			env := createdSs.Spec.Template.Spec.Containers[0].Env
+
+			extraPathsIdx := -1
+			jdkOptsIdx := -1
+			for i, e := range env {
+				if e.Name == "EXTRA_BROKER_PROPERTIES" {
+					g.Expect(e.Value).To(Equal(extraPaths))
+					extraPathsIdx = i
+				}
+				if e.Name == "JDK_JAVA_OPTIONS" {
+					g.Expect(e.Value).To(ContainSubstring(",$(EXTRA_BROKER_PROPERTIES)"))
+					jdkOptsIdx = i
+				}
+			}
+			g.Expect(extraPathsIdx).NotTo(Equal(-1), "EXTRA_BROKER_PROPERTIES must be in container env")
+			g.Expect(jdkOptsIdx).NotTo(Equal(-1), "JDK_JAVA_OPTIONS must be in container env")
+			g.Expect(extraPathsIdx).To(BeNumerically("<", jdkOptsIdx),
+				"EXTRA_BROKER_PROPERTIES must precede JDK_JAVA_OPTIONS for k8s substitution")
+		}, timeout, interval).Should(Succeed())
+
+		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			By("verifying Kubernetes has resolved $(EXTRA_BROKER_PROPERTIES) on the running pod")
+			podWithOrdinal := namer.CrToSS(crd.Name) + "-0"
+			Eventually(func(g Gomega) {
+				result := ExecOnPod(podWithOrdinal, crd.Name, defaultNamespace, []string{"env"}, g)
+				// After k8s substitution JDK_JAVA_OPTIONS must contain the resolved path, not the token
+				for _, line := range strings.Split(result, "\n") {
+					if strings.HasPrefix(line, "JDK_JAVA_OPTIONS") {
+						g.Expect(line).To(ContainSubstring(extraPaths))
+						g.Expect(line).NotTo(ContainSubstring("$(EXTRA_BROKER_PROPERTIES)"))
+					}
+				}
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+		}
+
+		By("deleting the CR")
+		CleanResource(createdCrd, createdCrd.Name, defaultNamespace)
+	})
+
+	It("EXTRA_BROKER_PROPERTIES with valueFrom secretKeyRef is passed through", Label("extra-broker-properties"), func() {
+		ctx := context.Background()
+		const secretName = "extra-broker-props-secret"
+		const secretKey = "props-path"
+		const extraPath = "/tmp/"
+
+		By("creating a Secret that holds the extra path")
+		secret := &corev1.Secret{
+			TypeMeta:   metav1.TypeMeta{Kind: "Secret", APIVersion: "v1"},
+			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: defaultNamespace},
+			StringData: map[string]string{secretKey: extraPath},
+		}
+		Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+		By("creating a CR with EXTRA_BROKER_PROPERTIES sourced from the Secret via valueFrom")
+		crd, createdCrd := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
+			candidate.Spec.Env = []corev1.EnvVar{
+				{
+					Name: "EXTRA_BROKER_PROPERTIES",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+							Key:                  secretKey,
+						},
+					},
+				},
+			}
+		})
+
+		ssKey := types.NamespacedName{Name: namer.CrToSS(createdCrd.Name), Namespace: defaultNamespace}
+		createdSs := &appsv1.StatefulSet{}
+
+		By("checking EXTRA_BROKER_PROPERTIES has valueFrom preserved and precedes JDK_JAVA_OPTIONS")
+		Eventually(func(g Gomega) {
+			g.Expect(k8sClient.Get(ctx, ssKey, createdSs)).Should(Succeed())
+
+			env := createdSs.Spec.Template.Spec.Containers[0].Env
+
+			extraPathsIdx := -1
+			jdkOptsIdx := -1
+			for i, e := range env {
+				if e.Name == "EXTRA_BROKER_PROPERTIES" {
+					g.Expect(e.ValueFrom).NotTo(BeNil(), "ValueFrom must be preserved")
+					g.Expect(e.ValueFrom.SecretKeyRef).NotTo(BeNil())
+					g.Expect(e.ValueFrom.SecretKeyRef.Name).To(Equal(secretName))
+					g.Expect(e.ValueFrom.SecretKeyRef.Key).To(Equal(secretKey))
+					extraPathsIdx = i
+				}
+				if e.Name == "JDK_JAVA_OPTIONS" {
+					g.Expect(e.Value).To(ContainSubstring(",$(EXTRA_BROKER_PROPERTIES)"))
+					jdkOptsIdx = i
+				}
+			}
+			g.Expect(extraPathsIdx).NotTo(Equal(-1), "EXTRA_BROKER_PROPERTIES must be in container env")
+			g.Expect(jdkOptsIdx).NotTo(Equal(-1), "JDK_JAVA_OPTIONS must be in container env")
+			g.Expect(extraPathsIdx).To(BeNumerically("<", jdkOptsIdx),
+				"EXTRA_BROKER_PROPERTIES must precede JDK_JAVA_OPTIONS for kubelet substitution")
+		}, timeout, interval).Should(Succeed())
+
+		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			By("verifying kubelet resolved the secret value into JDK_JAVA_OPTIONS on the running pod")
+			podWithOrdinal := namer.CrToSS(crd.Name) + "-0"
+			Eventually(func(g Gomega) {
+				result := ExecOnPod(podWithOrdinal, crd.Name, defaultNamespace, []string{"env"}, g)
+				for _, line := range strings.Split(result, "\n") {
+					if strings.HasPrefix(line, "JDK_JAVA_OPTIONS") {
+						g.Expect(line).To(ContainSubstring(extraPath))
+						g.Expect(line).NotTo(ContainSubstring("$(EXTRA_BROKER_PROPERTIES)"))
+					}
+				}
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+		}
+
+		By("deleting the CR and the Secret")
+		CleanResource(createdCrd, createdCrd.Name, defaultNamespace)
+		Expect(k8sClient.Delete(ctx, secret)).Should(Succeed())
+	})
+
+	It("EXTRA_BROKER_PROPERTIES with valueFrom configMapKeyRef is passed through", Label("extra-broker-properties"), func() {
+		ctx := context.Background()
+		const cmName = "extra-broker-props-cm"
+		const cmKey = "props-path"
+		const extraPath = "/tmp/"
+
+		By("creating a ConfigMap that holds the extra path")
+		cm := &corev1.ConfigMap{
+			TypeMeta:   metav1.TypeMeta{Kind: "ConfigMap", APIVersion: "v1"},
+			ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: defaultNamespace},
+			Data:       map[string]string{cmKey: extraPath},
+		}
+		Expect(k8sClient.Create(ctx, cm)).Should(Succeed())
+
+		By("creating a CR with EXTRA_BROKER_PROPERTIES sourced from the ConfigMap via valueFrom")
+		crd, createdCrd := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
+			candidate.Spec.Env = []corev1.EnvVar{
+				{
+					Name: "EXTRA_BROKER_PROPERTIES",
+					ValueFrom: &corev1.EnvVarSource{
+						ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: cmName},
+							Key:                  cmKey,
+						},
+					},
+				},
+			}
+		})
+
+		ssKey := types.NamespacedName{Name: namer.CrToSS(createdCrd.Name), Namespace: defaultNamespace}
+		createdSs := &appsv1.StatefulSet{}
+
+		By("checking EXTRA_BROKER_PROPERTIES has configMapKeyRef preserved and precedes JDK_JAVA_OPTIONS")
+		Eventually(func(g Gomega) {
+			g.Expect(k8sClient.Get(ctx, ssKey, createdSs)).Should(Succeed())
+
+			env := createdSs.Spec.Template.Spec.Containers[0].Env
+
+			extraPathsIdx := -1
+			jdkOptsIdx := -1
+			for i, e := range env {
+				if e.Name == "EXTRA_BROKER_PROPERTIES" {
+					g.Expect(e.ValueFrom).NotTo(BeNil(), "ValueFrom must be preserved")
+					g.Expect(e.ValueFrom.ConfigMapKeyRef).NotTo(BeNil())
+					g.Expect(e.ValueFrom.ConfigMapKeyRef.Name).To(Equal(cmName))
+					g.Expect(e.ValueFrom.ConfigMapKeyRef.Key).To(Equal(cmKey))
+					extraPathsIdx = i
+				}
+				if e.Name == "JDK_JAVA_OPTIONS" {
+					g.Expect(e.Value).To(ContainSubstring(",$(EXTRA_BROKER_PROPERTIES)"))
+					jdkOptsIdx = i
+				}
+			}
+			g.Expect(extraPathsIdx).NotTo(Equal(-1), "EXTRA_BROKER_PROPERTIES must be in container env")
+			g.Expect(jdkOptsIdx).NotTo(Equal(-1), "JDK_JAVA_OPTIONS must be in container env")
+			g.Expect(extraPathsIdx).To(BeNumerically("<", jdkOptsIdx),
+				"EXTRA_BROKER_PROPERTIES must precede JDK_JAVA_OPTIONS for kubelet substitution")
+		}, timeout, interval).Should(Succeed())
+
+		if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
+			By("verifying kubelet resolved the ConfigMap value into JDK_JAVA_OPTIONS on the running pod")
+			podWithOrdinal := namer.CrToSS(crd.Name) + "-0"
+			Eventually(func(g Gomega) {
+				result := ExecOnPod(podWithOrdinal, crd.Name, defaultNamespace, []string{"env"}, g)
+				for _, line := range strings.Split(result, "\n") {
+					if strings.HasPrefix(line, "JDK_JAVA_OPTIONS") {
+						g.Expect(line).To(ContainSubstring(extraPath))
+						g.Expect(line).NotTo(ContainSubstring("$(EXTRA_BROKER_PROPERTIES)"))
+					}
+				}
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+		}
+
+		By("deleting the CR and the ConfigMap")
+		CleanResource(createdCrd, createdCrd.Name, defaultNamespace)
+		Expect(k8sClient.Delete(ctx, cm)).Should(Succeed())
+	})
+
 	It("enable JVM metrics by using broker properties", func() {
 		ctx := context.Background()
 		crd := generateArtemisSpec(defaultNamespace)

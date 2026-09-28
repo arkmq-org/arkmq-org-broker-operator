@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/environments"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	appsv1 "k8s.io/api/apps/v1"
@@ -601,6 +602,164 @@ func Test_Respect_existing_JAVA_OPTS_properties_def(t *testing.T) {
 	}
 	assert.True(t, index != -1)
 	assert.True(t, strings.Contains(newSS.Spec.Template.Spec.InitContainers[0].Env[index].Value, "properties"))
+}
+
+func Test_ExtraBrokerPropertiesAbsentWhenNotSet(t *testing.T) {
+
+	// When the user does not define EXTRA_BROKER_PROPERTIES, the operator must not
+	// inject it and must not append the token to JDK_JAVA_OPTIONS.
+
+	cr := &v1beta2.BrokerCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
+		Spec:       v1beta2.BrokerClusterSpec{},
+	}
+
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesAbsentWhenNotSet"), isOpenshift, false)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+
+	newSS, err := reconciler.ProcessStatefulSet(cr, *MakeNamers(cr), nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, newSS)
+
+	env := newSS.Spec.Template.Spec.Containers[0].Env
+
+	for _, e := range env {
+		assert.NotEqual(t, environments.ExtraBrokerPropertiesEnvVar, e.Name,
+			"EXTRA_BROKER_PROPERTIES must not be injected when user has not set it")
+		if e.Name == jdkJavaOptionsEnvVarName {
+			assert.False(t, strings.Contains(e.Value, "$(EXTRA_BROKER_PROPERTIES)"),
+				"JDK_JAVA_OPTIONS must not contain the token when EXTRA_BROKER_PROPERTIES is unset")
+		}
+	}
+}
+
+func Test_ExtraBrokerPropertiesUserValueAppearsInEnvAndTokenInJdkOpts(t *testing.T) {
+
+	const extraPaths = "/my/custom/path/,/my/other/path/"
+
+	cr := &v1beta2.BrokerCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "cr"},
+		Spec: v1beta2.BrokerClusterSpec{
+			Env: []v1.EnvVar{
+				{
+					Name:  environments.ExtraBrokerPropertiesEnvVar,
+					Value: extraPaths,
+				},
+			},
+		},
+	}
+
+	outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesUserValueAppearsInEnvAndTokenInJdkOpts"), isOpenshift, false)
+	reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+
+	newSS, err := reconciler.ProcessStatefulSet(cr, *MakeNamers(cr), nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, newSS)
+
+	env := newSS.Spec.Template.Spec.Containers[0].Env
+
+	extraPathsIdx := -1
+	jdkOptsIdx := -1
+	for i, e := range env {
+		if e.Name == environments.ExtraBrokerPropertiesEnvVar {
+			assert.Equal(t, extraPaths, e.Value)
+			extraPathsIdx = i
+		}
+		if e.Name == jdkJavaOptionsEnvVarName {
+			jdkOptsIdx = i
+		}
+	}
+	assert.True(t, extraPathsIdx != -1, "EXTRA_BROKER_PROPERTIES must be in container env")
+	assert.True(t, jdkOptsIdx != -1, "JDK_JAVA_OPTIONS must be in container env")
+	assert.True(t, extraPathsIdx < jdkOptsIdx, "EXTRA_BROKER_PROPERTIES must precede JDK_JAVA_OPTIONS")
+	assert.True(t, strings.Contains(env[jdkOptsIdx].Value, ",$(EXTRA_BROKER_PROPERTIES)"),
+		"JDK_JAVA_OPTIONS must contain ,$(EXTRA_BROKER_PROPERTIES) token")
+}
+
+func Test_ExtraBrokerPropertiesValueFromPassedThrough(t *testing.T) {
+
+	// When the user sets EXTRA_BROKER_PROPERTIES via valueFrom (e.g. secretKeyRef or configMapKeyRef),
+	// the operator must leave it intact: the kubelet resolves the value first
+	// and then expands $(EXTRA_BROKER_PROPERTIES) inside JDK_JAVA_OPTIONS correctly.
+
+	for _, tc := range []struct {
+		name       string
+		envSource  *v1.EnvVarSource
+		verifyFunc func(t *testing.T, e v1.EnvVar)
+	}{
+		{
+			name: "secretKeyRef",
+			envSource: &v1.EnvVarSource{
+				SecretKeyRef: &v1.SecretKeySelector{
+					LocalObjectReference: v1.LocalObjectReference{Name: "my-secret"},
+					Key:                  "props-path",
+				},
+			},
+			verifyFunc: func(t *testing.T, e v1.EnvVar) {
+				assert.NotNil(t, e.ValueFrom)
+				assert.NotNil(t, e.ValueFrom.SecretKeyRef)
+				assert.Equal(t, "my-secret", e.ValueFrom.SecretKeyRef.Name)
+				assert.Equal(t, "props-path", e.ValueFrom.SecretKeyRef.Key)
+			},
+		},
+		{
+			name: "configMapKeyRef",
+			envSource: &v1.EnvVarSource{
+				ConfigMapKeyRef: &v1.ConfigMapKeySelector{
+					LocalObjectReference: v1.LocalObjectReference{Name: "my-cm"},
+					Key:                  "props-path",
+				},
+			},
+			verifyFunc: func(t *testing.T, e v1.EnvVar) {
+				assert.NotNil(t, e.ValueFrom)
+				assert.NotNil(t, e.ValueFrom.ConfigMapKeyRef)
+				assert.Equal(t, "my-cm", e.ValueFrom.ConfigMapKeyRef.Name)
+				assert.Equal(t, "props-path", e.ValueFrom.ConfigMapKeyRef.Key)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cr := &v1beta2.BrokerCluster{
+				ObjectMeta: metav1.ObjectMeta{Name: "cr"},
+				Spec: v1beta2.BrokerClusterSpec{
+					Env: []v1.EnvVar{
+						{
+							Name:      environments.ExtraBrokerPropertiesEnvVar,
+							ValueFrom: tc.envSource,
+						},
+					},
+				},
+			}
+
+			outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesValueFromPassedThrough"), isOpenshift, false)
+			reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
+
+			newSS, err := reconciler.ProcessStatefulSet(cr, *MakeNamers(cr), nil)
+			assert.NoError(t, err)
+			assert.NotNil(t, newSS)
+
+			env := newSS.Spec.Template.Spec.Containers[0].Env
+
+			extraPathsIdx := -1
+			jdkOptsIdx := -1
+			for i, e := range env {
+				if e.Name == environments.ExtraBrokerPropertiesEnvVar {
+					tc.verifyFunc(t, e)
+					extraPathsIdx = i
+				}
+				if e.Name == jdkJavaOptionsEnvVarName {
+					jdkOptsIdx = i
+				}
+			}
+			assert.True(t, extraPathsIdx != -1, "EXTRA_BROKER_PROPERTIES must be present in container env")
+			assert.True(t, jdkOptsIdx != -1, "JDK_JAVA_OPTIONS must be present in container env")
+			// Must precede JDK_JAVA_OPTIONS so the kubelet expands the token correctly
+			assert.True(t, extraPathsIdx < jdkOptsIdx, "EXTRA_BROKER_PROPERTIES must precede JDK_JAVA_OPTIONS in env list")
+			// The token must still be present in JDK_JAVA_OPTIONS for kubelet expansion
+			assert.True(t, strings.Contains(env[jdkOptsIdx].Value, ",$(EXTRA_BROKER_PROPERTIES)"),
+				"JDK_JAVA_OPTIONS must contain ,$(EXTRA_BROKER_PROPERTIES) token")
+		})
+	}
 }
 
 func TestProcess_TemplateKeyValue(t *testing.T) {

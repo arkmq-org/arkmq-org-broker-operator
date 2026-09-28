@@ -2520,6 +2520,9 @@ func (reconciler *BrokerClusterReconcilerImpl) brokerPropertiesConfigSystemPropV
 		result = fmt.Sprintf("%s,%s%s/?filter=.*\\.%s${STATEFUL_SET_ORDINAL}%s", result, mountPoint, resourceName, OrdinalPropertiesSuffix, OrdinalPropertiesSuffixEnd)
 	}
 
+	// append $(EXTRA_BROKER_PROPERTIES) only when the var is defined in spec.Env
+	result = environments.AppendExtraBrokerPropertiesToken(result, reconciler.customResource.Spec.Env)
+
 	return result
 }
 

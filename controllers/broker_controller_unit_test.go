@@ -30,6 +30,7 @@ import (
 	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
 	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/environments"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/jolokia_client"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
@@ -578,4 +579,147 @@ func mustTestKeyPairCN(t *testing.T, commonName string) (certPEM, keyPEM []byte)
 	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 	return certPEM, keyPEM
+}
+
+func TestBrokerCR_ExtraBrokerPropertiesAbsentWhenNotSet(t *testing.T) {
+
+	// When the user does not define EXTRA_BROKER_PROPERTIES, the operator must not
+	// inject it and must not append the token to the JVM property value.
+
+	cr := &v1beta2.Broker{
+		ObjectMeta: v1.ObjectMeta{Name: "broker"},
+		Spec:       v1beta2.BrokerSpec{},
+	}
+
+	namer := MakeNamersForBroker(cr)
+	envVars := MakeEnvVarArrayForCRForBroker(cr, *namer)
+
+	for _, e := range envVars {
+		assert.NotEqual(t, environments.ExtraBrokerPropertiesEnvVar, e.Name,
+			"EXTRA_BROKER_PROPERTIES must not be injected when user has not set it")
+	}
+
+	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerReconcilerImpl(cr, r)
+	result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource",
+		map[string][]byte{"broker.properties": []byte("")})
+	assert.False(t, strings.Contains(result, "$(EXTRA_BROKER_PROPERTIES)"),
+		"brokerPropertiesConfigSystemPropValue must not contain the token when EXTRA_BROKER_PROPERTIES is unset")
+}
+
+func TestBrokerCR_ExtraBrokerPropertiesUserValueAppearsWithToken(t *testing.T) {
+
+	const extraPaths = "/my/extra/path/"
+
+	cr := &v1beta2.Broker{
+		ObjectMeta: v1.ObjectMeta{Name: "broker"},
+		Spec: v1beta2.BrokerSpec{
+			Env: []corev1.EnvVar{
+				{
+					Name:  environments.ExtraBrokerPropertiesEnvVar,
+					Value: extraPaths,
+				},
+			},
+		},
+	}
+
+	namer := MakeNamersForBroker(cr)
+	envVars := MakeEnvVarArrayForCRForBroker(cr, *namer)
+
+	found := false
+	for _, e := range envVars {
+		if e.Name == environments.ExtraBrokerPropertiesEnvVar {
+			assert.Equal(t, extraPaths, e.Value)
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "EXTRA_BROKER_PROPERTIES with user value must be in env array")
+
+	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewBrokerReconcilerImpl(cr, r)
+	result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource",
+		map[string][]byte{"broker.properties": []byte("")})
+	assert.True(t, strings.HasSuffix(result, ",$(EXTRA_BROKER_PROPERTIES)"),
+		"brokerPropertiesConfigSystemPropValue must end with ,$(EXTRA_BROKER_PROPERTIES) when user has set it")
+}
+
+func TestBrokerCR_ExtraBrokerPropertiesValueFromPassedThrough(t *testing.T) {
+
+	// When the user sets EXTRA_BROKER_PROPERTIES via valueFrom (e.g. secretKeyRef or configMapKeyRef),
+	// the operator must leave it intact: the kubelet resolves the secret or configmap value first
+	// and then expands $(EXTRA_BROKER_PROPERTIES) inside the JVM args correctly.
+
+	for _, tc := range []struct {
+		name       string
+		envSource  *corev1.EnvVarSource
+		verifyFunc func(t *testing.T, e corev1.EnvVar)
+	}{
+		{
+			name: "secretKeyRef",
+			envSource: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "my-secret"},
+					Key:                  "props-path",
+				},
+			},
+			verifyFunc: func(t *testing.T, e corev1.EnvVar) {
+				assert.NotNil(t, e.ValueFrom)
+				assert.NotNil(t, e.ValueFrom.SecretKeyRef)
+				assert.Equal(t, "my-secret", e.ValueFrom.SecretKeyRef.Name)
+				assert.Equal(t, "props-path", e.ValueFrom.SecretKeyRef.Key)
+			},
+		},
+		{
+			name: "configMapKeyRef",
+			envSource: &corev1.EnvVarSource{
+				ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "my-cm"},
+					Key:                  "props-path",
+				},
+			},
+			verifyFunc: func(t *testing.T, e corev1.EnvVar) {
+				assert.NotNil(t, e.ValueFrom)
+				assert.NotNil(t, e.ValueFrom.ConfigMapKeyRef)
+				assert.Equal(t, "my-cm", e.ValueFrom.ConfigMapKeyRef.Name)
+				assert.Equal(t, "props-path", e.ValueFrom.ConfigMapKeyRef.Key)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cr := &v1beta2.Broker{
+				ObjectMeta: v1.ObjectMeta{Name: "broker"},
+				Spec: v1beta2.BrokerSpec{
+					Env: []corev1.EnvVar{
+						{
+							Name:      environments.ExtraBrokerPropertiesEnvVar,
+							ValueFrom: tc.envSource,
+						},
+					},
+				},
+			}
+
+			namer := MakeNamersForBroker(cr)
+			envVars := MakeEnvVarArrayForCRForBroker(cr, *namer)
+
+			// valueFrom must be preserved unmodified by the operator
+			found := false
+			for _, e := range envVars {
+				if e.Name == environments.ExtraBrokerPropertiesEnvVar {
+					tc.verifyFunc(t, e)
+					found = true
+					break
+				}
+			}
+			assert.True(t, found, "EXTRA_BROKER_PROPERTIES with valueFrom must be in env array")
+
+			// The token must still be present in the JVM property so the kubelet can expand it
+			r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+			ri := NewBrokerReconcilerImpl(cr, r)
+			result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource",
+				map[string][]byte{"broker.properties": []byte("")})
+			assert.True(t, strings.HasSuffix(result, ",$(EXTRA_BROKER_PROPERTIES)"),
+				"brokerPropertiesConfigSystemPropValue must end with ,$(EXTRA_BROKER_PROPERTIES)")
+		})
+	}
 }

@@ -898,6 +898,69 @@ For example:
 
 **Note: the broker pods must be restarted to apply the acceptor broker properties!**
 
+## Providing additional brokerProperties paths via environment variable
+
+When broker properties files are already available inside the container at runtime — for
+example written by a Vault agent sidecar, an init container, or any other injector — you
+can use the `EXTRA_BROKER_PROPERTIES` environment variable to tell the operator to
+append those paths to the broker properties search path it manages.
+
+Set `EXTRA_BROKER_PROPERTIES` in `spec.env` with a comma-separated list of paths.
+Each entry can be a file path or a directory path (ending with `/`), using the same
+format that Apache Artemis accepts for `broker.properties`:
+
+```yaml
+apiVersion: broker.arkmq.org/v1beta2
+kind: BrokerCluster
+metadata:
+  name: ex-aao
+spec:
+  env:
+    - name: EXTRA_BROKER_PROPERTIES
+      value: "/vault/secrets/my-broker.properties,/my/extra/config-dir/"
+```
+
+The operator appends this value to the end of the `-Dbroker.properties=` JVM system
+property it manages, using **Kubernetes environment variable substitution** — no
+reconcile-time parsing is needed. The operator's own paths are always present; the
+user's paths are appended last so any key defined in them overrides keys from earlier
+sources.
+
+> **TIP**: You can source the path directly from a Secret or ConfigMap using `valueFrom`:
+>
+> Sourcing from a Secret:
+> ```yaml
+> spec:
+>   env:
+>     - name: EXTRA_BROKER_PROPERTIES
+>       valueFrom:
+>         secretKeyRef:
+>           name: my-secret
+>           key: props-path
+> ```
+>
+> Sourcing from a ConfigMap:
+> ```yaml
+> spec:
+>   env:
+>     - name: EXTRA_BROKER_PROPERTIES
+>       valueFrom:
+>         configMapKeyRef:
+>           name: my-configmap
+>           key: props-path
+> ```
+
+This mechanism complements `extraMounts.secrets` with the `-bp` suffix. Use **`-bp`
+secrets** when you want Kubernetes to mount the properties files into the pod. Use
+**`EXTRA_BROKER_PROPERTIES`** when the files are already present in the container
+at runtime (e.g. written by a Vault agent sidecar as in the
+[Vault tutorial](../tutorials/vault_broker_properties.md)).
+
+> **Note**: Unlike `-bp` mounted secrets and `spec.brokerProperties`, files provided via
+> `EXTRA_BROKER_PROPERTIES` are not managed as Kubernetes resources by the operator.
+> Therefore, their application and synchronization state are **not** tracked in
+> `CR.Status.Condition[BrokerPropertiesApplied]` or `status.externalConfigs`.
+
 ## Providing additional brokerProperties configuration from a secret
 In order to provide a way to split or organise these properties by file or by secret, an extra mount can be used to provide a secret that will be treated as an additional source of broker properties configuration.
 
