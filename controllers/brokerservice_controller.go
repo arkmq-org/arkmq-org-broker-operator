@@ -30,6 +30,7 @@ import (
 	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	servicemetrics "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/metrics"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/networkpolicies"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/templates"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
@@ -206,14 +207,21 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 		reconciler.appPropertiesSecretName(),
 	}
 
-	err = reconciler.processAppSecrets()
+	appPorts, err := reconciler.processAppSecrets()
+	if err != nil {
+		return err
+	}
+
+	if common.BrokerNetworkPolicyEnabled() && len(appPorts) > 0 {
+		desired.Spec.ResourceTemplates = appendNetworkPolicyTemplate(desired.Spec.ResourceTemplates, appPorts)
+	}
 
 	reconciler.TrackDesired(desired)
 
-	return err
+	return nil
 }
 
-func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (err error) {
+func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts []int32, err error) {
 	// avoid restart for app onboarding with existing mount points
 	// TODO potentially N app-secrets to overcome 1Mb size limit
 	resourceName := types.NamespacedName{
@@ -234,7 +242,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (err erro
 	apps := &broker.BrokerAppList{}
 	key := reconciler.instance.Namespace + ":" + reconciler.instance.Name
 	if err = reconciler.Client.List(context.TODO(), apps, client.MatchingFields{common.AppServiceBindingField: key}); err != nil {
-		return err
+		return nil, err
 	}
 
 	// reset data
@@ -270,6 +278,9 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (err erro
 		}
 		appIdentities = append(appIdentities, AppIdentity(&app))
 		validApps = append(validApps, app)
+		if app.Status.Service != nil && app.Status.Service.AssignedPort != UnassignedPort {
+			appPorts = append(appPorts, app.Status.Service.AssignedPort)
+		}
 	}
 
 	sort.Strings(appIdentities)
@@ -288,11 +299,46 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (err erro
 		err = reconciler.processControlPlaneOverrideSecret(validApps)
 	}
 
-	return err
+	return appPorts, err
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) appPropertiesSecretName() string {
 	return AppPropertiesSecretName(reconciler.instance.Name)
+}
+
+func appendNetworkPolicyTemplate(existing []broker.ResourceTemplate, appPorts []int32) []broker.ResourceTemplate {
+	netpolKind := "NetworkPolicy"
+
+	ports := []interface{}{
+		map[string]interface{}{"port": int64(networkpolicies.RestrictedJolokiaPort), "protocol": "TCP"},
+		map[string]interface{}{"port": int64(networkpolicies.RestrictedPrometheusPort), "protocol": "TCP"},
+	}
+	for _, p := range appPorts {
+		ports = append(ports, map[string]interface{}{"port": int64(p), "protocol": "TCP"})
+	}
+
+	patch := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"ingress": []interface{}{
+				map[string]interface{}{"ports": ports},
+			},
+		},
+	}
+	patchBytes, _ := json.Marshal(patch)
+
+	// replace any existing NP template rather than appending duplicates
+	filtered := make([]broker.ResourceTemplate, 0, len(existing))
+	for _, rt := range existing {
+		if rt.Selector != nil && rt.Selector.Kind != nil && *rt.Selector.Kind == netpolKind {
+			continue
+		}
+		filtered = append(filtered, rt)
+	}
+
+	return append(filtered, broker.ResourceTemplate{
+		Selector: &broker.ResourceSelector{Kind: &netpolKind},
+		Patch:    runtime.RawExtension{Raw: patchBytes},
+	})
 }
 
 func AppPropertiesSecretName(name string) string {

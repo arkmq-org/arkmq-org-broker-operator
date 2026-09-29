@@ -139,6 +139,7 @@ func (r *ActiveMQArtemisReconciler) toBrokerClusterParent() *BrokerClusterReconc
 //+kubebuilder:rbac:groups="",namespace=arkmq-org-broker-operator,resources=namespaces,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,namespace=arkmq-org-broker-operator,resources=deployments;daemonsets;replicasets;statefulsets,verbs=get;list;watch;create;delete;update
 //+kubebuilder:rbac:groups=networking.k8s.io,namespace=arkmq-org-broker-operator,resources=ingresses,verbs=get;list;watch;create;delete;update
+//+kubebuilder:rbac:groups=networking.k8s.io,namespace=arkmq-org-broker-operator,resources=networkpolicies,verbs=create;get;delete;list;update;watch
 //+kubebuilder:rbac:groups=route.openshift.io,namespace=arkmq-org-broker-operator,resources=routes;routes/custom-host;routes/status,verbs=get;list;watch;create;delete;update
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,namespace=arkmq-org-broker-operator,resources=httproutes;tlsroutes,verbs=get;list;watch;create;delete;update
 //+kubebuilder:rbac:groups=monitoring.coreos.com,namespace=arkmq-org-broker-operator,resources=servicemonitors,verbs=get;create

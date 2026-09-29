@@ -18,6 +18,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/containers"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/httproutes"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/ingresses"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/networkpolicies"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/persistentvolumeclaims"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/pods"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/routes"
@@ -196,6 +197,10 @@ func (reconciler *BrokerClusterReconcilerImpl) Process(customResource *v1beta2.B
 	if err != nil {
 		reconciler.log.Error(err, "Error processing console")
 		return err
+	}
+
+	if common.BrokerNetworkPolicyEnabled() {
+		reconciler.applyNetworkPolicy(customResource)
 	}
 
 	// mods to env var values sourced from secrets are not detected by process resources
@@ -544,6 +549,25 @@ func (reconciler *BrokerClusterReconcilerImpl) applyPodDisruptionBudget(customRe
 	desired.Spec.Selector = &metav1.LabelSelector{
 		MatchLabels: matchLabels,
 	}
+
+	reconciler.trackDesired(desired)
+}
+
+func (reconciler *BrokerClusterReconcilerImpl) applyNetworkPolicy(customResource *v1beta2.BrokerCluster) {
+	netpolType := reflect.TypeOf(netv1.NetworkPolicy{})
+	existing := reconciler.cloneOfDeployed(netpolType, customResource.Name+"-netpol")
+
+	var existingNP *netv1.NetworkPolicy
+	if existing != nil {
+		existingNP = existing.(*netv1.NetworkPolicy)
+	}
+
+	restricted := common.IsRestricted(customResource)
+	var acceptorPorts []int32
+	for _, a := range customResource.Spec.Acceptors {
+		acceptorPorts = append(acceptorPorts, a.Port)
+	}
+	desired := networkpolicies.NewNetworkPolicy(existingNP, customResource.Name, customResource.Namespace, restricted, acceptorPorts)
 
 	reconciler.trackDesired(desired)
 }
@@ -1936,7 +1960,7 @@ var orderedTypes *([]reflect.Type)
 
 func getOrderedTypeList() []reflect.Type {
 	if orderedTypes == nil {
-		types := make([]reflect.Type, 9)
+		types := make([]reflect.Type, 10)
 
 		// we want to create/update in this order
 		types[0] = reflect.TypeOf(corev1.Secret{})
@@ -1948,6 +1972,7 @@ func getOrderedTypeList() []reflect.Type {
 		types[6] = reflect.TypeOf(gatewayv1.TLSRoute{})
 		types[7] = reflect.TypeOf(gatewayv1.HTTPRoute{})
 		types[8] = reflect.TypeOf(policyv1.PodDisruptionBudget{})
+		types[9] = reflect.TypeOf(netv1.NetworkPolicy{})
 		orderedTypes = &types
 	}
 	return *orderedTypes

@@ -414,21 +414,21 @@ var _ = Describe("broker-service mqtt", func() {
 				})
 			}
 
-			By("deploying app-alpha (produces/consumes on alpha-topic)")
+			By("deploying app-alpha and waiting for Ready before app-beta (serializes port assignment)")
 			Expect(k8sClient.Create(ctx, &appAlpha)).Should(Succeed())
+			Eventually(func(g Gomega) {
+				app := &brokerv1beta2.BrokerApp{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appAlpha.Name, Namespace: defaultNamespace}, app)).Should(Succeed())
+				g.Expect(meta.IsStatusConditionTrue(app.Status.Conditions, brokerv1beta2.ReadyConditionType)).Should(BeTrue())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("deploying app-beta (produces/consumes on beta-topic)")
 			Expect(k8sClient.Create(ctx, &appBeta)).Should(Succeed())
-
-			By("waiting for both apps to be Ready")
-			for _, name := range []string{appAlpha.Name, appBeta.Name} {
-				key := types.NamespacedName{Name: name, Namespace: defaultNamespace}
-				Eventually(func(g Gomega) {
-					app := &brokerv1beta2.BrokerApp{}
-					g.Expect(k8sClient.Get(ctx, key, app)).Should(Succeed())
-					g.Expect(meta.IsStatusConditionTrue(app.Status.Conditions, brokerv1beta2.ReadyConditionType)).Should(BeTrue())
-				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-			}
+			Eventually(func(g Gomega) {
+				app := &brokerv1beta2.BrokerApp{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appBeta.Name, Namespace: defaultNamespace}, app)).Should(Succeed())
+				g.Expect(meta.IsStatusConditionTrue(app.Status.Conditions, brokerv1beta2.ReadyConditionType)).Should(BeTrue())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("reading assigned ports from app status")
 			alphaApp := &brokerv1beta2.BrokerApp{}
@@ -440,6 +440,8 @@ var _ = Describe("broker-service mqtt", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appBeta.Name, Namespace: defaultNamespace}, betaApp)).Should(Succeed())
 			betaPort := betaApp.Status.Service.AssignedPort
 			fmt.Printf("app-beta assigned port: %d\n", betaPort)
+
+			Expect(alphaPort).ShouldNot(Equal(betaPort), "port collision: both apps got the same port")
 
 			By("creating per-app acceptor services + ingresses")
 			alphaAccSvc := svc.NewServiceDefinitionForCR(

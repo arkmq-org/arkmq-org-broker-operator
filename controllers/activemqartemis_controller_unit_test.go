@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -366,6 +367,7 @@ var _ = Describe("activemqartemis controller unit", func() {
 		_ = brokerv1beta1.AddToScheme(s)
 		_ = corev1.AddToScheme(s)
 		_ = appsv1.AddToScheme(s)
+		_ = netv1.AddToScheme(s)
 
 		crd := &brokerv1beta1.ActiveMQArtemis{
 			ObjectMeta: v1.ObjectMeta{

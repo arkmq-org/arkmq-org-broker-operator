@@ -293,3 +293,37 @@ type errorClient struct {
 func (e *errorClient) Get(ctx context.Context, key types.NamespacedName, obj client.Object, opts ...client.GetOption) error {
 	return errors.New("simulated error")
 }
+
+func TestBrokerNetworkPolicyEnabled(t *testing.T) {
+	if os.Unsetenv("BROKER_NETWORK_POLICY") != nil {
+		t.Error("error unsetting BROKER_NETWORK_POLICY")
+	}
+	if BrokerNetworkPolicyEnabled() {
+		t.Error("expected false when env var is not set")
+	}
+
+	if os.Setenv("BROKER_NETWORK_POLICY", "true") != nil {
+		t.Error("error setting BROKER_NETWORK_POLICY")
+	}
+	if !BrokerNetworkPolicyEnabled() {
+		t.Error("expected true when env var is 'true'")
+	}
+
+	if os.Setenv("BROKER_NETWORK_POLICY", "TRUE") != nil {
+		t.Error("error setting BROKER_NETWORK_POLICY")
+	}
+	if !BrokerNetworkPolicyEnabled() {
+		t.Error("expected true case-insensitively")
+	}
+
+	if os.Setenv("BROKER_NETWORK_POLICY", "false") != nil {
+		t.Error("error setting BROKER_NETWORK_POLICY")
+	}
+	if BrokerNetworkPolicyEnabled() {
+		t.Error("expected false for value 'false'")
+	}
+
+	if os.Unsetenv("BROKER_NETWORK_POLICY") != nil {
+		t.Error("error unsetting BROKER_NETWORK_POLICY")
+	}
+}
