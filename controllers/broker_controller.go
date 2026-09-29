@@ -18,6 +18,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokervolumes"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/containers"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/networkpolicies"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/persistentvolumeclaims"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/pods"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
@@ -175,6 +176,7 @@ func (r *BrokerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}).
 		Owns(&netv1.Ingress{}).
 		Owns(&policyv1.PodDisruptionBudget{}).
+		Owns(&netv1.NetworkPolicy{}).
 		Watches(&corev1.Pod{},
 			handler.EnqueueRequestsFromMapFunc(r.mapPodToBrokerCR),
 			builder.WithPredicates(reconcileMeAnnotationPredicate()),
@@ -365,6 +367,10 @@ func (reconciler *BrokerReconcilerImpl) Process(customResource *v1beta2.Broker, 
 		reconciler.applyPodDisruptionBudget(customResource)
 	}
 
+	if common.BrokerNetworkPolicyEnabled() {
+		reconciler.applyNetworkPolicy(customResource)
+	}
+
 	// mods to env var values sourced from secrets are not detected by process resources
 	// track updates in trigger env var that has a total checksum
 	trackSecretCheckSumInEnvVar(common.ToResourceList(reconciler.requestedResources), desiredStatefulSet.Spec.Template.Spec.Containers)
@@ -466,6 +472,20 @@ func (reconciler *BrokerReconcilerImpl) applyPodDisruptionBudget(customResource 
 	desired.Spec.Selector = &metav1.LabelSelector{
 		MatchLabels: matchLabels,
 	}
+
+	reconciler.trackDesired(desired)
+}
+
+func (reconciler *BrokerReconcilerImpl) applyNetworkPolicy(customResource *v1beta2.Broker) {
+	netpolType := reflect.TypeOf(netv1.NetworkPolicy{})
+	existing := reconciler.cloneOfDeployed(netpolType, customResource.Name+"-netpol")
+
+	var existingNP *netv1.NetworkPolicy
+	if existing != nil {
+		existingNP = existing.(*netv1.NetworkPolicy)
+	}
+
+	desired := networkpolicies.NewNetworkPolicy(existingNP, customResource.Name, customResource.Namespace, true, nil)
 
 	reconciler.trackDesired(desired)
 }

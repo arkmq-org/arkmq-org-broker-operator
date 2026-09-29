@@ -250,6 +250,7 @@ func GetDeployedResources(instance *v1beta2.Broker, client rtclient.Client, onOp
 			&corev1.ConfigMapList{},
 			&policyv1.PodDisruptionBudgetList{},
 			&netv1.IngressList{},
+			&netv1.NetworkPolicyList{},
 		)
 	} else {
 		resourceMap, err = reader.ListAll(
@@ -259,6 +260,7 @@ func GetDeployedResources(instance *v1beta2.Broker, client rtclient.Client, onOp
 			&corev1.SecretList{},
 			&corev1.ConfigMapList{},
 			&policyv1.PodDisruptionBudgetList{},
+			&netv1.NetworkPolicyList{},
 		)
 	}
 	if err != nil {
