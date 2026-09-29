@@ -958,17 +958,20 @@ func WaitForPods(crName string, iPods ...int32) {
 	}
 }
 
+func addJetstackHelmRepo() error {
+	cmd := exec.Command(helmCmd, "repo", "add", "jetstack", "https://charts.jetstack.io", "--force-update")
+	return cmd.Run()
+}
+
 func InstallCertManager() error {
 	fmt.Printf("Installing cert-manager using %s\n", helmCmd)
-
-	cmd := exec.Command(helmCmd, "repo", "add", "jetstack", "https://charts.jetstack.io", "--force-update")
-	err := cmd.Run()
-	if err != nil {
+	if err := addJetstackHelmRepo(); err != nil {
 		return err
 	}
+
 	// cert manager
-	cmd = exec.Command(helmCmd, "upgrade", "-i", "-n", "cert-manager", "cert-manager", "jetstack/cert-manager", "--set", "installCRDs=true", "--wait", "--create-namespace")
-	err = cmd.Run()
+	cmd := exec.Command(helmCmd, "upgrade", "-i", "-n", "cert-manager", "cert-manager", "jetstack/cert-manager", "--set", "installCRDs=true", "--wait", "--create-namespace")
+	err := cmd.Run()
 	if err != nil {
 		return err
 	}
@@ -983,36 +986,50 @@ func InstallCertManager() error {
 		fmt.Printf("error waiting cert-manager %v\n", err)
 		return err
 	}
-	// trust manager
-	// https://cert-manager.io/docs/trust/trust-manager/installation/
-	cmd = exec.Command(helmCmd, "upgrade", "-i", "-n", "cert-manager", "trust-manager", "jetstack/trust-manager", "--set", "secretTargets.enabled=true", "--set", "secretTargets.authorizedSecretsAll=true", "--wait")
-	err = cmd.Run()
 
-	if err != nil {
-		fmt.Printf("error waiting cert-manager %v\n", err)
+	return nil
+}
+
+func InstallTrustManager() error {
+	fmt.Printf("Installing trust-manager using %s\n", helmCmd)
+	if err := addJetstackHelmRepo(); err != nil {
+		return err
 	}
 
-	return err
+	// https://cert-manager.io/docs/trust/trust-manager/installation/
+	cmd := exec.Command(helmCmd, "upgrade", "-i", "-n", "cert-manager", "trust-manager", "jetstack/trust-manager", "--set", "secretTargets.enabled=true", "--set", "secretTargets.authorizedSecretsAll=true", "--wait")
+	return cmd.Run()
+}
+
+func UninstallTrustManager() error {
+	cmd := exec.Command(helmCmd, "uninstall", "-n", "cert-manager", "trust-manager", "--wait", "--timeout", "5m")
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	// Remove the shared namespace only when cert-manager is not still installed.
+	if CertManagerInstalled() {
+		return nil
+	}
+
+	cmd = exec.Command(kubeTool, "delete", "namespace", "cert-manager", "--wait=true", "--timeout=5m")
+	return cmd.Run()
 }
 
 func UninstallCertManager() error {
-
-	//trust manager
-	cmd := exec.Command(helmCmd, "uninstall", "-n", "cert-manager", "trust-manager")
+	cmd := exec.Command(helmCmd, "uninstall", "-n", "cert-manager", "cert-manager", "--wait", "--timeout", "5m")
 	err := cmd.Run()
 	if err != nil {
 		return err
 	}
-	//cert manager
-	cmd = exec.Command(helmCmd, "uninstall", "-n", "cert-manager", "cert-manager")
-	err = cmd.Run()
-	if err != nil {
-		return err
+
+	// Keep the shared namespace when trust-manager remains installed.
+	if TrustManagerInstalled() {
+		return nil
 	}
-	//namespace
-	cmd = exec.Command(kubeTool, "delete", "namespace", "cert-manager")
-	err = cmd.Run()
-	return err
+
+	cmd = exec.Command(kubeTool, "delete", "namespace", "cert-manager", "--wait=true", "--timeout=5m")
+	return cmd.Run()
 }
 
 func CertManagerInstalled() bool {
@@ -1020,6 +1037,23 @@ func CertManagerInstalled() bool {
 	cmDeployment := &appsv1.Deployment{}
 	err := k8sClient.Get(ctx, cmDeploymentKey, cmDeployment)
 	return err == nil
+}
+
+func TrustManagerInstalled() bool {
+	tmDeploymentKey := types.NamespacedName{Name: "trust-manager", Namespace: "cert-manager"}
+	tmDeployment := &appsv1.Deployment{}
+	err := k8sClient.Get(ctx, tmDeploymentKey, tmDeployment)
+	return err == nil
+}
+
+func installTrustManagerIfMissing() (bool, error) {
+	if TrustManagerInstalled() {
+		return false, nil
+	}
+	if err := InstallTrustManager(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func InstallClusteredIssuer(issuerName string, customFunc func(*cmv1.ClusterIssuer)) *cmv1.ClusterIssuer {

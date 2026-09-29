@@ -84,6 +84,8 @@ var _ = Describe("broker managed resource labels", Label("broker-label-test"), f
 				if !CertManagerInstalled() {
 					Expect(InstallCertManager()).To(Succeed())
 				}
+				_, trustManagerErr := installTrustManagerIfMissing()
+				Expect(trustManagerErr).To(Succeed())
 
 				rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
 

@@ -52,6 +52,8 @@ var _ = Describe("broker-service edge cases and concurrent operations", func() {
 				Expect(InstallCertManager()).To(Succeed())
 				installedCertManager = true
 			}
+			_, trustManagerErr := installTrustManagerIfMissing()
+			Expect(trustManagerErr).To(Succeed())
 
 			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
 
