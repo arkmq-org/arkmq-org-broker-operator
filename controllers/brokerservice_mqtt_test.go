@@ -19,11 +19,14 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
 	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -31,6 +34,7 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -38,8 +42,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/ptr"
 
 	brokerv1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/monitoring"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/ingresses"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
 	svc "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/services"
@@ -63,6 +70,12 @@ var _ = Describe("broker-service", func() {
 			if !CertManagerInstalled() {
 				Expect(InstallCertManager()).To(Succeed())
 				installedCertManager = true
+			}
+
+			// required, not optional: the operator generates scrape wiring for every
+			// service and app, so the E2E cluster has to be able to run it
+			if !PrometheusStackInstalled() {
+				Expect(InstallPrometheusStack()).To(Succeed())
 			}
 
 			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
@@ -332,6 +345,15 @@ var _ = Describe("broker-service", func() {
 			ctx := context.Background()
 			serviceName := NextSpecResourceName()
 
+			// app-beta lives in a namespace of its own, away from the service, the
+			// way a tenant would, so its scrape wiring is exercised across
+			// namespaces.
+			By("ensuring other namespace exists")
+			otherNs := corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: otherNamespace}}
+			if err := k8sClient.Create(ctx, &otherNs); err != nil && !errors.IsAlreadyExists(err) {
+				Fail(fmt.Sprintf("Failed to create other namespace: %v", err))
+			}
+
 			// One server identity for the whole service: both app acceptors
 			// present this cert, so clients verify against it regardless of
 			// which port they land on.
@@ -357,7 +379,9 @@ var _ = Describe("broker-service", func() {
 					Namespace: defaultNamespace,
 					Labels:    map[string]string{"forMQTTMultiTenant": "true"},
 				},
-				Spec: brokerv1beta2.BrokerServiceSpec{},
+				Spec: brokerv1beta2.BrokerServiceSpec{
+					AppSelectorExpression: fmt.Sprintf(`app.metadata.namespace in ["%s", "%s"]`, defaultNamespace, otherNamespace),
+				},
 			}
 			crd.Spec.Resources = corev1.ResourceRequirements{
 				Limits: corev1.ResourceList{
@@ -371,7 +395,7 @@ var _ = Describe("broker-service", func() {
 			alphaIngressHost := "alpha-" + serviceName + "-" + defaultNamespace + "." + defaultTestIngressDomain
 			betaIngressHost := "beta-" + serviceName + "-" + defaultNamespace + "." + defaultTestIngressDomain
 
-			newApp := func(name, topic, subscription string) brokerv1beta2.BrokerApp {
+			newApp := func(name, namespace, topic, subscription string) brokerv1beta2.BrokerApp {
 				return brokerv1beta2.BrokerApp{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "ActiveMQArtemisApp",
@@ -379,7 +403,7 @@ var _ = Describe("broker-service", func() {
 					},
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      name,
-						Namespace: defaultNamespace,
+						Namespace: namespace,
 					},
 					Spec: brokerv1beta2.BrokerAppSpec{
 						ServiceSelector: &metav1.LabelSelector{
@@ -396,23 +420,43 @@ var _ = Describe("broker-service", func() {
 				}
 			}
 
-			appAlpha := newApp("app-alpha", "alpha-topic", "alpha-client.alpha-topic")
-			appBeta := newApp("app-beta", "beta-topic", "beta-client.beta-topic")
+			appAlpha := newApp("app-alpha", defaultNamespace, "alpha-topic", "alpha-client.alpha-topic")
+			appBeta := newApp("app-beta", otherNamespace, "beta-topic", "beta-client.beta-topic")
 
-			By("installing per-app client certs")
-			for _, appName := range []string{appAlpha.Name, appBeta.Name} {
-				certName := appName + common.AppCertSecretSuffix
-				InstallCert(certName, defaultNamespace, func(candidate *cmv1.Certificate) {
+			// alpha owns a queue beta consumes from, across namespaces: its
+			// series belong to alpha alone, beta reading them needs access to
+			// alpha's namespace
+			const sharedQueue = "SHARED.Q"
+			appAlpha.Spec.SharedAddresses = []brokerv1beta2.AddressType{{Address: sharedQueue}}
+			appAlpha.Spec.Capabilities[0].ProducerOf = append(appAlpha.Spec.Capabilities[0].ProducerOf,
+				brokerv1beta2.AddressRef{Address: sharedQueue})
+			appBeta.Spec.Capabilities[0].ConsumerOf = append(appBeta.Spec.Capabilities[0].ConsumerOf,
+				brokerv1beta2.AddressRef{Address: sharedQueue, AppName: appAlpha.Name, AppNamespace: appAlpha.Namespace})
+
+			By("installing per-app client certs, each in its app's namespace")
+			for _, app := range []*brokerv1beta2.BrokerApp{&appAlpha, &appBeta} {
+				certName := app.Name + common.AppCertSecretSuffix
+				InstallCert(certName, app.Namespace, func(candidate *cmv1.Certificate) {
 					candidate.Spec.SecretName = certName
-					candidate.Spec.CommonName = appName
+					candidate.Spec.CommonName = app.Name
 					candidate.Spec.Subject.Organizations = nil
-					candidate.Spec.Subject.OrganizationalUnits = []string{defaultNamespace}
+					candidate.Spec.Subject.OrganizationalUnits = []string{app.Namespace}
 					candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
 						Name: caIssuer.Name,
 						Kind: "ClusterIssuer",
 					}
 				})
 			}
+
+			By("installing prometheus cert")
+			InstallCert(common.DefaultPrometheusCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = common.DefaultPrometheusCertSecretName
+				candidate.Spec.CommonName = "prometheus"
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
 
 			By("deploying app-alpha (produces/consumes on alpha-topic)")
 			Expect(k8sClient.Create(ctx, &appAlpha)).Should(Succeed())
@@ -421,8 +465,8 @@ var _ = Describe("broker-service", func() {
 			Expect(k8sClient.Create(ctx, &appBeta)).Should(Succeed())
 
 			By("waiting for both apps to be Ready")
-			for _, name := range []string{appAlpha.Name, appBeta.Name} {
-				key := types.NamespacedName{Name: name, Namespace: defaultNamespace}
+			for _, app := range []*brokerv1beta2.BrokerApp{&appAlpha, &appBeta} {
+				key := types.NamespacedName{Name: app.Name, Namespace: app.Namespace}
 				Eventually(func(g Gomega) {
 					app := &brokerv1beta2.BrokerApp{}
 					g.Expect(k8sClient.Get(ctx, key, app)).Should(Succeed())
@@ -437,7 +481,7 @@ var _ = Describe("broker-service", func() {
 			fmt.Printf("app-alpha assigned port: %d\n", alphaPort)
 
 			betaApp := &brokerv1beta2.BrokerApp{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appBeta.Name, Namespace: defaultNamespace}, betaApp)).Should(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appBeta.Name, Namespace: appBeta.Namespace}, betaApp)).Should(Succeed())
 			betaPort := betaApp.Status.Service.AssignedPort
 			fmt.Printf("app-beta assigned port: %d\n", betaPort)
 
@@ -480,9 +524,10 @@ var _ = Describe("broker-service", func() {
 			// reports "not Authorized". There is no condition to wait on for the
 			// reload, so retry until it accepts us -- a fixed delay is a fluke
 			// away from failing on a slower machine, which is how this broke.
-			connectMqtt := func(appName, clientID, ingressHost string) (mqtt.Client, *bool) {
+			connectMqtt := func(app *brokerv1beta2.BrokerApp, clientID, ingressHost string) (mqtt.Client, *bool) {
+				appName := app.Name
 				certSecret, err := secrets.RetriveSecret(
-					types.NamespacedName{Namespace: defaultNamespace, Name: appName + common.AppCertSecretSuffix},
+					types.NamespacedName{Namespace: app.Namespace, Name: appName + common.AppCertSecretSuffix},
 					make(map[string]string), k8sClient)
 				Expect(err).Should(BeNil())
 				keyPair, err := tls.X509KeyPair(certSecret.Data["tls.crt"], certSecret.Data["tls.key"])
@@ -513,7 +558,7 @@ var _ = Describe("broker-service", func() {
 			}
 
 			By("app-alpha: MQTT pub/sub on alpha-topic")
-			alphaClient, alphaReceived := connectMqtt(appAlpha.Name, "alpha-client", alphaIngressHost)
+			alphaClient, alphaReceived := connectMqtt(&appAlpha, "alpha-client", alphaIngressHost)
 			token := alphaClient.Subscribe("alpha-topic", 1, func(_ mqtt.Client, msg mqtt.Message) {
 				*alphaReceived = true
 				fmt.Printf("alpha received: '%s' on %s\n", msg.Payload(), msg.Topic())
@@ -528,7 +573,7 @@ var _ = Describe("broker-service", func() {
 			Eventually(func() bool { return *alphaReceived }, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
 
 			By("app-beta: MQTT pub/sub on beta-topic")
-			betaClient, betaReceived := connectMqtt(appBeta.Name, "beta-client", betaIngressHost)
+			betaClient, betaReceived := connectMqtt(&appBeta, "beta-client", betaIngressHost)
 			token = betaClient.Subscribe("beta-topic", 1, func(_ mqtt.Client, msg mqtt.Message) {
 				*betaReceived = true
 				fmt.Printf("beta received: '%s' on %s\n", msg.Payload(), msg.Topic())
@@ -544,35 +589,115 @@ var _ = Describe("broker-service", func() {
 
 			serverName := common.OrdinalFQDNS(serviceName, defaultNamespace, 0)
 
-			// Same reason the connect retries: the app's identity only reaches the
-			// metrics endpoint once the broker has reloaded the override.
-			By("app-alpha scrapes metrics with its own app cert")
-			Eventually(func(g Gomega) {
-				body := scrapeMetrics(g, serverName, appClientCert(g, defaultNamespace, appAlpha.Name))
-
-				g.Expect(body).Should(MatchRegexp(`broker_queue_message_count.*queue="alpha-client\.alpha-topic"`),
-					"alpha should see its own queue metrics")
-				g.Expect(body).ShouldNot(MatchRegexp(`queue="beta-client\.beta-topic"`),
-					"alpha must NOT see beta's queue metrics")
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-
-			By("app-beta scrapes metrics with its own app cert")
-			Eventually(func(g Gomega) {
-				body := scrapeMetrics(g, serverName, appClientCert(g, defaultNamespace, appBeta.Name))
-
-				g.Expect(body).Should(MatchRegexp(`broker_queue_message_count.*queue="beta-client\.beta-topic"`),
-					"beta should see its own queue metrics")
-				g.Expect(body).ShouldNot(MatchRegexp(`queue="alpha-client\.alpha-topic"`),
-					"beta must NOT see alpha's queue metrics")
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-
-			By("the operator still sees every app's queue metrics")
+			// Same reason the connect retries: the owner labels only reach the
+			// metrics endpoint once the broker has reloaded its exporter config.
+			By("the broker labelling each app's queue with the app that owns it")
 			Eventually(func(g Gomega) {
 				body := scrapeMetrics(g, serverName, operatorClientCert)
 
-				g.Expect(body).Should(MatchRegexp(`broker_queue_message_count.*queue="alpha-client\.alpha-topic"`))
-				g.Expect(body).Should(MatchRegexp(`broker_queue_message_count.*queue="beta-client\.beta-topic"`))
+				alpha := queueSeriesLabels(body, "alpha-client.alpha-topic")
+				g.Expect(alpha).Should(HaveKeyWithValue("namespace", defaultNamespace))
+				g.Expect(alpha).Should(HaveKeyWithValue("brokerapp", appAlpha.Name))
+
+				beta := queueSeriesLabels(body, "beta-client.beta-topic")
+				g.Expect(beta).Should(HaveKeyWithValue("namespace", otherNamespace),
+					"beta's queue belongs in beta's namespace, away from the service")
+				g.Expect(beta).Should(HaveKeyWithValue("brokerapp", appBeta.Name))
+
+				g.Expect(body).ShouldNot(MatchRegexp(`(?m)^jvm_\w*\{[^}]*namespace=`),
+					"broker-wide series belong to no tenant")
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			// An app's own certificate reads the queues it is authorised on,
+			// whoever owns them: the way to its data where metrics are read without
+			// a namespace enforcing query path, or across a shared queue.
+			By("app-alpha scraping with its own app cert, seeing only its queues")
+			Eventually(func(g Gomega) {
+				body := scrapeMetrics(g, serverName, appClientCert(g, defaultNamespace, appAlpha.Name))
+
+				g.Expect(queueSeriesLabels(body, "alpha-client.alpha-topic")).ShouldNot(BeNil(),
+					"alpha should see its own queue metrics")
+				g.Expect(queueSeriesLabels(body, "beta-client.beta-topic")).Should(BeNil(),
+					"alpha must NOT see beta's queue metrics")
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("app-beta scraping with its own app cert, seeing only its queues")
+			Eventually(func(g Gomega) {
+				body := scrapeMetrics(g, serverName, appClientCert(g, appBeta.Namespace, appBeta.Name))
+
+				g.Expect(queueSeriesLabels(body, "beta-client.beta-topic")).ShouldNot(BeNil(),
+					"beta should see its own queue metrics")
+				g.Expect(queueSeriesLabels(body, "alpha-client.alpha-topic")).Should(BeNil(),
+					"beta must NOT see alpha's queue metrics")
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			// The scraper side of the same story: the operator generates the wiring a
+			// Prometheus needs, and that wiring reproduces the placement asserted
+			// above without anyone hand writing a target, a serverName or a cert ref.
+			By("the operator generating a ServiceMonitor for the service that keeps those labels")
+			serviceMonitor := &monitoringv1.ServiceMonitor{}
+			wiringKey := types.NamespacedName{Name: serviceName + monitoring.WiringSuffix, Namespace: defaultNamespace}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, wiringKey, serviceMonitor)).Should(Succeed())
+				g.Expect(serviceMonitor.Labels).Should(HaveKeyWithValue(common.LabelMonitoring, "true"))
+				g.Expect(serviceMonitor.Spec.Endpoints).Should(HaveLen(1))
+
+				endpoint := serviceMonitor.Spec.Endpoints[0]
+				g.Expect(endpoint.HonorLabels).Should(BeTrue(),
+					"without it the namespace the broker sets is renamed exported_namespace")
+				g.Expect(endpoint.TLSConfig).ShouldNot(BeNil())
+				g.Expect(endpoint.TLSConfig.ServerName).Should(HaveValue(Equal(serverName)))
+				g.Expect(endpoint.TLSConfig.Cert.Secret).ShouldNot(BeNil())
+				g.Expect(endpoint.TLSConfig.Cert.Secret.Name).Should(
+					Equal(common.DefaultPrometheusCertSecretName),
+					"the service scrapes as prometheus, which the broker grants the broad metrics role")
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			// Driven purely from the generated spec: a wrong serverName or cert
+			// reference fails here instead of producing a target stuck in "down".
+			By("the scrape the ServiceMonitor describes seeing every app's queues")
+			Eventually(func(g Gomega) {
+				endpoint := serviceMonitor.Spec.Endpoints[0]
+				body := scrapeUrl(g, fmt.Sprintf("https://%s:%d%s", serverName, monitoring.Port, endpoint.Path),
+					tlsConfigFromSpec(g, &endpoint.TLSConfig.SafeTLSConfig, serviceMonitor.Namespace))
+
+				g.Expect(queueSeriesLabels(body, "alpha-client.alpha-topic")).ShouldNot(BeNil())
+				g.Expect(queueSeriesLabels(body, "beta-client.beta-topic")).ShouldNot(BeNil())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			// The scrapes above prove the generated object is right; this proves a
+			// Prometheus accepts it and files each app's queue with the app, which
+			// is what tenancy rests on: a series is readable by whoever may read
+			// metrics in its namespace.
+			if isOpenshift {
+				By("not asking Prometheus for its series: the platform Prometheus is only reachable with a token")
+			} else {
+				By("Prometheus filing each queue in its owner's namespace and nowhere else")
+				job := serviceMonitor.Name
+				for _, owned := range []struct{ queue, namespace string }{
+					{"alpha-client.alpha-topic", defaultNamespace},
+					{"beta-client.beta-topic", otherNamespace},
+					// beta consumes from it, but alpha owns it
+					{sharedQueue, defaultNamespace},
+				} {
+					Eventually(func(g Gomega) {
+						g.Expect(prometheusSeriesLabel(g, fmt.Sprintf(`count by (namespace) (broker_queue_message_count{job=%q, queue=%q})`, job, owned.queue), "namespace")).
+							Should(ConsistOf(owned.namespace), "namespaces holding queue %s", owned.queue)
+					}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+				}
+
+				By("Prometheus filing no broker-wide series in an app's namespace")
+				Expect(prometheusSeriesLabel(Default, fmt.Sprintf(`count by (__name__) ({namespace=%q, __name__=~"jvm_.*|process_.*"})`, otherNamespace), "__name__")).
+					Should(BeEmpty())
+			}
+
+			By("the generated objects not being rewritten on every reconcile")
+			wiringVersion := serviceMonitor.ResourceVersion
+			Consistently(func(g Gomega) {
+				current := &monitoringv1.ServiceMonitor{}
+				g.Expect(k8sClient.Get(ctx, wiringKey, current)).Should(Succeed())
+				g.Expect(current.ResourceVersion).Should(Equal(wiringVersion))
+			}, time.Second*30, time.Second*5).Should(Succeed())
 
 			alphaClient.Disconnect(250)
 			betaClient.Disconnect(250)
@@ -606,7 +731,8 @@ var _ = Describe("broker-service", func() {
 			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
 
 			UninstallCert(appAlpha.Name+common.AppCertSecretSuffix, defaultNamespace)
-			UninstallCert(appBeta.Name+common.AppCertSecretSuffix, defaultNamespace)
+			UninstallCert(appBeta.Name+common.AppCertSecretSuffix, appBeta.Namespace)
+			UninstallCert(common.DefaultPrometheusCertSecretName, defaultNamespace)
 			UninstallCert(sharedOperandCertName, defaultNamespace)
 		})
 	})
@@ -669,4 +795,106 @@ func appClientCert(g Gomega, namespace, appName string) func(*tls.CertificateReq
 	return func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 		return &keyPair, nil
 	}
+}
+
+// queueSeriesLabels returns the labels of a queue's message count series in an
+// exposition body, or nil when the queue has none.
+func queueSeriesLabels(body, queue string) map[string]string {
+	series := regexp.MustCompile(`(?m)^broker_queue_message_count\{([^}]*)\}`)
+	label := regexp.MustCompile(`(\w+)="([^"]*)"`)
+
+	for _, match := range series.FindAllStringSubmatch(body, -1) {
+		labels := map[string]string{}
+		for _, pair := range label.FindAllStringSubmatch(match[1], -1) {
+			labels[pair[1]] = pair[2]
+		}
+		if labels["queue"] == queue {
+			return labels
+		}
+	}
+	return nil
+}
+
+// tlsConfigFromSpec resolves a generated tlsConfig the way prometheus-operator
+// would: every secret reference is read from the namespace of the object that
+// declared it.
+func tlsConfigFromSpec(g Gomega, tlsSpec *monitoringv1.SafeTLSConfig, namespace string) *tls.Config {
+	g.Expect(tlsSpec).ShouldNot(BeNil())
+
+	readKey := func(secretName, key string) []byte {
+		secret, err := secrets.RetriveSecret(
+			types.NamespacedName{Namespace: namespace, Name: secretName},
+			make(map[string]string), k8sClient)
+		g.Expect(err).Should(BeNil(), "secret %s referenced in namespace %s", secretName, namespace)
+		g.Expect(secret.Data).Should(HaveKey(key))
+		return secret.Data[key]
+	}
+
+	tlsConfig := &tls.Config{
+		ServerName: ptr.Deref(tlsSpec.ServerName, ""),
+	}
+
+	g.Expect(tlsSpec.CA.Secret).ShouldNot(BeNil(), "generated tlsConfig must reference a CA secret")
+	caPool := x509.NewCertPool()
+	g.Expect(caPool.AppendCertsFromPEM(readKey(tlsSpec.CA.Secret.Name, tlsSpec.CA.Secret.Key))).Should(BeTrue())
+	tlsConfig.RootCAs = caPool
+
+	g.Expect(tlsSpec.Cert.Secret).ShouldNot(BeNil(), "generated tlsConfig must reference a client cert")
+	g.Expect(tlsSpec.KeySecret).ShouldNot(BeNil(), "generated tlsConfig must reference a client key")
+	keyPair, err := tls.X509KeyPair(
+		readKey(tlsSpec.Cert.Secret.Name, tlsSpec.Cert.Secret.Key),
+		readKey(tlsSpec.KeySecret.Name, tlsSpec.KeySecret.Key))
+	g.Expect(err).Should(BeNil())
+	tlsConfig.Certificates = []tls.Certificate{keyPair}
+
+	return tlsConfig
+}
+
+// prometheusSeriesLabel runs an instant query against the Prometheus the suite
+// installed and returns, for each resulting series, the values of the given
+// labels joined by a slash.
+func prometheusSeriesLabel(g Gomega, query string, labels ...string) []string {
+	clientset, err := kubernetes.NewForConfig(restConfig)
+	g.Expect(err).Should(Succeed())
+
+	body, err := clientset.CoreV1().Services(prometheusNamespace).
+		ProxyGet("http", "kube-prometheus-stack-prometheus", "http-web", "/api/v1/query", map[string]string{"query": query}).
+		DoRaw(ctx)
+	g.Expect(err).Should(Succeed())
+
+	var result struct {
+		Data struct {
+			Result []struct {
+				Metric map[string]string `json:"metric"`
+			} `json:"result"`
+		} `json:"data"`
+	}
+	g.Expect(json.Unmarshal(body, &result)).Should(Succeed())
+
+	values := make([]string, 0, len(result.Data.Result))
+	for _, series := range result.Data.Result {
+		value := make([]string, 0, len(labels))
+		for _, label := range labels {
+			value = append(value, series.Metric[label])
+		}
+		values = append(values, strings.Join(value, "/"))
+	}
+	return values
+}
+
+func scrapeUrl(g Gomega, url string, tlsConfig *tls.Config) string {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = tlsConfig
+
+	httpClient := http.Client{Transport: transport, Timeout: time.Second * 5}
+
+	resp, err := httpClient.Get(url)
+	g.Expect(err).Should(Succeed())
+	g.Expect(resp).ShouldNot(BeNil())
+	defer func() { _ = resp.Body.Close() }()
+	g.Expect(resp.StatusCode).Should(Equal(200))
+
+	body, err := io.ReadAll(resp.Body)
+	g.Expect(err).Should(Succeed())
+	return string(body)
 }
