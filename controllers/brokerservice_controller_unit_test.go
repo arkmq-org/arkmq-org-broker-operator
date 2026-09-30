@@ -525,7 +525,7 @@ func TestBrokerServiceReconcileStatusAppliedApps(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEmpty(t, secret.ResourceVersion)
 	// Verify annotation is present on the secret
-	assert.Equal(t, fmt.Sprintf("%s-%s", ns, appName), secret.Annotations[common.ProvisionedAppsAnnotation])
+	assert.Equal(t, fmt.Sprintf("%s/%s", ns, appName), secret.Annotations[common.ProvisionedAppsAnnotation])
 
 	// 3. Update Broker status to simulate broker picking up the config
 	brokerCR := &v1beta2.Broker{}
@@ -555,7 +555,7 @@ func TestBrokerServiceReconcileStatusAppliedApps(t *testing.T) {
 	// Verify BrokerService status
 	err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 	assert.NoError(t, err)
-	assert.Equal(t, []string{fmt.Sprintf("%s-%s", ns, appName)}, updatedSvc.Status.ProvisionedApps)
+	assert.Equal(t, []string{fmt.Sprintf("%s/%s", ns, appName)}, updatedSvc.Status.ProvisionedApps)
 }
 
 func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
@@ -676,7 +676,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 	updatedSvc := &v1beta2.BrokerService{}
 	err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 	assert.NoError(t, err)
-	assert.Equal(t, []string{fmt.Sprintf("%s-%s", ns, app1Name)}, updatedSvc.Status.ProvisionedApps)
+	assert.Equal(t, []string{fmt.Sprintf("%s/%s", ns, app1Name)}, updatedSvc.Status.ProvisionedApps)
 
 	// 2. Add App2
 	app2 := &v1beta2.BrokerApp{
@@ -713,7 +713,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 	// IMPORTANT: It should NOT be empty.
 	err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 	assert.NoError(t, err)
-	assert.Equal(t, []string{fmt.Sprintf("%s-%s", ns, app1Name)}, updatedSvc.Status.ProvisionedApps)
+	assert.Equal(t, []string{fmt.Sprintf("%s/%s", ns, app1Name)}, updatedSvc.Status.ProvisionedApps)
 
 	// 3. Update Broker Status to point to Secret v2
 	err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
@@ -734,7 +734,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 	// Verify AppliedApps has App1 and App2
 	err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 	assert.NoError(t, err)
-	expectedApps := []string{fmt.Sprintf("%s-%s", ns, app1Name), fmt.Sprintf("%s-%s", ns, app2Name)}
+	expectedApps := []string{fmt.Sprintf("%s/%s", ns, app1Name), fmt.Sprintf("%s/%s", ns, app2Name)}
 	sort.Strings(expectedApps)
 	sort.Strings(updatedSvc.Status.ProvisionedApps)
 	assert.Equal(t, expectedApps, updatedSvc.Status.ProvisionedApps)
@@ -1705,4 +1705,14 @@ func TestQueueOwnersKeepTheFirstClaimWhateverTheOrder(t *testing.T) {
 	assert.Equal(t, queueOwners([]v1beta2.BrokerApp{first, second}, logr.Discard()),
 		queueOwners([]v1beta2.BrokerApp{second, first}, logr.Discard()))
 	assert.Equal(t, "first", queueOwners([]v1beta2.BrokerApp{second, first}, logr.Discard())["SHARED"].OwnerApp)
+}
+
+func TestProvisionedAppNameKeepsNamespaceAndNameApart(t *testing.T) {
+	short := ownerApp("a", "x-b")
+	long := ownerApp("a-x", "b")
+
+	// the dash-joined identity cannot tell these apps apart
+	assert.Equal(t, AppIdentity(&short), AppIdentity(&long))
+	assert.NotEqual(t, ProvisionedAppName(&short), ProvisionedAppName(&long))
+	assert.Equal(t, "a/x-b", ProvisionedAppName(&short))
 }

@@ -474,6 +474,16 @@ var _ = Describe("broker-service", func() {
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 			}
 
+			By("the service listing both apps by namespace and name, the one across namespaces included")
+			Eventually(func(g Gomega) {
+				service := &brokerv1beta2.BrokerService{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, service)).Should(Succeed())
+				g.Expect(service.Status.ProvisionedApps).Should(ConsistOf(
+					appAlpha.Namespace+"/"+appAlpha.Name,
+					appBeta.Namespace+"/"+appBeta.Name,
+				))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
 			By("reading assigned ports from app status")
 			alphaApp := &brokerv1beta2.BrokerApp{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appAlpha.Name, Namespace: defaultNamespace}, alphaApp)).Should(Succeed())

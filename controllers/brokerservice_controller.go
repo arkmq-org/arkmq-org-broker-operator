@@ -309,7 +309,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (err erro
 
 	// reset data
 	desired.Data = make(map[string][]byte)
-	appIdentities := make([]string, 0, len(apps.Items))
+	provisionedApps := make([]string, 0, len(apps.Items))
 	rejectedApps := make([]broker.RejectedApp, 0)
 	validApps := make([]broker.BrokerApp, 0, len(apps.Items))
 
@@ -338,15 +338,15 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (err erro
 			reconciler.log.Error(err, "failed to process acceptor for app", "app", app.Name)
 			break
 		}
-		appIdentities = append(appIdentities, AppIdentity(&app))
+		provisionedApps = append(provisionedApps, ProvisionedAppName(&app))
 		validApps = append(validApps, app)
 	}
 
-	sort.Strings(appIdentities)
+	sort.Strings(provisionedApps)
 	if desired.Annotations == nil {
 		desired.Annotations = make(map[string]string)
 	}
-	desired.Annotations[common.ProvisionedAppsAnnotation] = strings.Join(appIdentities, ",")
+	desired.Annotations[common.ProvisionedAppsAnnotation] = strings.Join(provisionedApps, ",")
 
 	// Track rejected apps in status for user visibility
 	reconciler.status.RejectedApps = rejectedApps
@@ -1072,6 +1072,14 @@ func consumerRole(prefix string) string {
 
 func metricsRole(prefix string) string {
 	return fmt.Sprintf("%s-metrics", prefix)
+}
+
+// ProvisionedAppName is how status.provisionedApps names an app: its namespace
+// and name joined by a slash, which neither may contain, so the pair splits back
+// unambiguously. AppIdentity's dash can collide: app x-b in namespace a and app b
+// in namespace a-x are both a-x-b.
+func ProvisionedAppName(app *broker.BrokerApp) string {
+	return app.Namespace + "/" + app.Name
 }
 
 func AppIdentity(app *broker.BrokerApp) string {
