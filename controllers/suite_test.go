@@ -106,6 +106,8 @@ const (
 
 	// Default ingress domain for tests
 	defaultTestIngressDomain = "tests.arkmq-org.io"
+
+	unitLabel = "unit"
 )
 
 var (
@@ -489,10 +491,10 @@ func cleanUpTestProxy() {
 }
 
 func createControllerManagerForSuite() {
-	createControllerManager(false, "")
+	createControllerManager("")
 }
 
-func createControllerManager(disableMetrics bool, watchNamespace string) {
+func createControllerManager(watchNamespace string) {
 
 	managerCtx, managerCancel = context.WithCancel(ctx)
 
@@ -532,10 +534,7 @@ func createControllerManager(disableMetrics bool, watchNamespace string) {
 		},
 	}
 
-	if disableMetrics {
-		// if we can shutdown metrics port, we don't need disable it.
-		mgrOptions.Metrics.BindAddress = "0"
-	}
+	mgrOptions.Metrics.BindAddress = "0"
 
 	waitforever := time.Duration(-1)
 	mgrOptions.GracefulShutdownTimeout = &waitforever
@@ -898,7 +897,15 @@ func setUpK8sClient() {
 	Expect(k8sClient).NotTo(BeNil())
 }
 
+func isUnitOnlyRun() bool {
+	return GinkgoLabelFilter() == unitLabel
+}
+
 var _ = BeforeSuite(func() {
+	if isUnitOnlyRun() {
+		return
+	}
+
 	opts := zap.Options{
 		Development: true,
 		DestWriter:  GinkgoWriter,
@@ -962,6 +969,10 @@ func cleanUpPVC() {
 }
 
 var _ = AfterSuite(func() {
+	if isUnitOnlyRun() {
+		return
+	}
+
 	By("tearing down the test environment")
 	if os.Getenv("USE_EXISTING_CLUSTER") == "true" {
 		cleanUpPVC()
@@ -1046,6 +1057,13 @@ func StopCapturingLog() {
 }
 
 func BeforeEachSpec() {
+	if k8sClient == nil {
+		if !isUnitOnlyRun() {
+			Skip("requires a cluster (run with KUBEBUILDER_ASSETS or USE_EXISTING_CLUSTER=true)")
+		}
+		return
+	}
+
 	specCount++
 
 	//Print running spec

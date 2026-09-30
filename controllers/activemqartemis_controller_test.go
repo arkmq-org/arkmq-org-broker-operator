@@ -3793,7 +3793,7 @@ var _ = Describe("artemis controller", func() {
 				Expect(k8sClient.Get(ctx, pvcKey, pvc)).Should(Succeed())
 				Expect(len(pvc.OwnerReferences)).To(BeEquivalentTo(1))
 
-				createControllerManager(true, defaultNamespace)
+				createControllerManager(defaultNamespace)
 
 				// Expect the owner reference gets removed
 				Eventually(func(g Gomega) {
@@ -4965,7 +4965,7 @@ var _ = Describe("artemis controller", func() {
 			Expect(k8sClient.Get(ctx, key, createdSs)).ShouldNot(Succeed())
 
 			By("By starting reconciler for this namespace")
-			createControllerManager(true, nonDefaultNamespace)
+			createControllerManager(nonDefaultNamespace)
 
 			key = types.NamespacedName{Name: createdCrd.Name, Namespace: nonDefaultNamespace}
 
