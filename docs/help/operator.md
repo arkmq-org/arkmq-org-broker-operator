@@ -55,6 +55,8 @@ via corresponding Custom Resources (CRs). To enable regular users to deploy CRs,
 roles and permissions to the CRDs. For more information, see Creating cluster roles for Custom Resource Definitions in the 
 Kubernetes documentation.
 
+On OpenShift, the operator reads the cluster-wide TLS security profile from `apiservers.config.openshift.io/cluster` to enforce consistent TLS settings across broker acceptors and the Jolokia management endpoint. This requires a ClusterRole granting `get`, `list`, and `watch` on the `apiservers` resource in the `config.openshift.io` API group. When installing via OLM, the CSV declares this as a `clusterPermission` and OLM creates the necessary ClusterRole and ClusterRoleBinding automatically, regardless of install mode. For manual (non-OLM) deployments, including namespace-scoped installs, you must apply the ClusterRole and ClusterRoleBinding from the `deploy/` directory and ensure the ClusterRoleBinding references the correct namespace for the operator's ServiceAccount.
+
 When you update your cluster with the CRDs for the latest Operator version, this update affects all projects in the cluster. 
 Any broker Pods deployed from previous versions of the Operator might become unable to update their status. To fix this issue 
 for an affected project, you must also upgrade that project to use the latest version of the Operator.
