@@ -1242,7 +1242,7 @@ In order for the operator to be able to use mtls to connect to the Broker CR ope
 The default operator cert secret name is `arkmq-org-broker-manager-cert` and the default operator trust bundle secret name is `arkmq-org-broker-manager-ca`.
 If either of these secrets need to be named differently, an enviroment variable can provide the alternative name using key ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME or ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME.
 
-The Broker CR automatically configures control plane authentication for common services. For Prometheus metrics scraping, the operator reads the certificate from a prometheus cert secret and configures the broker to grant metrics access to that certificate's Common Name (CN). The operator first checks for a CR-specific secret `[cr-name]-[base-name]` (allowing per-CR isolation), then falls back to the shared `[base-name]` secret. The base name defaults to `prometheus-cert` but can be overridden using the BASE_PROMETHEUS_CERT_SECRET_NAME environment variable (e.g., if set to `custom-prometheus`, it checks `my-broker-custom-prometheus` then `custom-prometheus`).
+The Broker CR automatically configures control plane authentication for common services. For Prometheus metrics scraping, the operator reads the certificate from a prometheus cert secret and configures the broker to grant metrics access to that certificate's Common Name (CN). The operator first checks for a CR-specific secret `[cr-name]-[base-name]` (allowing per-CR isolation), then falls back to the shared `[base-name]` secret. The base name defaults to `prometheus-cert` but can be overridden using the BASE_PROMETHEUS_CERT_SECRET_NAME environment variable (e.g., if set to `custom-prometheus`, it checks `my-broker-custom-prometheus` then `custom-prometheus`). The same resolution decides which secret the generated `ServiceMonitor` references, so the override carries through to the scrape.
 
 ## Locking down a broker deployment
 
@@ -1366,6 +1366,228 @@ spec:
   - port: console-jolokia
 ```
 For a complete example please refer to this [arkmq-org example](https://github.com/arkmq-org/arkmq-examples/tree/main/operator/prometheus).
+
+### Scraping a BrokerService and its BrokerApps
+
+The section above is the manual route, for the `Broker` CR and its non-mTLS
+`console-jolokia` port. A `BrokerService` and its `BrokerApp`s need none of it:
+the operator generates the scrape wiring, and the broker labels each app's
+queue metrics with the app they belong to.
+
+Deploying a `BrokerService` generates, in its namespace, a `ServiceMonitor`
+named `<service>-metrics`. It scrapes the service's `metrics` port (`8888`) over
+mTLS, presenting the prometheus certificate, which the broker grants the broad
+`metrics` role: this one scrape collects every app's queues. A `BrokerApp`
+generates no scrape wiring of its own.
+
+#### Metrics and tenancy
+
+```mermaid
+flowchart LR
+    operator["Operator"]
+
+    subgraph svc["namespace svc-ns"]
+        broker["Broker pod<br/>metrics agent: one rule per queue,<br/>labelling it with its owner's namespace"]
+        sm["ServiceMonitor messaging-metrics"]
+    end
+
+    prom["Platform Prometheus"]
+
+    subgraph stored["Series, by namespace"]
+        s_svc["svc-ns<br/>JVM, process"]
+        s_a["tenant-a<br/>ORDERS"]
+        s_b["tenant-b<br/>b-client.news"]
+    end
+
+    svc_owner["Service owner<br/>reads svc-ns, tenant-a, tenant-b"]
+    b_owner["app-b's owner<br/>reads tenant-b, and tenant-a for ORDERS"]
+
+    operator -- "renders the agent config" --> broker
+    operator -- "generates" --> sm
+    sm -. "configures" .-> prom
+    prom -- "scrapes" --> broker
+    prom --> s_svc
+    prom --> s_a
+    prom --> s_b
+    s_svc --> svc_owner
+    s_a --> svc_owner
+    s_b --> svc_owner
+    s_b --> b_owner
+    s_a -. "read access to tenant-a" .-> b_owner
+```
+
+In this example `app-a`, in `tenant-a`, owns the anycast queue `ORDERS` and the
+topic `NEWS`. `app-b`, in `tenant-b`, consumes from `ORDERS` and subscribes to
+`NEWS` with its own queue `b-client.news`. Each queue is filed once, in its
+owner's namespace; who else reads it is a matter of access to that namespace.
+
+The broker labels the series of each queue an app declares with
+`namespace="<app namespace>"` and `brokerapp="<app>"`, and the generated
+`ServiceMonitor` sets `honorLabels: true` so a Prometheus keeps them. An app's
+queues are therefore filed in the app's namespace, while broker-wide series,
+JVM and process, stay in the service's. Whoever may read metrics in the app's
+namespace reads that app's queues, and nothing of the broker itself.
+
+Messages only live in queues, so metrics are per queue. A multicast address has
+no metrics of its own; sum its subscription queues, which carry it as the
+`address` label, for totals. A queue belongs to the app its messages are held
+for:
+
+- an anycast queue belongs to the app that declares the address;
+- a subscription queue belongs to the app that declares the subscription, the
+  consumer, not to the app that owns the multicast address.
+
+Queues nobody declares, such as those an MQTT client
+creates for an undeclared subscription, keep the service's namespace; give each
+app's MQTT clients a naming prefix of their own so such queues stay
+attributable.
+
+Each queue is filed once, in its owner's namespace, so reading a queue from
+elsewhere takes read access to metrics in the owner's namespace:
+
+- the service owner reads the service's namespace for the broker-wide series,
+  and every namespace whose apps may bind to the service for their queues. The
+  `BrokerService` lists the apps applied to it in `status.provisionedApps`,
+  each as `<namespace>/<name>@<generation>`;
+- an app's owner reads its own namespace, and for a queue owned by another app
+  it references, that app's namespace;
+- an app publishing to a topic reads its subscribers' namespaces to see their
+  backlog.
+
+Access is per namespace: reading a queue in another app's namespace means
+reading everything else filed there too.
+
+This isolates tenants only when metrics are queried through something that
+enforces the namespace, and an app's metrics are private to it only when the
+app has a **namespace of its own**. Anyone who can write monitoring objects in
+the service's namespace can label series with any namespace, so tenants must
+not have write access there. The alternatives considered are in
+[cross-namespace scraping](../design/cross-namespace-scraping.md).
+
+#### An app's own metrics identity
+
+The broker also lets each app read the metrics of the queues it is authorised
+on, and no others, by presenting its own `<app>-app-cert` on port `8888`: the
+Common Name maps to the app's `<namespace>-<app>-metrics` role. The operator
+generates no scrape for it. It is there for when the labelled scrape above does
+not give an app what it needs:
+
+- a scraper of the tenant's own, such as its own Prometheus or an agent
+  shipping metrics elsewhere, reads its queues without being handed the
+  prometheus identity, which sees every tenant's;
+- on a cluster without prometheus-operator the operator generates no scrape,
+  and this is how a tenant gets its queues at all;
+- where metrics are queried without namespace enforcement, the labels isolate
+  nothing, and the certificate is the only boundary;
+- where the Prometheus overrides the namespace label, as OpenShift's user
+  workload monitoring does, a scrape declared in the app's namespace lands
+  there regardless.
+
+Such a scrape is declared in the app's namespace, so its certificate resolves
+there. A `Probe` works everywhere, OpenShift user workload monitoring included:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: <app>-metrics
+  namespace: <app namespace>
+spec:
+  jobName: <app>-metrics
+  prober:
+    url: <service>-ss-0.<service>-hdls-svc.<service namespace>.svc.cluster.local:8888
+    scheme: https
+    path: /metrics
+  targets:
+    staticConfig:
+      static:
+        - <service>-ss-0.<service>-hdls-svc.<service namespace>.svc.cluster.local
+  tlsConfig:
+    serverName: <service>-ss-0.<service>-hdls-svc.<service namespace>.svc.cluster.local
+    ca:
+      secret: {name: arkmq-org-broker-manager-ca, key: ca.pem}
+    cert:
+      secret: {name: <app>-app-cert, key: tls.crt}
+    keySecret: {name: <app>-app-cert, key: tls.key}
+```
+
+The broker is its own prober here: the scrape goes to the prober URL and carries
+a `target` parameter the broker ignores. The identity is the certificate, so
+`<app>-app-cert` deserves the same care as any credential.
+
+The role scopes queue series only. The broker's JVM and process series, heap,
+threads, garbage collection and CPU, come from the metrics agent itself rather
+than from broker MBeans, so every identity that can scrape the endpoint gets
+them. They describe the shared broker, not any tenant's data, but they reflect
+the load all tenants put on it: a tenant scraping with its own certificate can
+observe the others' activity in aggregate. The labelled scrape files them in
+the service's namespace only.
+
+#### Prometheus requirements
+
+The operator generates the scrape wiring but never enables monitoring itself.
+
+**On OpenShift**, the scrape has to be done by platform monitoring: user
+workload monitoring replaces the namespace label with the `ServiceMonitor`'s
+own. OpenShift reserves platform monitoring for its core components and Red Hat
+certified operators, as described in
+[collecting metrics with the platform Prometheus](https://rhobs-handbook.netlify.app/products/openshiftmonitoring/collecting_metrics.md/#collecting-metrics-with-prometheus).
+A cluster admin labels the namespace holding the `BrokerService` and lets the
+platform Prometheus discover targets there:
+
+```bash
+oc label namespace <service namespace> openshift.io/cluster-monitoring=true
+oc create role prometheus-k8s -n <service namespace> \
+  --verb=get,list,watch --resource=services,endpoints,pods,endpointslices.discovery.k8s.io
+oc create rolebinding prometheus-k8s -n <service namespace> \
+  --role=prometheus-k8s --serviceaccount=openshift-monitoring:prometheus-k8s
+```
+
+User workload monitoring stops watching a namespace so labelled, so keep
+`BrokerService`s in a namespace of their own. Tenants then query their queues
+through the console or the Thanos querier for their own namespace.
+
+None of this needs user workload monitoring, which the platform Prometheus
+does not depend on. Enable it for what tenants do on their own: alerting and
+recording rules in a tenant's namespace are evaluated by its Thanos Ruler, and
+a scrape a tenant declares with its app certificate is collected by its
+Prometheus.
+
+**On other clusters**, a Prometheus selecting the label every generated object
+carries must be running:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: artemis-prometheus
+spec:
+  serviceMonitorSelector:
+    matchLabels:
+      broker.arkmq.org/monitoring: "true"
+  serviceMonitorNamespaceSelector: {}
+```
+
+An empty namespace selector means *all* namespaces; omitting it would restrict
+discovery to the Prometheus' own namespace. Isolating tenants additionally needs
+a query path that enforces the namespace, as OpenShift's does: kube-rbac-proxy
+and [prom-label-proxy](https://github.com/prometheus-community/prom-label-proxy)
+in front of Prometheus or Thanos. A Prometheus with `enforcedNamespaceLabel` set
+is not supported: it files every queue in the service's namespace.
+
+Generation is silently skipped, logged at verbosity 1, when the cluster does not
+serve the `monitoring.coreos.com` `ServiceMonitor` kind or when the certificate
+to scrape as cannot be resolved.
+
+**Install Prometheus and issue the certificates before creating a
+`BrokerService`.** Generation happens while reconciling, and the operator does
+not watch for prometheus-operator or the certificates appearing later, so a
+service created first keeps no scrape configuration. Restart the operator to pick
+them up:
+
+```bash
+kubectl rollout restart deployment/arkmq-org-broker-controller-manager -n <operator namespace>
+```
 
 ## Enabling Operator Metrics
 
