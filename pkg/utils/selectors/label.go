@@ -27,6 +27,11 @@ const (
 	LabelBrokerService   = "broker.arkmq.org/service"
 	LabelBrokerPeerIndex = "broker.arkmq.org/peer-index"
 
+	// LabelMonitoring marks the scrape wiring the operator generates. It is the
+	// single selector a Prometheus instance needs, so nothing has to be
+	// parametrized per service.
+	LabelMonitoring = "broker.arkmq.org/monitoring"
+
 	// Standard Kubernetes annotation keys
 	AnnotationStatefulSet        = "statefulsets.kubernetes.io/drainer-pod-owner"
 	AnnotationDrainerPodTemplate = "statefulsets.kubernetes.io/drainer-pod-template"
