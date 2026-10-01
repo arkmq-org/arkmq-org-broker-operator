@@ -33,6 +33,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,11 +41,10 @@ import (
 
 	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
 )
 
 var _ = Describe("minimal", func() {
-
-	var installedCertManager bool = false
 
 	BeforeEach(func() {
 		BeforeEachSpec()
@@ -57,7 +57,6 @@ var _ = Describe("minimal", func() {
 			//if cert manager/trust manager is not installed, install it
 			if !CertManagerInstalled() {
 				Expect(InstallCertManager()).To(Succeed())
-				installedCertManager = true
 			}
 
 			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
@@ -85,19 +84,157 @@ var _ = Describe("minimal", func() {
 	})
 
 	AfterEach(func() {
-		if false && os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			UnInstallCaBundle(common.DefaultOperatorCASecretName)
-			UninstallClusteredIssuer(caIssuerName)
-			UninstallCert(rootCert.Name, rootCert.Namespace)
-			UninstallClusteredIssuer(rootIssuerName)
-
-			if installedCertManager {
-				Expect(UninstallCertManager()).To(Succeed())
-				installedCertManager = false
-			}
-		}
-
 		AfterEachSpec()
+	})
+
+	Context("basic deploy", func() {
+		It("verify ss resource version", func() {
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				return
+			}
+
+			By("installing operator cert")
+			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
+				candidate.Spec.CommonName = "arkmq-org-broker-operator"
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
+
+			ctx := context.Background()
+
+			// empty CRD, name is used for cert subject to match the headless service
+			crd := v1beta2.Broker{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "Broker",
+					APIVersion: v1beta2.GroupVersion.Identifier(),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      NextSpecResourceName(),
+					Namespace: defaultNamespace,
+				},
+			}
+			crd.Spec.BrokerProperties = []string{
+				"messageCounterSamplePeriod=100",
+			}
+
+			sharedOperandCertName := common.DefaultOperandCertSecretName
+			By("installing restricted mtls broker cert")
+			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = sharedOperandCertName
+				candidate.Spec.CommonName = "arkmq-org-broker-operand"
+				candidate.Spec.DNSNames = []string{common.OrdinalFQDNS(crd.Name, defaultNamespace, 0)}
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
+
+			prometheusCertName := common.DefaultPrometheusCertSecretName
+			By("installing prometheus cert")
+			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = prometheusCertName
+				candidate.Spec.CommonName = "prometheus"
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
+
+			By("Deploying the CRD " + crd.Name)
+			Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
+
+			brokerKey := types.NamespacedName{Name: crd.Name, Namespace: crd.Namespace}
+			createdCrd := &v1beta2.Broker{}
+
+			By("Checking ready")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, brokerKey, createdCrd)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("CR RV: %s CR GEN: %d STATUS: %v\n\n", createdCrd.ResourceVersion, createdCrd.Generation, createdCrd.Status)
+				}
+				g.Expect(meta.IsStatusConditionTrue(createdCrd.Status.Conditions, v1beta2.ReadyConditionType)).Should(BeTrue())
+				g.Expect(meta.IsStatusConditionTrue(createdCrd.Status.Conditions, v1beta2.ConfigAppliedConditionType)).Should(BeTrue())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("Checking SS version")
+
+			var ssResourceVersion string
+			var ssGeneration int64
+
+			ssKey := types.NamespacedName{
+				Name:      namer.CrToSS(crd.Name),
+				Namespace: defaultNamespace,
+			}
+			currentSS := &appsv1.StatefulSet{}
+
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, ssKey, currentSS)).Should(Succeed())
+				g.Expect(currentSS.Status.ReadyReplicas).Should(BeEquivalentTo(1))
+				ssResourceVersion = currentSS.ResourceVersion
+				ssGeneration = currentSS.Generation
+
+				if verbose {
+					fmt.Printf("SS RV: %s GEN: %d STATUS: %v\n\n", currentSS.ResourceVersion, currentSS.Generation, currentSS.Status)
+				}
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("updating CR and verifying no rollout of SS")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, brokerKey, createdCrd)).Should(Succeed())
+				createdCrd.Spec.BrokerProperties = []string{
+					"messageCounterSamplePeriod=600",
+				}
+				g.Expect(k8sClient.Update(ctx, createdCrd)).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("Checking ready again at gen 2")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, brokerKey, createdCrd)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("AFTER UPDATE CR RV: %s CR GEN: %d STATUS: %v\n\n", createdCrd.ResourceVersion, createdCrd.Generation, createdCrd.Status)
+				}
+				g.Expect(meta.IsStatusConditionTrue(createdCrd.Status.Conditions, v1beta2.ReadyConditionType)).Should(BeTrue())
+				g.Expect(meta.IsStatusConditionTrue(createdCrd.Status.Conditions, v1beta2.ConfigAppliedConditionType)).Should(BeTrue())
+				g.Expect(createdCrd.Generation).To(BeEquivalentTo(2))
+				g.Expect(createdCrd.Status.ObservedGeneration).To(BeEquivalentTo(2))
+
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("verifying no ss update")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, ssKey, currentSS)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("AFTER SS RV: %s GEN: %d STATUS: %v\n\n", ssResourceVersion, currentSS.Generation, currentSS.Status)
+				}
+
+				g.Expect(currentSS.Status.ReadyReplicas).Should(BeEquivalentTo(1))
+				g.Expect(currentSS.ResourceVersion).To(Equal(ssResourceVersion))
+				g.Expect(currentSS.Generation).To(BeEquivalentTo(ssGeneration))
+
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			pod0Key := types.NamespacedName{
+				Name:      namer.CrToSSOrdinal(crd.Name, 0),
+				Namespace: defaultNamespace,
+			}
+			currentPod := &corev1.Pod{}
+
+			Expect(k8sClient.Get(ctx, pod0Key, currentPod)).Should(Succeed())
+
+			CleanResource(createdCrd, createdCrd.Name, defaultNamespace)
+
+			By("verifying pod not stuck in terminating")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, pod0Key, currentPod)).ShouldNot(Succeed())
+			}, "10s").Should(Succeed())
+
+		})
 	})
 
 	Context("restricted rbac", func() {

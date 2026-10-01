@@ -47,7 +47,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 )
 
-var _ = Describe("broker-service", func() {
+var _ = Describe("broker-service mqtt", func() {
 
 	var installedCertManager bool = false
 

@@ -1102,11 +1102,6 @@ func (in *BrokerSpec) DeepCopyInto(out *BrokerSpec) {
 		*out = new(v1.Probe)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.EnableMetricsPlugin != nil {
-		in, out := &in.EnableMetricsPlugin, &out.EnableMetricsPlugin
-		*out = new(bool)
-		**out = **in
-	}
 	if in.PodDisruptionBudget != nil {
 		in, out := &in.PodDisruptionBudget, &out.PodDisruptionBudget
 		*out = new(policyv1.PodDisruptionBudgetSpec)

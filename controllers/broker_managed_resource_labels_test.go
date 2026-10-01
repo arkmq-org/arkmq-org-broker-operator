@@ -171,13 +171,6 @@ var _ = Describe("broker managed resource labels", Label("broker-label-test"), f
 				assertManagedResourceTrackingLabels(g, propsSecret.Labels, brokerCr.Name, selectors.LabelBrokerKey, selectors.LabelActiveMQArtemisKey)
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("verifying scale label selector uses Broker tracking label")
-			Eventually(func(g Gomega) {
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: brokerCr.Name, Namespace: defaultNamespace}, &createdBrokerCr)).Should(Succeed())
-				g.Expect(createdBrokerCr.Status.ScaleLabelSelector).To(ContainSubstring(selectors.LabelBrokerKey + "=" + brokerCr.Name))
-				g.Expect(createdBrokerCr.Status.ScaleLabelSelector).NotTo(ContainSubstring(selectors.LabelActiveMQArtemisKey + "="))
-			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-
 			By("cleaning up")
 			CleanResource(&createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
 		})

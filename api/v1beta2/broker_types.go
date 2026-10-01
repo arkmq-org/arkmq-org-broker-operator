@@ -119,10 +119,6 @@ type BrokerSpec struct {
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Readiness Probe Configurations"
 	ReadinessProbe *corev1.Probe `json:"readinessProbe,omitempty"`
 
-	// Whether or not to install the Artemis metrics plugin.
-	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Enable Metrics Plugin",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:booleanSwitch"}
-	EnableMetricsPlugin *bool `json:"enableMetricsPlugin,omitempty"`
-
 	// Specifies the pod disruption budget.
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Pod Disruption Budget"
 	PodDisruptionBudget *policyv1.PodDisruptionBudgetSpec `json:"podDisruptionBudget,omitempty"`
@@ -156,9 +152,6 @@ type BrokerStatus struct {
 	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Pods Status",xDescriptors="urn:alm:descriptor:com.tectonic.ui:podStatuses"
 	PodStatus olm.DeploymentStatus `json:"podStatus"`
 
-	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Auto scale label selector"
-	ScaleLabelSelector string `json:"scaleLabelSelector,omitempty"`
-
 	// Current state of external referenced resources
 	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="External Configurations Status"
 	ExternalConfigs []ExternalConfigStatus `json:"externalConfigs,omitempty"`
@@ -168,6 +161,12 @@ type BrokerStatus struct {
 
 	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Upgrade Status"
 	Upgrade UpgradeStatus `json:"upgrade,omitempty"`
+
+	// observedGeneration is the most recent generation observed for this Broker. It corresponds to the
+	// Broker's generation, which is updated on Spec mutation by the API Server.
+	//+optional
+	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Observed Generation"
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 //+kubebuilder:object:root=true

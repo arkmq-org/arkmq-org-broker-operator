@@ -1168,9 +1168,6 @@ spec:
                         type: string
                     type: object
                 type: object
-              enableMetricsPlugin:
-                description: Whether or not to install the Artemis metrics plugin.
-                type: boolean
               env:
                 description: Optional list of environment variables to apply to the
                   broker container.
@@ -4780,6 +4777,12 @@ spec:
                   - resourceVersion
                   type: object
                 type: array
+              observedGeneration:
+                description: |-
+                  observedGeneration is the most recent generation observed for this Broker. It corresponds to the
+                  Broker's generation, which is updated on Spec mutation by the API Server.
+                format: int64
+                type: integer
               podStatus:
                 description: The current pods
                 properties:
@@ -4800,8 +4803,6 @@ spec:
                       type: string
                     type: array
                 type: object
-              scaleLabelSelector:
-                type: string
               upgrade:
                 properties:
                   majorUpdates:

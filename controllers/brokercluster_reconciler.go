@@ -137,7 +137,7 @@ type BrokerClusterReconcilerImpl struct {
 
 func NewBrokerClusterReconcilerImpl(customResource *v1beta2.BrokerCluster, parent *BrokerClusterReconciler) *BrokerClusterReconcilerImpl {
 	return &BrokerClusterReconcilerImpl{
-		log:                       withCRContext(parent.log, customResource.Name, customResource.Namespace),
+		log:                       withCRContext(parent.log, customResource.Kind, customResource.Name, customResource.Namespace),
 		customResource:            customResource,
 		scheme:                    parent.Scheme,
 		requestedResources:        make(map[reflect.Type]map[string]rtclient.Object),
@@ -3298,7 +3298,7 @@ type propertyFile struct {
 }
 
 func AssertBrokersAvailable(cr *v1beta2.BrokerCluster, client rtclient.Client) ArtemisError {
-	reqLogger := withCRContext(ctrl.Log, cr.Name, cr.Namespace)
+	reqLogger := withCRContext(ctrl.Log, cr.Kind, cr.Name, cr.Namespace)
 
 	// pre-condition, we must be deployed, avoid broker status roundtrip till ready
 	DeployedCondition := meta.FindStatusCondition(cr.Status.Conditions, v1beta2.DeployedConditionType)

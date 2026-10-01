@@ -657,6 +657,116 @@ func TestBrokerCR_ExtraBrokerPropertiesUserValueAppearsWithToken(t *testing.T) {
 		"brokerPropertiesConfigSystemPropValue must end with ,$(EXTRA_BROKER_PROPERTIES) when user has set it")
 }
 
+func TestRepeatedReconcileDoesNotUpdateStatefulSet(t *testing.T) {
+	certPEM, keyPEM := mustTestKeyPair(t)
+
+	ns := "test"
+	cr := &v1beta2.Broker{
+		ObjectMeta: v1.ObjectMeta{Name: "my-broker", Namespace: ns},
+	}
+
+	operandSecret := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{Name: common.DefaultOperandCertSecretName, Namespace: ns},
+		Data:       map[string][]byte{"tls.crt": certPEM, "tls.key": keyPEM},
+	}
+	operatorCert := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{Name: common.DefaultOperatorCertSecretName, Namespace: ns},
+		Data:       map[string][]byte{"tls.crt": certPEM, "tls.key": keyPEM},
+	}
+	operatorCA := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{Name: common.DefaultOperatorCASecretName, Namespace: ns},
+		Data:       map[string][]byte{"ca.pem": certPEM},
+	}
+
+	common.SetOperatorNameSpace(ns)
+	t.Cleanup(common.UnsetOperatorNameSpace)
+
+	k8sClient := fake.NewClientBuilder().WithObjects(operandSecret, operatorCert, operatorCA).Build()
+	r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	namer := MakeNamersForBroker(cr)
+
+	// First reconcile: generate desired PodTemplateSpec from scratch (no deployed state)
+	reconciler1 := NewBrokerReconcilerImpl(cr, r)
+	firstPTS, err := reconciler1.PodTemplateSpecForCR(cr, *namer, &appsv1.StatefulSet{}, k8sClient)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(firstPTS.Spec.InitContainers), "should have one sidecar init container")
+
+	// Build the "deployed" StatefulSet as Kubernetes would store it
+	deployed := &appsv1.StatefulSet{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      namer.SsNameBuilder.Name(),
+			Namespace: ns,
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Template: *firstPTS,
+		},
+	}
+
+	// Simulate Kubernetes API server applying defaults to all containers
+	applyServerSideDefaults := func(containers []corev1.Container) {
+		for i := range containers {
+			c := &containers[i]
+			if c.TerminationMessagePath == "" {
+				c.TerminationMessagePath = "/dev/termination-log"
+			}
+			if c.TerminationMessagePolicy == "" {
+				c.TerminationMessagePolicy = corev1.TerminationMessageReadFile
+			}
+			if c.ImagePullPolicy == "" {
+				c.ImagePullPolicy = corev1.PullIfNotPresent
+			}
+		}
+	}
+	applyServerSideDefaults(deployed.Spec.Template.Spec.InitContainers)
+	applyServerSideDefaults(deployed.Spec.Template.Spec.Containers)
+
+	// Second reconcile: generate desired using a clone of the deployed state as current
+	currentClone := deployed.DeepCopy()
+	reconciler2 := NewBrokerReconcilerImpl(cr, r)
+	secondPTS, err := reconciler2.PodTemplateSpecForCR(cr, *namer, currentClone, k8sClient)
+	assert.NoError(t, err)
+
+	requested := &appsv1.StatefulSet{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      namer.SsNameBuilder.Name(),
+			Namespace: ns,
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Template: *secondPTS,
+		},
+	}
+
+	t.Run("main container preserves server-side defaults", func(t *testing.T) {
+		deployedMain := deployed.Spec.Template.Spec.Containers[0]
+		requestedMain := requested.Spec.Template.Spec.Containers[0]
+		assert.Equal(t, deployedMain.TerminationMessagePath, requestedMain.TerminationMessagePath,
+			"MakeContainer reuses the deployed container, preserving TerminationMessagePath")
+		assert.Equal(t, deployedMain.ImagePullPolicy, requestedMain.ImagePullPolicy,
+			"MakeContainer reuses the deployed container, preserving ImagePullPolicy")
+	})
+
+	t.Run("sidecar container preserves server-side defaults from deployed state", func(t *testing.T) {
+		deployedSidecar := deployed.Spec.Template.Spec.InitContainers[0]
+		requestedSidecar := requested.Spec.Template.Spec.InitContainers[0]
+
+		assert.Equal(t, deployedSidecar.TerminationMessagePath, requestedSidecar.TerminationMessagePath,
+			"sidecar should preserve TerminationMessagePath from deployed state")
+		assert.Equal(t, deployedSidecar.TerminationMessagePolicy, requestedSidecar.TerminationMessagePolicy,
+			"sidecar should preserve TerminationMessagePolicy from deployed state")
+		assert.Equal(t, deployedSidecar.ImagePullPolicy, requestedSidecar.ImagePullPolicy,
+			"sidecar should preserve ImagePullPolicy from deployed state")
+	})
+
+	t.Run("CompareMetaAndSpec should detect no change on repeated reconcile", func(t *testing.T) {
+		isEqual := reconciler2.CompareMetaAndSpec(deployed, requested)
+		assert.True(t, isEqual,
+			"repeated reconcile should not detect changes in the StatefulSet; "+
+				"the sidecar init container is rebuilt from scratch each reconcile, losing "+
+				"server-side applied defaults (TerminationMessagePath, TerminationMessagePolicy, "+
+				"ImagePullPolicy), which causes a false diff and unnecessary StatefulSet update")
+	})
+}
+
 func TestBrokerCR_ExtraBrokerPropertiesValueFromPassedThrough(t *testing.T) {
 
 	// When the user sets EXTRA_BROKER_PROPERTIES via valueFrom (e.g. secretKeyRef or configMapKeyRef),

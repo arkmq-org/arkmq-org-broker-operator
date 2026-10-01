@@ -255,6 +255,7 @@ func (r *BrokerReconciler) UpdateBrokerCRStatus(desired *v1beta2.Broker, client 
 		return err
 	}
 
+	desired.Status.ObservedGeneration = desired.Generation
 	if !EqualBrokerCRStatus(&desired.Status, &current.Status) {
 		r.log.V(1).Info("cr.status update", "Namespace", desired.Namespace, "Name", desired.Name, "Observed status", desired.Status)
 		return resources.UpdateStatus(client, desired)
@@ -264,8 +265,7 @@ func (r *BrokerReconciler) UpdateBrokerCRStatus(desired *v1beta2.Broker, client 
 }
 
 func EqualBrokerCRStatus(s1, s2 *v1beta2.BrokerStatus) bool {
-	if s1.ScaleLabelSelector != s2.ScaleLabelSelector ||
-		!reflect.DeepEqual(s1.Version, s2.Version) ||
+	if !reflect.DeepEqual(s1.Version, s2.Version) ||
 		len(s2.ExternalConfigs) != len(s1.ExternalConfigs) ||
 		brokerExternalConfigsModified(s2.ExternalConfigs, s1.ExternalConfigs) ||
 		!reflect.DeepEqual(s1.PodStatus, s2.PodStatus) ||
@@ -322,13 +322,13 @@ func countOfDeployedBroker(reconciler *BrokerReconcilerImpl) (total int) {
 	return total
 }
 
-func withCRContext(logger logr.Logger, name, namespace string) logr.Logger {
-	return logger.WithValues("CRD.Name", name, "CRD.Namespace", namespace)
+func withCRContext(logger logr.Logger, kind, name, namespace string) logr.Logger {
+	return logger.WithValues("Kind", kind, "CRD.Name", name, "CRD.Namespace", namespace)
 }
 
 func NewBrokerReconcilerImpl(customResource *v1beta2.Broker, parent *BrokerReconciler) *BrokerReconcilerImpl {
 	return &BrokerReconcilerImpl{
-		log:                withCRContext(parent.log, customResource.Name, customResource.Namespace),
+		log:                withCRContext(parent.log, customResource.Kind, customResource.Name, customResource.Namespace),
 		customResource:     customResource,
 		scheme:             parent.Scheme,
 		requestedResources: make(map[reflect.Type]map[string]rtclient.Object),
@@ -340,8 +340,7 @@ func NewBrokerReconcilerImpl(customResource *v1beta2.Broker, parent *BrokerRecon
 
 func (reconciler *BrokerReconcilerImpl) Process(customResource *v1beta2.Broker, namer common.Namers, client rtclient.Client, scheme *runtime.Scheme) error {
 
-	reconciler.log.V(1).Info("Reconciler Processing...", "Operator version", version.Version, "ActiveMQArtemis release", customResource.Spec.Version)
-	reconciler.log.V(2).Info("Reconciler Processing...", "CRD ver", customResource.ResourceVersion, "CRD Gen", customResource.Generation)
+	reconciler.log.V(1).Info("Reconciler processing...", "CRD ver", customResource.ResourceVersion, "CRD Gen", customResource.Generation)
 
 	reconciler.CurrentDeployedResources(customResource, client)
 
@@ -378,8 +377,7 @@ func (reconciler *BrokerReconcilerImpl) Process(customResource *v1beta2.Broker, 
 		reconciler.log.Error(err, "error processing resources")
 	}
 
-	reconciler.log.V(1).Info("Reconciler Processing... complete", "CRD ver:", customResource.ResourceVersion, "CRD Gen:", customResource.Generation)
-
+	reconciler.log.V(1).Info("Reconciler processing...complete", "CRD ver", customResource.ResourceVersion, "CRD Gen", customResource.Generation)
 	// we don't requeue
 	return err
 }
@@ -1120,7 +1118,6 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	reconciler.configurePodSecurityContext(podSpec, customResource.Spec.PodSecurityContext)
 
 	pts.Spec = *podSpec
-	pts.Spec.InitContainers = nil
 
 	reEvalJdkOpts := generateReEvalOrdinaEnvReplacement(customResource.Spec.Env)
 
@@ -1129,40 +1126,42 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		fmt.Sprintf("export STATEFUL_SET_ORDINAL=${HOSTNAME##*-}; %s exec java %s $JAVA_ARGS_APPEND org.apache.activemq.artemis.core.server.embedded.Main", reEvalJdkOpts, strings.Join(additionalSystemProps, " ")),
 	}
 
+	// Reuse the existing sidecar container from the deployed state (if present)
+	// to preserve server-side applied defaults, same pattern as MakeContainer.
+	sidecarContainer := existingInitContainer(pts.Spec.InitContainers, sidecarContainerName)
+
 	// The sidecar reuses the broker image to avoid an additional image pull.
 	// Since the main container already pulls this image, all layers are cached
 	// on the node — the sidecar rootfs is a zero-cost overlay mount. The
 	// command override runs only the status script, not the broker. Both
 	// containers share the same pod (network, SA token, volumes), so using
 	// the broker image does not widen the attack surface.
+
 	sidecarRestartPolicy := corev1.ContainerRestartPolicyAlways
-	sidecarContainer := corev1.Container{
-		Name:          sidecarContainerName,
-		Image:         brokerversion.ResolveImage(customResource, common.BrokerImageKey),
-		Command:       []string{"/bin/bash", path.Join(sidecarSecretPath, brokerStatusScriptKey)},
-		RestartPolicy: &sidecarRestartPolicy,
-		Env: []corev1.EnvVar{
-			{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{
-				FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.name"},
-			}},
-			{Name: "POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{
-				FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.namespace"},
-			}},
-			{Name: "RELOAD_LOG_PATH", Value: path.Join(brokervolumes.DataMountPath, "log", "event_stream.log")},
-		},
-		VolumeMounts: []corev1.VolumeMount{
-			{Name: customResource.Name, MountPath: brokervolumes.DataMountPath, ReadOnly: true},
-			sidecarVolumeMount,
-		},
-		Resources: corev1.ResourceRequirements{
-			Limits: corev1.ResourceList{
-				corev1.ResourceMemory: resource.MustParse("8Mi"),
-				corev1.ResourceCPU:    resource.MustParse("10m"),
-			},
+	sidecarContainer.Image = brokerversion.ResolveImage(customResource, common.BrokerImageKey)
+	sidecarContainer.Command = []string{"/bin/bash", path.Join(sidecarSecretPath, brokerStatusScriptKey)}
+	sidecarContainer.RestartPolicy = &sidecarRestartPolicy
+	sidecarContainer.Env = []corev1.EnvVar{
+		{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.name"},
+		}},
+		{Name: "POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.namespace"},
+		}},
+		{Name: "RELOAD_LOG_PATH", Value: path.Join(brokervolumes.DataMountPath, "log", "event_stream.log")},
+	}
+	sidecarContainer.VolumeMounts = []corev1.VolumeMount{
+		{Name: customResource.Name, MountPath: brokervolumes.DataMountPath, ReadOnly: true},
+		sidecarVolumeMount,
+	}
+	sidecarContainer.Resources = corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse("8Mi"),
+			corev1.ResourceCPU:    resource.MustParse("10m"),
 		},
 	}
-	reconciler.configureContainerSecurityContext(&sidecarContainer, customResource.Spec.ContainerSecurityContext)
-	pts.Spec.InitContainers = []corev1.Container{sidecarContainer}
+	reconciler.configureContainerSecurityContext(sidecarContainer, customResource.Spec.ContainerSecurityContext)
+	pts.Spec.InitContainers = []corev1.Container{*sidecarContainer}
 
 	reqLogger.V(2).Info("Final Init spec", "Detail", pts.Spec.InitContainers)
 
@@ -1359,7 +1358,7 @@ func (reconciler *BrokerReconcilerImpl) addResourceForBrokerProperties(customRes
 	data := brokerproperties.BrokerPropertiesData(reconciler.customResource.Spec.BrokerProperties)
 
 	if desired == nil {
-		reconciler.log.V(1).Info("desired brokerprop secret nil, create new one", "name", resourceName.Name)
+		reconciler.log.V(2).Info("desired brokerprop secret nil, create new one", "name", resourceName.Name)
 		secret := secrets.MakeSecret(resourceName, data, namer.LabelBuilder.Labels())
 		desired = &secret
 	} else {
@@ -1675,7 +1674,7 @@ func (reconciler *BrokerReconcilerImpl) ProcessBrokerStatus(cr *v1beta2.Broker, 
 }
 
 func AssertBrokersAvailableForBroker(cr *v1beta2.Broker) ArtemisError {
-	reqLogger := withCRContext(ctrl.Log, cr.Name, cr.Namespace)
+	reqLogger := withCRContext(ctrl.Log, cr.Kind, cr.Name, cr.Namespace)
 
 	// pre-condition, we must be deployed, avoid broker status roundtrip till ready
 	DeployedCondition := meta.FindStatusCondition(cr.Status.Conditions, v1beta2.DeployedConditionType)
@@ -2368,6 +2367,15 @@ func (reconciler *BrokerReconcilerImpl) ensureSidecarConfig(client rtclient.Clie
 	}
 
 	return nil
+}
+
+func existingInitContainer(initContainers []corev1.Container, name string) *corev1.Container {
+	for _, c := range initContainers {
+		if c.Name == name {
+			return &c
+		}
+	}
+	return &corev1.Container{Name: name}
 }
 
 // Controller Errors

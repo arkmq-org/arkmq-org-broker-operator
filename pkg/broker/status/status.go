@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
 
 	"github.com/RHsyseng/operator-utils/pkg/olm"
@@ -35,8 +34,6 @@ func ProcessStatus(cr *v1beta2.Broker, client rtclient.Client, namespacedName ty
 	reqLogger := ctrl.Log.WithName("util_process_status").WithValues("ActiveMQArtemis Name", cr.Name)
 
 	updateVersionStatus(cr)
-
-	updateScaleStatus(cr, namer)
 
 	cr.Status.PodStatus = updatePodStatus(client, namespacedName)
 
@@ -99,18 +96,6 @@ func updateVersionStatus(cr *v1beta2.Broker) {
 			}
 		}
 	}
-}
-
-func updateScaleStatus(cr *v1beta2.Broker, n common.Namers) {
-	labels := make([]string, 0, len(n.LabelBuilder.Labels())+len(cr.Spec.Labels))
-	for k, v := range n.LabelBuilder.Labels() {
-		labels = append(labels, fmt.Sprintf("%s=%s", k, v))
-	}
-	for k, v := range cr.Spec.Labels {
-		labels = append(labels, fmt.Sprintf("%s=%s", k, v))
-	}
-	sort.Strings(labels)
-	cr.Status.ScaleLabelSelector = strings.Join(labels[:], ",")
 }
 
 func updatePodStatus(client rtclient.Client, namespacedName types.NamespacedName) olm.DeploymentStatus {
