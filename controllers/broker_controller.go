@@ -1076,19 +1076,6 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	}
 	podSpec.TerminationGracePeriodSeconds = &terminationGracePeriodSeconds
 
-	//tell container don't config
-	envConfigBroker := corev1.EnvVar{
-		Name:  "CONFIG_BROKER",
-		Value: "false",
-	}
-	environments.Create(podSpec.Containers, &envConfigBroker)
-
-	envBrokerCustomInstanceDir := corev1.EnvVar{
-		Name:  "CONFIG_INSTANCE_DIR",
-		Value: brokerConfigRoot,
-	}
-	environments.Create(podSpec.Containers, &envBrokerCustomInstanceDir)
-
 	// JAAS Config
 	if jaasConfigPath, found := brokerproperties.GetJaasConfigExtraMountPath(customResource.Spec.ExtraMounts); found {
 		debugArgs := corev1.EnvVar{
@@ -1627,41 +1614,8 @@ func (reconciler *BrokerReconcilerImpl) PersistentVolumeClaimArrayForCR(customRe
 }
 
 func MakeEnvVarArrayForCRForBroker(customResource *v1beta2.Broker, namer common.Namers) []corev1.EnvVar {
-
-	const requireLogin = "false"
-	const journalType = "nio"
-	const jolokiaAgentEnabled = "true"
-	const managementRBACEnabled = "true"
-
-	var metricsPluginEnabled string
-	if customResource.Spec.EnableMetricsPlugin != nil {
-		metricsPluginEnabled = strconv.FormatBool(*customResource.Spec.EnableMetricsPlugin)
-	}
-
-	envVar := []corev1.EnvVar{}
-	envVarArrayForBasic := environments.AddEnvVarForBasic(requireLogin, journalType, namer.SvcPingNameBuilder.Name())
-	envVar = append(envVar, envVarArrayForBasic...)
-	if customResource.Spec.PersistenceEnabled {
-		envVarArrayForPresistent := environments.AddEnvVarForPersistent(customResource.Name)
-		envVar = append(envVar, envVarArrayForPresistent...)
-	}
-
-	envVarArrayForCluster := environments.AddEnvVarForCluster(false)
-	envVar = append(envVar, envVarArrayForCluster...)
-
-	envVarArrayForJolokia := environments.AddEnvVarForJolokia(jolokiaAgentEnabled)
-	envVar = append(envVar, envVarArrayForJolokia...)
-
-	envVarArrayForManagement := environments.AddEnvVarForManagement(managementRBACEnabled)
-	envVar = append(envVar, envVarArrayForManagement...)
-
-	envVarArrayForMetricsPlugin := environments.AddEnvVarForMetricsPlugin(metricsPluginEnabled)
-	envVar = append(envVar, envVarArrayForMetricsPlugin...)
-
-	// Env from CR will override
-	envVar = environments.ReplaceOrAppend(envVar, customResource.Spec.Env...)
-
-	return envVar
+	// Broker CR bypasses launch.sh so no AMQ_* or CONFIG_* vars needed
+	return append([]corev1.EnvVar{}, customResource.Spec.Env...)
 }
 
 func (reconciler *BrokerReconcilerImpl) ProcessBrokerStatus(cr *v1beta2.Broker, client rtclient.Client, scheme *runtime.Scheme) (retry bool) {

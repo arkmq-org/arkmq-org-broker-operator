@@ -35,6 +35,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/jolokia_client"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -734,4 +735,40 @@ func TestBrokerCR_ExtraBrokerPropertiesValueFromPassedThrough(t *testing.T) {
 				"brokerPropertiesConfigSystemPropValue must end with ,$(EXTRA_BROKER_PROPERTIES)")
 		})
 	}
+}
+
+func TestMakeEnvVarArrayForCRForBroker_EmptyEnv(t *testing.T) {
+	cr := &v1beta2.Broker{
+		ObjectMeta: v1.ObjectMeta{Name: "broker"},
+		Spec:       v1beta2.BrokerSpec{},
+	}
+
+	namer := MakeNamersForBroker(cr)
+	envVars := MakeEnvVarArrayForCRForBroker(cr, *namer)
+
+	assert.Empty(t, envVars, "Broker CR with empty Spec.Env must produce no env vars")
+}
+
+func TestMakeEnvVarArrayForCRForBroker_SpecEnvPassedThrough(t *testing.T) {
+	cr := &v1beta2.Broker{
+		ObjectMeta: v1.ObjectMeta{Name: "broker"},
+		Spec: v1beta2.BrokerSpec{
+			Env: []corev1.EnvVar{
+				{Name: "MY_VAR", Value: "my-value"},
+				{Name: "AMQ_NAME", Value: "my-custom-broker"},
+				{Name: "ANOTHER_VAR", Value: "another-value"},
+			},
+		},
+	}
+
+	namer := MakeNamersForBroker(cr)
+	envVars := MakeEnvVarArrayForCRForBroker(cr, *namer)
+
+	require.Len(t, envVars, 3)
+	assert.Equal(t, "MY_VAR", envVars[0].Name)
+	assert.Equal(t, "my-value", envVars[0].Value)
+	assert.Equal(t, "AMQ_NAME", envVars[1].Name)
+	assert.Equal(t, "my-custom-broker", envVars[1].Value)
+	assert.Equal(t, "ANOTHER_VAR", envVars[2].Name)
+	assert.Equal(t, "another-value", envVars[2].Value)
 }

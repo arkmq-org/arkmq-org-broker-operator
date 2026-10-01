@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -176,6 +177,59 @@ var _ = Describe("broker managed resource labels", Label("broker-label-test"), f
 				g.Expect(createdBrokerCr.Status.ScaleLabelSelector).To(ContainSubstring(selectors.LabelBrokerKey + "=" + brokerCr.Name))
 				g.Expect(createdBrokerCr.Status.ScaleLabelSelector).NotTo(ContainSubstring(selectors.LabelActiveMQArtemisKey + "="))
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("cleaning up")
+			CleanResource(&createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
+		})
+
+		It("broker pod has no unnecessary AMQ env vars", func() {
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				return
+			}
+
+			brokerCr := generateBrokerCRSpec(defaultNamespace)
+			installRestrictedBrokerCerts(brokerCr.Name)
+
+			By("deploying a Broker CR")
+			Expect(k8sClient.Create(ctx, &brokerCr)).Should(Succeed())
+
+			createdBrokerCr := v1beta2.Broker{}
+			Eventually(func() bool {
+				return getPersistedVersionedCrd(brokerCr.Name, defaultNamespace, &createdBrokerCr)
+			}, timeout, interval).Should(BeTrue())
+
+			By("waiting for the broker pod to be running")
+			WaitForPod(brokerCr.Name)
+
+			By("verifying the broker container has no unnecessary environment variables")
+			podKey := types.NamespacedName{
+				Name:      namer.CrToSSOrdinal(brokerCr.Name, 0),
+				Namespace: defaultNamespace,
+			}
+
+			pod := &corev1.Pod{}
+			Expect(k8sClient.Get(ctx, podKey, pod)).Should(Succeed())
+
+			var brokerContainer *corev1.Container
+			for i := range pod.Spec.Containers {
+				if pod.Spec.Containers[i].Name == brokerCr.Name+"-container" {
+					brokerContainer = &pod.Spec.Containers[i]
+					break
+				}
+			}
+
+			Expect(brokerContainer).NotTo(BeNil(), "broker container should exist")
+
+			for _, env := range brokerContainer.Env {
+				Expect(strings.HasPrefix(env.Name, "AMQ_")).To(
+					BeFalse(),
+					"broker container must not have AMQ_* env vars, found: %s", env.Name,
+				)
+				Expect(env.Name).NotTo(Equal("CONFIG_BROKER"),
+					"broker container must not have CONFIG_BROKER (shell-script var)")
+				Expect(env.Name).NotTo(Equal("CONFIG_INSTANCE_DIR"),
+					"broker container must not have CONFIG_INSTANCE_DIR (shell-script var)")
+			}
 
 			By("cleaning up")
 			CleanResource(&createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
