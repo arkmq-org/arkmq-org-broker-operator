@@ -20002,7 +20002,7 @@ spec:
                   type: object
                 type: array
               provisionedApps:
-                description: List of BrokerApp identities that have been applied to the service
+                description: BrokerApps that have been applied to the service, each as <namespace>/<name>
                 items:
                   type: string
                 type: array
@@ -20243,7 +20243,11 @@ rules:
   - servicemonitors
   verbs:
   - create
+  - delete
   - get
+  - list
+  - update
+  - watch
 - apiGroups:
   - networking.k8s.io
   resources:

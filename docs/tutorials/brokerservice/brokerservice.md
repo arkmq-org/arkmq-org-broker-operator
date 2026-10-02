@@ -16,7 +16,7 @@ This tutorial builds a realistic event-driven order-processing pipeline on Kuber
 
 The pipeline processes orders through four stages — generation, processing, shipping, and delivery — each running as a separate Camel JMS application connected to a shared Apache Artemis broker. Every stage communicates exclusively through the broker using mTLS, with access enforced by `BrokerApp` RBAC so each application can only read from and write to the queues it owns.
 
-The broker is deployed as a `BrokerService`, which the ArkMQ Operator manages automatically: it provisions the StatefulSet, configures per-application acceptors, and exposes Prometheus metrics on port 8888. A `ServiceMonitor` tells Prometheus where to scrape, and a Grafana dashboard visualizes memory usage and queue depth in real time.
+The broker is deployed as a `BrokerService`, which the ArkMQ Operator manages automatically: it provisions the StatefulSet, configures per-application acceptors, and exposes Prometheus metrics on port 8888. It also generates the `ServiceMonitor` that tells Prometheus where to scrape, and a Grafana dashboard visualizes memory usage and queue depth in real time.
 
 The three scenario sections at the end let you interactively create a processing bottleneck, diagnose the resulting backlog in Grafana, and recover by scaling the bottleneck deployment.
 
@@ -122,91 +122,118 @@ You can view the list of minikube maintainers at: https://github.com/kubernetes/
 
 ### Build the Camel Pipeline Image
 
-The Camel pipeline image is built using your local Docker daemon (which has
-internet access for Maven dependencies) and then loaded directly into Minikube.
+The Camel pipeline image is built by your local container tool (which has
+internet access for Maven dependencies) and then loaded into Minikube. Either
+`docker` or `podman` works; the image is handed to Minikube as a tar archive so
+the step does not depend on which one you have.
 The source lives alongside this tutorial in [`camel-jms-app/`](camel-jms-app/).
 The `Containerfile` is a multi-stage build — Maven and the JDK run inside the
 builder container, so no local JDK or Maven installation is required.
 
 ```bash {"stage":"init", "label":"build camel jms image", "rootdir":"$initial_dir", "runtime":"bash"}
-docker build -f docs/tutorials/brokerservice/camel-jms-app/Containerfile docs/tutorials/brokerservice/camel-jms-app/ -t camel-jms-app:latest
-minikube image load camel-jms-app:latest --profile brokerservice-monitoring
+CONTAINER_TOOL=$(command -v docker || command -v podman)
+if [ -z "${CONTAINER_TOOL}" ]; then
+  echo "Neither docker nor podman was found on PATH" >&2
+  exit 1
+fi
+
+"${CONTAINER_TOOL}" build \
+  -f docs/tutorials/brokerservice/camel-jms-app/Containerfile \
+  docs/tutorials/brokerservice/camel-jms-app/ \
+  -t camel-jms-app:latest
+
+# minikube image load reads a name from the docker daemon, which podman does not
+# populate, so go through a tar archive instead
+CAMEL_IMAGE_TAR=$(mktemp -t camel-jms-app-XXXXXX.tar)
+"${CONTAINER_TOOL}" save camel-jms-app:latest -o "${CAMEL_IMAGE_TAR}"
+minikube image load "${CAMEL_IMAGE_TAR}" --profile brokerservice-monitoring
+rm -f "${CAMEL_IMAGE_TAR}"
+
+# podman normalises an unqualified build tag to localhost/<name> while docker
+# keeps it bare. The deployments reference the bare name, so add it when the
+# prefixed one is what landed.
+if minikube image ls --profile brokerservice-monitoring | grep -qx 'localhost/camel-jms-app:latest'; then
+  minikube image tag localhost/camel-jms-app:latest camel-jms-app:latest \
+    --profile brokerservice-monitoring
+fi
 ```
 ```shell markdown_runner
-#0 building with "default" instance using docker driver
+[1/2] STEP 1/8: FROM registry.access.redhat.com/ubi9/openjdk-21 AS builder
+[1/2] STEP 2/8: USER root
+--> c89f634500be
+[1/2] STEP 3/8: WORKDIR /build
+--> 66241d4bb930
+[1/2] STEP 4/8: RUN microdnf install -y maven --setopt=install_weak_deps=0 && microdnf clean all
+Downloading metadata...
+Downloading metadata...
+Downloading metadata...
+Nothing to do.
+Complete.
+--> 6d08da2ea51f
+[1/2] STEP 5/8: COPY pom.xml pom.xml
+--> 6647bed66d7a
+[1/2] STEP 6/8: RUN mvn dependency:resolve-plugins dependency:resolve -q
+--> cb9bd38cf145
+[1/2] STEP 7/8: COPY src/ src/
+--> b21e4b2e005b
+[1/2] STEP 8/8: RUN mvn package -DskipTests -q
+--> 258a3ee45a1f
+[2/2] STEP 1/11: FROM registry.access.redhat.com/ubi9/openjdk-21-runtime
+[2/2] STEP 2/11: ENV LANGUAGE='en_US:en'
+--> 06e713251d83
+[2/2] STEP 3/11: COPY --chown=185 --from=builder /build/target/quarkus-app/lib/       /deployments/lib/
+--> f302c522e050
+[2/2] STEP 4/11: COPY --chown=185 --from=builder /build/target/quarkus-app/*.jar       /deployments/
+--> d01ec5ab9c3c
+[2/2] STEP 5/11: COPY --chown=185 --from=builder /build/target/quarkus-app/app/        /deployments/app/
+--> 70ac21b2361a
+[2/2] STEP 6/11: COPY --chown=185 --from=builder /build/target/quarkus-app/quarkus/    /deployments/quarkus/
+--> af54ee6b0756
+[2/2] STEP 7/11: EXPOSE 8080
+--> a04a566b01ca
+[2/2] STEP 8/11: USER 185
+--> 321b10d16aaf
+[2/2] STEP 9/11: ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=127.0.0.1 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -Xbootclasspath/a:/deployments/lib/main/de.dentrassi.crypto.pem-keystore-3.0.0.jar:/deployments/lib/main/com.hierynomus.asn-one-0.6.0.jar:/deployments/lib/main/org.slf4j.slf4j-api-2.0.18.jar -Djava.security.properties=/app/tls/pem/java.security"
+--> 4d560376f072
+[2/2] STEP 10/11: ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
+--> 7ace9f3b0b74
+[2/2] STEP 11/11: ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
+[2/2] COMMIT camel-jms-app:latest
+--> ebd8492d032d
+Successfully tagged localhost/camel-jms-app:latest
+ebd8492d032d3e6c4cd41829e55fa4b775ee0769704bcbe804617022bd6961f2
+Trying to pull registry.access.redhat.com/ubi9/openjdk-21:latest...
+Getting image source signatures
+Checking if image destination supports signatures
+Copying blob sha256:207da760819c8247a463fb2268005066114a491e5b3e296fcd0b7a79400b2f1e
+Copying blob sha256:eb6cbddf5f403250ac934b73c78eb43e655a49768a13d13e279ba79d950d145f
+Copying config sha256:a68923bc3ba9d685d18e3c6df60a529aa88b526573df468061c73fb9defc994c
+Writing manifest to image destination
+Storing signatures
 
-#1 [internal] load build definition from Containerfile
-#1 transferring dockerfile: 1.43kB done
-#1 DONE 0.0s
+(microdnf:2): librhsm-WARNING **: 11:46:19.570: Found 0 entitlement certificates
 
-#2 [internal] load metadata for registry.access.redhat.com/ubi9/openjdk-21:latest
-#2 ...
+(microdnf:2): librhsm-WARNING **: 11:46:19.571: Found 0 entitlement certificates
 
-#3 [internal] load metadata for registry.access.redhat.com/ubi9/openjdk-21-runtime:latest
-#3 DONE 0.4s
+(microdnf:1): librhsm-WARNING **: 11:46:20.562: Found 0 entitlement certificates
 
-#2 [internal] load metadata for registry.access.redhat.com/ubi9/openjdk-21:latest
-#2 DONE 0.4s
-
-#4 [internal] load .dockerignore
-#4 transferring context: 217B done
-#4 DONE 0.0s
-
-#5 [internal] load build context
-#5 DONE 0.0s
-
-#6 [builder 1/7] FROM registry.access.redhat.com/ubi9/openjdk-21:latest@sha256:40929d99200a97ae859994d3a41080befb871c26ae116f7d24bc9aeaa7d31d46
-#6 resolve registry.access.redhat.com/ubi9/openjdk-21:latest@sha256:40929d99200a97ae859994d3a41080befb871c26ae116f7d24bc9aeaa7d31d46 0.1s done
-#6 DONE 0.1s
-
-#7 [stage-1 1/5] FROM registry.access.redhat.com/ubi9/openjdk-21-runtime:latest@sha256:f10cc334bd39f39ad35bcefc5ac0ce1ad25bda499f6abf73ccb8afdd1ea6d3c1
-#7 resolve registry.access.redhat.com/ubi9/openjdk-21-runtime:latest@sha256:f10cc334bd39f39ad35bcefc5ac0ce1ad25bda499f6abf73ccb8afdd1ea6d3c1 0.1s done
-#7 DONE 0.1s
-
-#5 [internal] load build context
-#5 transferring context: 21.73kB done
-#5 DONE 0.0s
-
-#8 [stage-1 2/5] COPY --chown=185 --from=builder /build/target/quarkus-app/lib/       /deployments/lib/
-#8 CACHED
-
-#9 [builder 6/7] COPY src/ src/
-#9 CACHED
-
-#10 [builder 2/7] WORKDIR /build
-#10 CACHED
-
-#11 [stage-1 3/5] COPY --chown=185 --from=builder /build/target/quarkus-app/*.jar       /deployments/
-#11 CACHED
-
-#12 [builder 5/7] RUN mvn dependency:resolve-plugins dependency:resolve -q
-#12 CACHED
-
-#13 [builder 7/7] RUN mvn package -DskipTests -q
-#13 CACHED
-
-#14 [stage-1 4/5] COPY --chown=185 --from=builder /build/target/quarkus-app/app/        /deployments/app/
-#14 CACHED
-
-#15 [builder 3/7] RUN microdnf install -y maven --setopt=install_weak_deps=0 && microdnf clean all
-#15 CACHED
-
-#16 [builder 4/7] COPY pom.xml pom.xml
-#16 CACHED
-
-#17 [stage-1 5/5] COPY --chown=185 --from=builder /build/target/quarkus-app/quarkus/    /deployments/quarkus/
-#17 CACHED
-
-#18 exporting to image
-#18 exporting layers done
-#18 exporting manifest sha256:7ec3c5074e20334c6fcaab1e44a352c72ff106940d1572b1ff3a1b93a3995d73 done
-#18 exporting config sha256:026c59c2230ae766a5a6f6dc34fd59e2c8c4778a971e1576fa46fc79bfd4455a done
-#18 exporting attestation manifest sha256:649c3c636d40884ab73092455503e4ecdd87c139aa7eefb342d60bec78eb8035
-#18 exporting attestation manifest sha256:649c3c636d40884ab73092455503e4ecdd87c139aa7eefb342d60bec78eb8035 0.0s done
-#18 exporting manifest list sha256:f4452bccb929c1a82c29d440d25ac10b3cd0e0818a211eb030d73ad9907f120d 0.0s done
-#18 naming to docker.io/library/camel-jms-app:latest done
-#18 unpacking to docker.io/library/camel-jms-app:latest 0.0s done
-#18 DONE 0.1s
+(microdnf:1): librhsm-WARNING **: 11:46:20.563: Found 0 entitlement certificates
+Trying to pull registry.access.redhat.com/ubi9/openjdk-21-runtime:latest...
+Getting image source signatures
+Checking if image destination supports signatures
+Copying blob sha256:6e30b8bbcac0f26e0bed25820e66283110ca62b30a9c55bf6d441c49c6c1d3ca
+Copying blob sha256:207da760819c8247a463fb2268005066114a491e5b3e296fcd0b7a79400b2f1e
+Copying config sha256:42aa29730f7e14815bf8b62c19bf107a45e5b1e08c1e0d32d68c97fd0e0310e8
+Writing manifest to image destination
+Storing signatures
+Copying blob sha256:15bd75a4e0d9c6eb2dca6324dca83e1c68d5eadc93d821b6201290e0f244e42b
+Copying blob sha256:b6acd93080909baef2f968dde1481778fa832ac6750964894e209f206c0e76a0
+Copying blob sha256:5ed4b882a59c46831a9645f5fe06efe0c6fa04cad8dccd890b9067b3892af095
+Copying blob sha256:5bd296c84f61e94ee5a7073bb1634ba1aea98a5229a50738eb3253a3e6182166
+Copying blob sha256:a34855efb70bf61a81d8c1e02485ded51be18c8a518455f1e89c9f167b1c0e9a
+Copying blob sha256:b346bc1ef3f6fe2b4293ec9985372b2d00e6bd1804a178cc5c47ec034dec249d
+Copying config sha256:ebd8492d032d3e6c4cd41829e55fa4b775ee0769704bcbe804617022bd6961f2
+Writing manifest to image destination
 ```
 
 The first build takes a few minutes while Maven downloads dependencies and
@@ -279,17 +306,37 @@ deployment.apps/cert-manager created
 deployment.apps/cert-manager-webhook created
 mutatingwebhookconfiguration.admissionregistration.k8s.io/cert-manager-webhook created
 validatingwebhookconfiguration.admissionregistration.k8s.io/cert-manager-webhook created
+Warning: unrecognized format "int32"
+Warning: unrecognized format "int64"
 ```
 
 Wait for `cert-manager` to be ready:
 
 ```bash {"stage":"init", "label":"wait for cert-manager", "runtime":"bash"}
 kubectl wait deployment --for=condition=Available -n cert-manager --timeout=600s cert-manager cert-manager-cainjector cert-manager-webhook
+
+# The webhook reports Available before it accepts connections, and trust-manager's
+# Certificate and Issuer are rejected until it does. Probe it with a server-side
+# dry run, which is validated by the webhook but creates nothing.
+until kubectl apply --dry-run=server -f - >/dev/null 2>&1 <<'EOF'
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: webhook-readiness-probe
+  namespace: cert-manager
+spec:
+  selfSigned: {}
+EOF
+do
+  echo "Waiting for the cert-manager webhook to answer" && sleep 5
+done
+echo "cert-manager webhook is answering"
 ```
 ```shell markdown_runner
 deployment.apps/cert-manager condition met
 deployment.apps/cert-manager-cainjector condition met
 deployment.apps/cert-manager-webhook condition met
+cert-manager webhook is answering
 ```
 
 ### Install Trust Manager
@@ -307,10 +354,11 @@ helm upgrade trust-manager jetstack/trust-manager --install --namespace cert-man
 ```shell markdown_runner
 Release "trust-manager" does not exist. Installing it now.
 NAME: trust-manager
-LAST DEPLOYED: Fri Sep 18 11:13:58 2026
+LAST DEPLOYED: Fri Oct  2 13:47:36 2026
 NAMESPACE: cert-manager
 STATUS: deployed
 REVISION: 1
+DESCRIPTION: Install complete
 TEST SUITE: None
 NOTES:
 ⚠️  WARNING: Consider increasing the Helm value `replicaCount` to 2 if you require high availability.
@@ -328,6 +376,7 @@ with creating your first bundle, check out the documentation on the
 cert-manager website:
 
 https://cert-manager.io/docs/projects/trust-manager/
+I1002 13:47:37.170662 3075946 warnings.go:107] "Warning: unrecognized format \"int64\""
 ```
 
 ### Install kube-prometheus-stack
@@ -339,13 +388,18 @@ helm repo update
 ```shell markdown_runner
 "prometheus-community" already exists with the same configuration, skipping
 Hang tight while we grab the latest from your chart repositories...
+...Successfully got an update from the "kedacore" chart repository
 ...Successfully got an update from the "jetstack" chart repository
+...Successfully got an update from the "hashicorp" chart repository
+...Successfully got an update from the "cilium" chart repository
+...Successfully got an update from the "grafana" chart repository
 ...Successfully got an update from the "prometheus-community" chart repository
 Update Complete. ⎈Happy Helming!⎈
 ```
 
 ```bash {"stage":"init", "label":"install kube-prometheus-stack", "runtime":"bash"}
 helm upgrade -i prometheus prometheus-community/kube-prometheus-stack \
+  --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
   -n service-app-project \
   --set grafana.sidecar.dashboards.enabled=true \
   --set grafana.sidecar.dashboards.label=grafana_dashboard \
@@ -359,11 +413,11 @@ helm upgrade -i prometheus prometheus-community/kube-prometheus-stack \
 ```shell markdown_runner
 Release "prometheus" does not exist. Installing it now.
 NAME: prometheus
-LAST DEPLOYED: Fri Sep 18 11:14:21 2026
+LAST DEPLOYED: Fri Oct  2 13:47:50 2026
 NAMESPACE: service-app-project
 STATUS: deployed
 REVISION: 1
-TEST SUITE: None
+DESCRIPTION: Install complete
 NOTES:
 kube-prometheus-stack has been installed. Check its status by running:
   kubectl --namespace service-app-project get pods -l "release=prometheus"
@@ -383,6 +437,25 @@ Get your grafana admin user password by running:
 
 
 Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
+I1002 13:47:48.013073 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:47:48.013091 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:47:48.214676 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:47:48.214695 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:47:48.270173 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:47:48.270187 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:47:48.421512 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:47:48.713070 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:47:48.713087 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:47:48.958953 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:47:48.958969 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:47:49.003650 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:47:49.251890 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:47:49.251903 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:47:49.370312 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:47:49.603452 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:47:49.603470 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:47:59.351066 3076565 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
+I1002 13:47:59.351067 3076565 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
 ```
 
 Wait for all monitoring components:
@@ -404,8 +477,9 @@ statefulset.apps/prometheus-prometheus-kube-prometheus-prometheus condition met
 ```
 ```shell markdown_runner
 Deploying operator to watch single namespace
-Client Version: 4.8.11
-Kubernetes Version: v1.35.1
+Client Version: 4.18.5
+Kustomize Version: v5.4.2
+Kubernetes Version: v1.34.0
 customresourcedefinition.apiextensions.k8s.io/activemqartemises.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisaddresses.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisscaledowns.broker.amq.io created
@@ -421,6 +495,8 @@ role.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-role created
 rolebinding.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-rolebinding created
 networkpolicy.networking.k8s.io/arkmq-org-broker-controller-manager-netpol created
 deployment.apps/arkmq-org-broker-controller-manager created
+Warning: unrecognized format "int32"
+Warning: unrecognized format "int64"
 ```
 
 ```bash {"stage":"init", "label":"wait for the operator to be running", "runtime":"bash"}
@@ -563,6 +639,36 @@ certificate.cert-manager.io/arkmq-org-broker-manager-cert condition met
 ```
 
 ---
+
+### Create Prometheus Client Certificate
+
+Create the Prometheus client certificate. The Operator uses `prometheus-cert` as the default Prometheus client certificate secret name; it uses the certificate's Common Name to grant Prometheus access to the broker metrics endpoint, and references it from the scrape configuration it generates for the `BrokerService`. Issue it before deploying the `BrokerService`: the Operator generates that configuration while reconciling the service.
+
+```bash {"stage":"deploy_certs", "label":"create prometheus cert", "runtime":"bash"}
+kubectl apply -f - <<EOF
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: prometheus-cert
+  namespace: service-app-project
+spec:
+  secretName: prometheus-cert
+  commonName: prometheus
+  issuerRef:
+    name: broker-ca-issuer
+    kind: ClusterIssuer
+EOF
+```
+```shell markdown_runner
+certificate.cert-manager.io/prometheus-cert created
+```
+
+```bash {"stage":"deploy_certs", "label":"wait for prometheus cert", "runtime":"bash"}
+kubectl wait certificate prometheus-cert -n service-app-project --for=condition=Ready --timeout=300s
+```
+```shell markdown_runner
+certificate.cert-manager.io/prometheus-cert condition met
+```
 
 ## 4. Deploy BrokerService and BrokerApps
 
@@ -925,10 +1031,10 @@ Then confirm the secrets exist:
 kubectl get secret -n service-app-project | grep binding-secret
 ```
 ```shell markdown_runner
-delivery-service-binding-secret                                                       Opaque                                3      90s
-order-generator-binding-secret                                                        Opaque                                3      22m
-order-processor-binding-secret                                                        Opaque                                3      21m
-shipping-service-binding-secret                                                       Opaque                                3      2m30s
+delivery-service-binding-secret                                                       Opaque                                3      20s
+order-generator-binding-secret                                                        Opaque                                3      3m9s
+order-processor-binding-secret                                                        Opaque                                3      110s
+shipping-service-binding-secret                                                       Opaque                                3      90s
 ```
 
 You should see `order-generator-binding-secret`, `order-processor-binding-secret`, `shipping-service-binding-secret`, and `delivery-service-binding-secret` before proceeding to deploy the Camel applications.
@@ -1533,44 +1639,44 @@ Check that orders are flowing through all stages:
 kubectl logs -n service-app-project deployment/order-generator --tail=5
 ```
 ```shell markdown_runner
-2026-09-18 10:41:05,916 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(398):[amqps://messaging-service.service-app-project.svc.cluster.local:61616]) Connection ID:79009c7a-5105-482f-b8dd-7a332bd90f1c:398 connected to server: amqps://messaging-service.service-app-project.svc.cluster.local:61616
-2026-09-18 10:41:06,138 INFO  [order-generator] (Camel (camel-1) thread #1 - timer://order-generator) [generator] → ORDERS.NEW | orderId=ORD-bd1b67
-2026-09-18 10:41:06,168 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(399):[amqps://messaging-service.service-app-project.svc.cluster.local:61616]) Connection ID:6ab23265-b50f-4d8f-8325-e7b01d0a3acf:399 connected to server: amqps://messaging-service.service-app-project.svc.cluster.local:61616
-2026-09-18 10:41:06,338 INFO  [order-generator] (Camel (camel-1) thread #1 - timer://order-generator) [generator] → ORDERS.NEW | orderId=ORD-2bd4b0
-2026-09-18 10:41:06,360 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(400):[amqps://messaging-service.service-app-project.svc.cluster.local:61616]) Connection ID:ad1e732e-f016-4b4f-9062-b49ced526553:400 connected to server: amqps://messaging-service.service-app-project.svc.cluster.local:61616
+2026-10-02 11:54:06,537 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(435):[amqps://messaging-service.service-app-project.svc.cluster.local:61616]) Connection ID:369ad6fe-2b1c-4fcd-b016-8738f7ad208a:435 connected to server: amqps://messaging-service.service-app-project.svc.cluster.local:61616
+2026-10-02 11:54:06,726 INFO  [order-generator] (Camel (camel-1) thread #1 - timer://order-generator) [generator] → ORDERS.NEW | orderId=ORD-19a8c5
+2026-10-02 11:54:06,743 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(436):[amqps://messaging-service.service-app-project.svc.cluster.local:61616]) Connection ID:5cd4c13b-d176-43f0-88a1-fc742eda3b0e:436 connected to server: amqps://messaging-service.service-app-project.svc.cluster.local:61616
+2026-10-02 11:54:06,927 INFO  [order-generator] (Camel (camel-1) thread #1 - timer://order-generator) [generator] → ORDERS.NEW | orderId=ORD-69ed64
+2026-10-02 11:54:06,942 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(437):[amqps://messaging-service.service-app-project.svc.cluster.local:61616]) Connection ID:2b105cf8-3300-46a2-b110-33daee7e56f5:437 connected to server: amqps://messaging-service.service-app-project.svc.cluster.local:61616
 ```
 
 ```bash {"stage":"verify", "label":"check processor logs", "runtime":"bash"}
 kubectl logs -n service-app-project deployment/order-processor-app --tail=5
 ```
 ```shell markdown_runner
-2026-09-18 10:41:06,138 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] ← ORDERS.NEW | processing...
-2026-09-18 10:41:06,239 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] → ORDERS.PROCESSED | status=PROCESSED
-2026-09-18 10:41:06,364 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] ← ORDERS.NEW | processing...
-2026-09-18 10:41:06,465 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] → ORDERS.PROCESSED | status=PROCESSED
-2026-09-18 10:41:06,558 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] ← ORDERS.NEW | processing...
+2026-10-02 11:54:06,641 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] → ORDERS.PROCESSED | status=PROCESSED
+2026-10-02 11:54:06,755 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] ← ORDERS.NEW | processing...
+2026-10-02 11:54:06,855 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] → ORDERS.PROCESSED | status=PROCESSED
+2026-10-02 11:54:06,946 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] ← ORDERS.NEW | processing...
+2026-10-02 11:54:07,046 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] → ORDERS.PROCESSED | status=PROCESSED
 ```
 
 ```bash {"stage":"verify", "label":"check shipping logs", "runtime":"bash"}
 kubectl logs -n service-app-project deployment/shipping-service-app --tail=5
 ```
 ```shell markdown_runner
-2026-09-18 10:41:06,364 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] ← ORDERS.PROCESSED | shipping...
-2026-09-18 10:41:06,390 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] → ORDERS.SHIPPED | status=SHIPPED
-2026-09-18 10:41:06,558 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] ← ORDERS.PROCESSED | shipping...
-2026-09-18 10:41:06,584 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] → ORDERS.SHIPPED | status=SHIPPED
-2026-09-18 10:41:06,696 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] ← ORDERS.PROCESSED | shipping...
+2026-10-02 11:54:06,674 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] → ORDERS.SHIPPED | status=SHIPPED
+2026-10-02 11:54:06,861 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] ← ORDERS.PROCESSED | shipping...
+2026-10-02 11:54:06,886 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] → ORDERS.SHIPPED | status=SHIPPED
+2026-10-02 11:54:07,050 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] ← ORDERS.PROCESSED | shipping...
+2026-10-02 11:54:07,075 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] → ORDERS.SHIPPED | status=SHIPPED
 ```
 
 ```bash {"stage":"verify", "label":"check delivery logs", "runtime":"bash"}
 kubectl logs -n service-app-project deployment/delivery-service-app --tail=5
 ```
 ```shell markdown_runner
-2026-09-18 10:41:06,398 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] ← ORDERS.SHIPPED | delivering...
-2026-09-18 10:41:06,424 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] → ORDERS.DELIVERED | status=DELIVERED
-2026-09-18 10:41:06,695 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] ← ORDERS.SHIPPED | delivering...
-2026-09-18 10:41:06,720 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] → ORDERS.DELIVERED | status=DELIVERED
-2026-09-18 10:41:06,839 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] ← ORDERS.SHIPPED | delivering...
+2026-10-02 11:54:06,703 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] → ORDERS.DELIVERED | status=DELIVERED
+2026-10-02 11:54:06,897 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] ← ORDERS.SHIPPED | delivering...
+2026-10-02 11:54:06,923 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] → ORDERS.DELIVERED | status=DELIVERED
+2026-10-02 11:54:07,079 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] ← ORDERS.SHIPPED | delivering...
+2026-10-02 11:54:07,104 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] → ORDERS.DELIVERED | status=DELIVERED
 ```
 
 You should see log lines like:
@@ -1589,111 +1695,29 @@ You should see log lines like:
 
 ## 6. Configure Prometheus Monitoring
 
-> **How broker metrics work:** The ArkMQ Operator automatically configures the Prometheus Java agent for every `BrokerService`, exposing broker metrics on port 8888. This is a `BrokerService`-level concern — individual `BrokerApp` resources do not configure metrics. This section creates a Kubernetes `Service` for the metrics port and a `ServiceMonitor` so Prometheus can discover and scrape it.
+> **How broker metrics work:** The ArkMQ Operator automatically configures the Prometheus Java agent for every `BrokerService`, exposing broker metrics on port 8888. This is a `BrokerService`-level concern — individual `BrokerApp` resources do not configure metrics. The Operator also generates the `ServiceMonitor` that points Prometheus at the broker, using the client certificate issued in [section 3](#create-prometheus-client-certificate), so there is nothing to configure here.
 
-### Create Prometheus Client Certificate
+### Inspect the generated scrape configuration
 
-Create the Prometheus client certificate. The Operator uses `prometheus-cert` as the default Prometheus client certificate secret name; it uses the certificate's Common Name to grant Prometheus access to the broker metrics endpoint.
+The Operator generates the scrape configuration itself: a `ServiceMonitor` over
+the service's `metrics` port, presenting `prometheus-cert`, and labelled
+`broker.arkmq.org/monitoring: "true"` so a Prometheus can select it without
+naming any particular service.
 
-```bash {"stage":"monitoring", "label":"create prometheus cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: prometheus-cert
-  namespace: service-app-project
-spec:
-  secretName: prometheus-cert
-  commonName: prometheus
-  issuerRef:
-    name: broker-ca-issuer
-    kind: ClusterIssuer
-EOF
-```
-```shell markdown_runner
-certificate.cert-manager.io/prometheus-cert created
-```
-
-```bash {"stage":"monitoring", "label":"wait for prometheus cert", "runtime":"bash"}
-kubectl wait certificate prometheus-cert -n service-app-project --for=condition=Ready --timeout=300s
-```
-```shell markdown_runner
-certificate.cert-manager.io/prometheus-cert condition met
-```
-
-### Create Metrics Service
-
-```bash {"stage":"monitoring", "label":"create metrics service", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Service
-metadata:
-  name: messaging-service-metrics
-  namespace: service-app-project
-  labels:
-    app: messaging-service
-spec:
-  selector:
-    ActiveMQArtemis: messaging-service
-  ports:
-    - name: metrics
-      port: 8888
-      targetPort: 8888
-      protocol: TCP
-EOF
-```
-```shell markdown_runner
-service/messaging-service-metrics created
-```
-
-### Create ServiceMonitor
-
-```bash {"stage":"monitoring", "label":"create servicemonitor", "runtime":"bash"}
+```bash {"stage":"monitoring", "label":"show generated scrape config", "runtime":"bash"}
 kubectl wait pod/messaging-service-ss-0 -n service-app-project --for=condition=Ready --timeout=300s
-export BROKER_POD=$(kubectl get pods \
-  -n service-app-project \
-  -l ActiveMQArtemis=messaging-service \
-  -o jsonpath='{.items[0].metadata.name}')
-export BROKER_FQDN="${BROKER_POD}.messaging-service-hdls-svc.service-app-project.svc.cluster.local"
-echo "Broker FQDN: ${BROKER_FQDN}"
-kubectl apply -f - <<EOF
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: messaging-service-monitor
-  namespace: service-app-project
-  labels:
-    app: messaging-service
-    release: prometheus
-spec:
-  selector:
-    matchLabels:
-      app: messaging-service
-  endpoints:
-  - port: metrics
-    scheme: https
-    interval: 15s
-    tlsConfig:
-      serverName: '${BROKER_FQDN}'
-      ca:
-        secret:
-          name: arkmq-org-broker-manager-ca
-          key: ca.pem
-      cert:
-        secret:
-          name: prometheus-cert
-          key: tls.crt
-      keySecret:
-        name: prometheus-cert
-        key: tls.key
-      insecureSkipVerify: false
-EOF
+kubectl get servicemonitor -n service-app-project -l broker.arkmq.org/monitoring=true
 ```
 ```shell markdown_runner
 pod/messaging-service-ss-0 condition met
-Broker FQDN: messaging-service-ss-0.messaging-service-hdls-svc.service-app-project.svc.cluster.local
-servicemonitor.monitoring.coreos.com/messaging-service-monitor created
+NAME                        AGE
+messaging-service-metrics   5m9s
 ```
+
+The apps generate no scrape configuration of their own: the broker labels each
+app's queue series with the app and its namespace, so this one scrape serves
+them all. Metrics are collected under the job name `messaging-service-metrics`,
+which the queries below rely on.
 
 ### Create Prometheus Recording Rules
 
@@ -1762,14 +1786,14 @@ echo "Grafana available at http://${GRAFANA_HOST}"
 ```
 ```shell markdown_runner
 ingress.networking.k8s.io/grafana created
-Grafana available at http://grafana.service-app-project.192.168.49.2.nip.io
+Grafana available at http://grafana.service-app-project.192.168.50.207.nip.io
 ```
 
 ```bash {"stage":"grafana", "label":"get grafana password", "runtime":"bash"}
 kubectl get secret prometheus-grafana -n service-app-project -o jsonpath='{.data.admin-password}' | base64 -d && echo
 ```
 ```shell markdown_runner
-T2bZa0a5DleMl3kxcj9XGOT09O26TF223b9FL7cH
+pnlxQvSf7lRwi08RdHwvTBAAyfEyQRKzZw9GNo9V
 ```
 
 Login at the URL printed above with username `admin` and the password printed above, then open the **"Artemis Broker - Memory & Queue Analysis"** dashboard. Panels will start showing data within one scrape interval (15 s).
@@ -1779,14 +1803,14 @@ Login at the URL printed above with username `admin` and the password printed ab
 Wait for Prometheus to mark the broker target as `UP`:
 
 ```bash {"stage":"monitoring", "label":"verify prometheus target", "runtime":"bash"}
-kubectl get servicemonitor messaging-service-monitor -n service-app-project
-kubectl get endpointslice -l app=messaging-service -n service-app-project
+kubectl get servicemonitor messaging-service-metrics -n service-app-project
+kubectl get endpointslice -l kubernetes.io/service-name=messaging-service -n service-app-project
 ```
 ```shell markdown_runner
 NAME                        AGE
-messaging-service-monitor   1s
-NAME                              ADDRESSTYPE   PORTS   ENDPOINTS     AGE
-messaging-service-metrics-whblz   IPv4          8888    10.244.0.19   1s
+messaging-service-metrics   5m9s
+NAME                      ADDRESSTYPE   PORTS   ENDPOINTS     AGE
+messaging-service-p7jzv   IPv4          8888    10.244.0.20   5m9s
 ```
 
 Open the Grafana dashboard — panels should now show live data within one scrape interval (15 s).
@@ -2014,8 +2038,12 @@ The baseline shipping configuration is:
 
 To fully tear down the tutorial environment, delete the Minikube cluster. This removes the entire cluster including the operator, all deployed resources, and all cluster-scoped CRDs:
 
-```bash
+```bash {"stage":"teardown", "requires":"init/minikube_start", "runtime":"bash", "label":"delete minikube cluster"}
 minikube delete --profile brokerservice-monitoring
+```
+```shell markdown_runner
+* Deleting "brokerservice-monitoring" in kvm2 ...
+* Removed all traces of the "brokerservice-monitoring" cluster.
 ```
 
 If you want to clean up only the tutorial resources while keeping the cluster running, delete the namespace and the ClusterIssuers explicitly. ClusterIssuers are not namespace-scoped and survive namespace deletion, so they must be removed separately:
@@ -2043,13 +2071,13 @@ kubectl port-forward svc/prometheus-kube-prometheus-prometheus \
   -n service-app-project 9090:9090 > /tmp/prometheus-pf.log 2>&1 &
 ```
 
-Open http://localhost:9090/targets and find `messaging-service-monitor`. The error shown on a failing target will identify whether the problem is TLS, DNS, or authentication.
+Open http://localhost:9090/targets and find `messaging-service-metrics`. The error shown on a failing target will identify whether the problem is TLS, DNS, or authentication.
 
 Also verify the `prometheus-cert` secret exists — the Operator requires it to authorise Prometheus:
 
 ```bash
 kubectl get secret prometheus-cert -n service-app-project
-kubectl get servicemonitor messaging-service-monitor -n service-app-project -o yaml | grep "release: prometheus"
+kubectl get servicemonitor messaging-service-metrics -n service-app-project -o yaml | grep "broker.arkmq.org/monitoring"
 ```
 
 ### Panel shows "No data" but the target is UP

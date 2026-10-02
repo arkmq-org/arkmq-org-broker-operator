@@ -16,6 +16,22 @@ includeObjectNameAttributes:
 {{- end}}
 {{- end}}
 rules:
+{{- /* one rule per app queue, ahead of the generic one: the exporter stops at
+       the first matching rule, and only these carry the owner's namespace */ -}}
+{{- range .Queues}}
+  - pattern: '{{.Pattern}}'
+    name: broker_queue_$5
+    help: $5
+    attrNameSnakeCase: true
+    type: GAUGE
+    labels:
+      broker: "$1"
+      address: "$2"
+      routing_type: "$3"
+      queue: "$4"
+      namespace: "{{.OwnerNamespace}}"
+      brokerapp: "{{.OwnerApp}}"
+{{- end}}
   - pattern: "org.apache.activemq.artemis<broker=\"([^\"]+)\", component=addresses, address=\"([^\"]+)\", subcomponent=queues, routing-type=\"([^\"]+)\", queue=\"([^\"]+)\"><>([^:]+):"
     name: broker_queue_$5
     help: $5

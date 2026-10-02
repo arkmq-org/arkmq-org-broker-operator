@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/monitoring"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"path"
 	"reflect"
 	"sort"
@@ -41,6 +43,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -69,6 +72,7 @@ func NewBrokerServiceReconciler(client client.Client, scheme *runtime.Scheme, co
 
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=monitoring.coreos.com,namespace=arkmq-org-broker-operator,resources=servicemonitors,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps,verbs=get;list;watch
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps/status,verbs=get;list;watch
 
@@ -134,10 +138,18 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 
 // instance specifics for a reconciler loop
 func (r *BrokerServiceReconciler) getOwned() []client.ObjectList {
-	return []client.ObjectList{
+	owned := []client.ObjectList{
 		&corev1.SecretList{},
 		&broker.BrokerList{},
 		&corev1.ServiceList{}}
+
+	// only when the kind is served: read.ListAll errors outright on one that is
+	// not, which would abort the reconcile
+	if monitoring.IsPrometheusAvailable(r.RESTMapper()) {
+		owned = append(owned, &monitoringv1.ServiceMonitorList{})
+	}
+
+	return owned
 }
 
 func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
@@ -145,7 +157,8 @@ func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
 	return []reflect.Type{
 		reflect.TypeOf(corev1.Secret{}),
 		reflect.TypeOf(broker.Broker{}),
-		reflect.TypeOf(corev1.Service{})}
+		reflect.TypeOf(corev1.Service{}),
+		reflect.TypeOf(monitoringv1.ServiceMonitor{})}
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
@@ -166,13 +179,71 @@ func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
 	return nil
 }
 
+// processMonitoring generates what a Prometheus needs to scrape this service's
+// brokers under the prometheus identity, which the broker grants the broad
+// "metrics" role and which therefore sees every app's queues. Each app queue's
+// series carry the owning app's namespace, so this one scrape serves every
+// tenant, and broker-wide series stay with the service.
+//
+// Silently generates nothing when the ServiceMonitor kind is not served; the
+// BrokerService is perfectly functional without it.
+func (reconciler *BrokerServiceInstanceReconciler) processMonitoring() {
+	instance := reconciler.instance
+
+	if !monitoring.IsPrometheusAvailable(reconciler.RESTMapper()) {
+		reconciler.log.V(1).Info("prometheus-operator is not available, skipping ServiceMonitor generation",
+			"service", instance.Name)
+		return
+	}
+
+	// Without a prometheus certificate there is no identity to scrape as, and the
+	// broker would reject the connection. Not an error: the same absence is
+	// tolerated when resolving the control plane CNs.
+	promCertSecret := common.GetPrometheusCertSecretNameFor(instance.Name, instance.Namespace, reconciler.Client)
+	if _, err := common.GetNamespacedSecret(reconciler.Client, promCertSecret, instance.Namespace); err != nil {
+		reconciler.log.V(1).Info("no prometheus cert, generating no ServiceMonitor",
+			"service", instance.Name, "secret", promCertSecret)
+		return
+	}
+
+	caRef := monitoring.CARef(reconciler.Client)
+	if caRef == nil {
+		reconciler.log.V(1).Info("no ca bundle, generating no ServiceMonitor", "service", instance.Name)
+		return
+	}
+
+	var existing *monitoringv1.ServiceMonitor
+	if obj := reconciler.CloneOfDeployed(reflect.TypeOf(monitoringv1.ServiceMonitor{}), monitoring.WiringName(instance.Name)); obj != nil {
+		existing = obj.(*monitoringv1.ServiceMonitor)
+	}
+
+	reconciler.TrackDesired(monitoring.BuildServiceMonitor(monitoring.ScrapeTarget{
+		Owner:           instance,
+		ServiceSelector: serviceLabels(instance),
+		// The operand certificate is issued for the service name and for
+		// *.<svc>-hdls-svc.<ns>.svc.<domain>. The scrape reaches a pod by IP, and
+		// only the wildcard covers a name that is the pod's, so verify against one
+		// of those: every pod presents the same certificate.
+		ServerName:       common.OrdinalFQDNS(instance.Name, instance.Namespace, 0),
+		ClientCertSecret: promCertSecret,
+		CA:               caRef,
+		Labels:           monitoring.Labels("broker-service", instance.Name, instance.Name),
+	}, existing))
+}
+
 func (reconciler *BrokerServiceInstanceReconciler) processSpec() (err error) {
 	if err = reconciler.processBroker(); err != nil {
 		return err
 	}
 
 	// Process service
-	return reconciler.processService()
+	if err := reconciler.processService(); err != nil {
+		return err
+	}
+
+	reconciler.processMonitoring()
+
+	return nil
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
@@ -238,7 +309,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (err erro
 
 	// reset data
 	desired.Data = make(map[string][]byte)
-	appIdentities := make([]string, 0, len(apps.Items))
+	provisionedApps := make([]string, 0, len(apps.Items))
 	rejectedApps := make([]broker.RejectedApp, 0)
 	validApps := make([]broker.BrokerApp, 0, len(apps.Items))
 
@@ -267,15 +338,15 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (err erro
 			reconciler.log.Error(err, "failed to process acceptor for app", "app", app.Name)
 			break
 		}
-		appIdentities = append(appIdentities, AppIdentity(&app))
+		provisionedApps = append(provisionedApps, ProvisionedAppName(&app))
 		validApps = append(validApps, app)
 	}
 
-	sort.Strings(appIdentities)
+	sort.Strings(provisionedApps)
 	if desired.Annotations == nil {
 		desired.Annotations = make(map[string]string)
 	}
-	desired.Annotations[common.ProvisionedAppsAnnotation] = strings.Join(appIdentities, ",")
+	desired.Annotations[common.ProvisionedAppsAnnotation] = strings.Join(provisionedApps, ",")
 
 	// Track rejected apps in status for user visibility
 	reconciler.status.RejectedApps = rejectedApps
@@ -510,8 +581,19 @@ func (reconciler *BrokerServiceInstanceReconciler) processService() error {
 	desired.Spec.Selector = map[string]string{
 		common.LabelBrokerService: reconciler.instance.Name,
 	}
+	// for the generated ServiceMonitor to find this Service and its metrics port
+	desired.Labels = serviceLabels(reconciler.instance)
+	desired.Spec.Ports = []corev1.ServicePort{{
+		Name:       monitoring.PortName,
+		Port:       monitoring.Port,
+		TargetPort: intstr.FromInt32(monitoring.Port),
+	}}
 	reconciler.TrackDesired(desired)
 	return nil
+}
+
+func serviceLabels(instance *broker.BrokerService) map[string]string {
+	return map[string]string{common.LabelBrokerService: instance.Name}
 }
 
 // appToServiceHandler handles BrokerApp events and enqueues the affected BrokerService(s).
@@ -598,11 +680,18 @@ func (r *BrokerServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
-	return ctrl.NewControllerManagedBy(mgr).
+	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&broker.BrokerService{}).
 		Owns(&broker.Broker{}).
-		Watches(&broker.BrokerApp{}, &appToServiceHandler{}).
-		Complete(r)
+		Watches(&broker.BrokerApp{}, &appToServiceHandler{})
+
+	// see the note in the BrokerApp reconciler: Owns on a kind the API server does
+	// not serve takes the manager down at start
+	if monitoring.IsPrometheusAvailable(mgr.GetRESTMapper()) {
+		builder = builder.Owns(&monitoringv1.ServiceMonitor{})
+	}
+
+	return builder.Complete(r)
 }
 
 type AddressConfig struct {
@@ -985,6 +1074,14 @@ func metricsRole(prefix string) string {
 	return fmt.Sprintf("%s-metrics", prefix)
 }
 
+// ProvisionedAppName is how status.provisionedApps names an app: its namespace
+// and name joined by a slash, which neither may contain, so the pair splits back
+// unambiguously. AppIdentity's dash can collide: app x-b in namespace a and app b
+// in namespace a-x are both a-x-b.
+func ProvisionedAppName(app *broker.BrokerApp) string {
+	return app.Namespace + "/" + app.Name
+}
+
 func AppIdentity(app *broker.BrokerApp) string {
 	return NameSpacedValue(app, app.Name)
 }
@@ -1010,38 +1107,7 @@ func (reconciler *BrokerServiceInstanceReconciler) controlPlaneOverrideSecretNam
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSecret(validApps []broker.BrokerApp) error {
-	// Collect all unique ConsumerOf and ProducerOf addresses from validated apps only
-	appQueues := make(map[string]bool)
-	for _, app := range validApps {
-		for _, capability := range app.Spec.Capabilities {
-			// Collect ConsumerOf addresses for metrics
-			for _, addressRef := range capability.ConsumerOf {
-				if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-					// ANYCAST - direct queue address
-					appQueues[addressRef.Address] = true
-				} else {
-					// MULTICAST - generate FQQN for each multicast queue
-					for _, queueName := range addressRef.Subscriptions {
-						fqqn := addressRef.Address + FQQNSeparator + queueName
-						appQueues[fqqn] = true
-					}
-				}
-			}
-			// Also collect ProducerOf addresses for metrics
-			for _, addressRef := range capability.ProducerOf {
-				if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-					// ANYCAST - direct queue address
-					appQueues[addressRef.Address] = true
-				} else {
-					// MULTICAST - generate FQQN for each multicast queue
-					for _, queueName := range addressRef.Subscriptions {
-						fqqn := addressRef.Address + FQQNSeparator + queueName
-						appQueues[fqqn] = true
-					}
-				}
-			}
-		}
-	}
+	appQueues := queueOwners(validApps, reconciler.log)
 
 	// Get or create the control-plane-override secret
 	resourceName := types.NamespacedName{
@@ -1143,7 +1209,60 @@ func (reconciler *BrokerServiceInstanceReconciler) appCertCN(app *broker.BrokerA
 	return subject.CommonName, nil
 }
 
-func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]bool) ([]byte, error) {
+// queueOwners maps every queue the validated apps produce to or consume from to
+// the app that owns it, whose namespace its series are labelled with. An
+// anycast queue belongs to the app that declares the address, which a
+// referencing app names in its AddressRef. A subscription queue is created for
+// the subscriber and named by it, so it belongs to the subscriber, whoever owns
+// the address.
+func queueOwners(validApps []broker.BrokerApp, log logr.Logger) map[string]templates.QueueOwner {
+	apps := make([]*broker.BrokerApp, len(validApps))
+	for i := range validApps {
+		apps[i] = &validApps[i]
+	}
+	// the first claim wins, so claims are made in a stable order
+	sort.Slice(apps, func(i, j int) bool { return AppIdentity(apps[i]) < AppIdentity(apps[j]) })
+
+	owners := make(map[string]templates.QueueOwner)
+	claim := func(queue string, owner templates.QueueOwner) {
+		if current, found := owners[queue]; found {
+			if current != owner {
+				log.V(1).Info("queue claimed by more than one app, keeping the first",
+					"queue", queue, "kept", current, "ignored", owner)
+			}
+			return
+		}
+		owners[queue] = owner
+	}
+
+	for _, app := range apps {
+		self := templates.QueueOwner{OwnerNamespace: app.Namespace, OwnerApp: app.Name}
+		for _, capability := range app.Spec.Capabilities {
+			for _, refs := range [][]broker.AddressRef{capability.ConsumerOf, capability.ProducerOf} {
+				for _, addressRef := range refs {
+					if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
+						for _, queueName := range addressRef.Subscriptions {
+							claim(addressRef.Address+FQQNSeparator+queueName, self)
+						}
+						continue
+					}
+					owner := self
+					if addressRef.AppName != "" {
+						owner.OwnerApp = addressRef.AppName
+						if addressRef.AppNamespace != "" {
+							owner.OwnerNamespace = addressRef.AppNamespace
+						}
+					}
+					claim(addressRef.Address, owner)
+				}
+			}
+		}
+	}
+
+	return owners
+}
+
+func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]templates.QueueOwner) ([]byte, error) {
 	var caSecret, caSecretKey string
 	if caCertSecret, err := common.GetOperatorCASecret(reconciler.Client); err == nil {
 		caSecret = caCertSecret.Name

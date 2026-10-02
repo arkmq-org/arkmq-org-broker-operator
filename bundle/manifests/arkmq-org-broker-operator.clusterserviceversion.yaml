@@ -6867,7 +6867,7 @@ spec:
         path: conditions
         x-descriptors:
         - urn:alm:descriptor:io.kubernetes.conditions
-      - description: List of BrokerApp identities that have been applied to the service
+      - description: BrokerApps that have been applied to the service, each as <namespace>/<name>
         displayName: Provisioned Applications
         path: provisionedApps
       - description: List of BrokerApps that were rejected during provisioning validation
@@ -7307,7 +7307,11 @@ spec:
           - servicemonitors
           verbs:
           - create
+          - delete
           - get
+          - list
+          - update
+          - watch
         - apiGroups:
           - networking.k8s.io
           resources:

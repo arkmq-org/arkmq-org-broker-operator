@@ -25,6 +25,7 @@ import (
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/templates"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -524,7 +525,7 @@ func TestBrokerServiceReconcileStatusAppliedApps(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEmpty(t, secret.ResourceVersion)
 	// Verify annotation is present on the secret
-	assert.Equal(t, fmt.Sprintf("%s-%s", ns, appName), secret.Annotations[common.ProvisionedAppsAnnotation])
+	assert.Equal(t, fmt.Sprintf("%s/%s", ns, appName), secret.Annotations[common.ProvisionedAppsAnnotation])
 
 	// 3. Update Broker status to simulate broker picking up the config
 	brokerCR := &v1beta2.Broker{}
@@ -554,7 +555,7 @@ func TestBrokerServiceReconcileStatusAppliedApps(t *testing.T) {
 	// Verify BrokerService status
 	err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 	assert.NoError(t, err)
-	assert.Equal(t, []string{fmt.Sprintf("%s-%s", ns, appName)}, updatedSvc.Status.ProvisionedApps)
+	assert.Equal(t, []string{fmt.Sprintf("%s/%s", ns, appName)}, updatedSvc.Status.ProvisionedApps)
 }
 
 func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
@@ -675,7 +676,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 	updatedSvc := &v1beta2.BrokerService{}
 	err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 	assert.NoError(t, err)
-	assert.Equal(t, []string{fmt.Sprintf("%s-%s", ns, app1Name)}, updatedSvc.Status.ProvisionedApps)
+	assert.Equal(t, []string{fmt.Sprintf("%s/%s", ns, app1Name)}, updatedSvc.Status.ProvisionedApps)
 
 	// 2. Add App2
 	app2 := &v1beta2.BrokerApp{
@@ -712,7 +713,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 	// IMPORTANT: It should NOT be empty.
 	err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 	assert.NoError(t, err)
-	assert.Equal(t, []string{fmt.Sprintf("%s-%s", ns, app1Name)}, updatedSvc.Status.ProvisionedApps)
+	assert.Equal(t, []string{fmt.Sprintf("%s/%s", ns, app1Name)}, updatedSvc.Status.ProvisionedApps)
 
 	// 3. Update Broker Status to point to Secret v2
 	err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
@@ -733,7 +734,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 	// Verify AppliedApps has App1 and App2
 	err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 	assert.NoError(t, err)
-	expectedApps := []string{fmt.Sprintf("%s-%s", ns, app1Name), fmt.Sprintf("%s-%s", ns, app2Name)}
+	expectedApps := []string{fmt.Sprintf("%s/%s", ns, app1Name), fmt.Sprintf("%s/%s", ns, app2Name)}
 	sort.Strings(expectedApps)
 	sort.Strings(updatedSvc.Status.ProvisionedApps)
 	assert.Equal(t, expectedApps, updatedSvc.Status.ProvisionedApps)
@@ -1655,4 +1656,63 @@ func newServiceReconcilerWithClient(cl client.Client) *BrokerServiceInstanceReco
 			},
 		},
 	}
+}
+
+func ownerApp(namespace, name string, capabilities ...v1beta2.AppCapabilityType) v1beta2.BrokerApp {
+	return v1beta2.BrokerApp{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec:       v1beta2.BrokerAppSpec{Capabilities: capabilities},
+	}
+}
+
+func TestQueueOwnersGiveAnOwnedAnycastQueueToItsApp(t *testing.T) {
+	owners := queueOwners([]v1beta2.BrokerApp{
+		ownerApp("ns-a", "producer", v1beta2.AppCapabilityType{ProducerOf: []v1beta2.AddressRef{{Address: "ORDERS"}}}),
+	}, logr.Discard())
+
+	assert.Equal(t, templates.QueueOwner{OwnerNamespace: "ns-a", OwnerApp: "producer"}, owners["ORDERS"])
+}
+
+func TestQueueOwnersGiveAReferencedAnycastQueueToTheAppItNames(t *testing.T) {
+	owners := queueOwners([]v1beta2.BrokerApp{
+		ownerApp("ns-b", "consumer", v1beta2.AppCapabilityType{ConsumerOf: []v1beta2.AddressRef{
+			{Address: "ORDERS", AppName: "producer", AppNamespace: "ns-a"},
+			{Address: "LOCAL.REF", AppName: "sibling"},
+		}}),
+	}, logr.Discard())
+
+	assert.Equal(t, templates.QueueOwner{OwnerNamespace: "ns-a", OwnerApp: "producer"}, owners["ORDERS"],
+		"the referencing app does not own the queue it consumes from")
+	assert.Equal(t, templates.QueueOwner{OwnerNamespace: "ns-b", OwnerApp: "sibling"}, owners["LOCAL.REF"],
+		"a reference without a namespace names an app beside the referencing one")
+}
+
+func TestQueueOwnersGiveASubscriptionQueueToTheSubscriber(t *testing.T) {
+	owners := queueOwners([]v1beta2.BrokerApp{
+		ownerApp("ns-b", "subscriber", v1beta2.AppCapabilityType{ConsumerOf: []v1beta2.AddressRef{
+			{Address: "NEWS", AppName: "publisher", AppNamespace: "ns-a", Subscriptions: []string{"sub-client.news"}},
+		}}),
+	}, logr.Discard())
+
+	assert.Equal(t, templates.QueueOwner{OwnerNamespace: "ns-b", OwnerApp: "subscriber"}, owners["NEWS"+FQQNSeparator+"sub-client.news"])
+	assert.NotContains(t, owners, "NEWS", "a multicast address is not a queue")
+}
+
+func TestQueueOwnersKeepTheFirstClaimWhateverTheOrder(t *testing.T) {
+	first := ownerApp("ns-a", "first", v1beta2.AppCapabilityType{ProducerOf: []v1beta2.AddressRef{{Address: "SHARED"}}})
+	second := ownerApp("ns-b", "second", v1beta2.AppCapabilityType{ProducerOf: []v1beta2.AddressRef{{Address: "SHARED"}}})
+
+	assert.Equal(t, queueOwners([]v1beta2.BrokerApp{first, second}, logr.Discard()),
+		queueOwners([]v1beta2.BrokerApp{second, first}, logr.Discard()))
+	assert.Equal(t, "first", queueOwners([]v1beta2.BrokerApp{second, first}, logr.Discard())["SHARED"].OwnerApp)
+}
+
+func TestProvisionedAppNameKeepsNamespaceAndNameApart(t *testing.T) {
+	short := ownerApp("a", "x-b")
+	long := ownerApp("a-x", "b")
+
+	// the dash-joined identity cannot tell these apps apart
+	assert.Equal(t, AppIdentity(&short), AppIdentity(&long))
+	assert.NotEqual(t, ProvisionedAppName(&short), ProvisionedAppName(&long))
+	assert.Equal(t, "a/x-b", ProvisionedAppName(&short))
 }

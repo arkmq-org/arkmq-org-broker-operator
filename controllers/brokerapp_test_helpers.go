@@ -133,8 +133,8 @@ func (b *BrokerServiceBuilder) WithMemoryLimit(memory string) *BrokerServiceBuil
 	return b
 }
 
-func (b *BrokerServiceBuilder) WithProvisionedApp(appIdentity string) *BrokerServiceBuilder {
-	b.service.Status.ProvisionedApps = append(b.service.Status.ProvisionedApps, appIdentity)
+func (b *BrokerServiceBuilder) WithProvisionedApp(provisionedName string) *BrokerServiceBuilder {
+	b.service.Status.ProvisionedApps = append(b.service.Status.ProvisionedApps, provisionedName)
 	return b
 }
 

@@ -78,7 +78,7 @@ func TestSimpleReconcile(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("amqps://%s.%s.svc.%s:%d", svcName, ns, common.GetClusterDomain(), updatedApp.Status.Service.AssignedPort), string(bindingSecret.Data["uri"]))
 
 	// update broker service status to reflect ready with deployed app
-	svc.Status.ProvisionedApps = []string{AppIdentity(app)}
+	svc.Status.ProvisionedApps = []string{ProvisionedAppName(app)}
 	err = cl.Status().Update(context.TODO(), svc)
 	assert.NoError(t, err)
 
@@ -336,7 +336,7 @@ func TestReconcileDeployedConditionFromBrokerServiceStatus(t *testing.T) {
 	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, updatedSvc)
 	assert.NoError(t, err)
 
-	appIdentity := AppIdentity(app)
+	appIdentity := ProvisionedAppName(app)
 	updatedSvc.Status.ProvisionedApps = []string{appIdentity}
 	err = cl.Status().Update(context.TODO(), updatedSvc)
 	assert.NoError(t, err)

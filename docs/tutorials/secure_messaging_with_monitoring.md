@@ -116,7 +116,7 @@ graph TD
         end
 
         subgraph monitoring ["Monitoring Stack"]
-            ServiceMonitor["ServiceMonitor<br/>(messaging-service-monitor)"]
+            ServiceMonitor["ServiceMonitor<br/>(messaging-service-metrics)"]
             ArtemisProm["Artemis-Prometheus"]
             DefaultProm["Default Prometheus<br/>(kube-prometheus-stack)"]
             Grafana["Grafana"]
@@ -131,6 +131,7 @@ graph TD
     SAProducer -->|"Sends (mTLS, port from binding)"| BrokerSvc
     SAConsumer -->|"Receives (mTLS, port from binding)"| BrokerSvc
 
+    Operator -->|"Generates"| ServiceMonitor
     ServiceMonitor -->|"Configures"| ArtemisProm
     ArtemisProm -->|"Scrapes /metrics (mTLS CN: prometheus)"| BrokerSvc
     DefaultProm -->|"Scrapes pod/node metrics"| BrokerSvc
@@ -346,12 +347,11 @@ helm upgrade -i prometheus prometheus-community/kube-prometheus-stack \
 "prometheus-community" already exists with the same configuration, skipping
 Release "prometheus" does not exist. Installing it now.
 NAME: prometheus
-LAST DEPLOYED: Fri Aug 28 14:52:06 2026
+LAST DEPLOYED: Fri Oct  2 13:57:20 2026
 NAMESPACE: broker-tutorial
 STATUS: deployed
 REVISION: 1
 DESCRIPTION: Install complete
-TEST SUITE: None
 NOTES:
 kube-prometheus-stack has been installed. Check its status by running:
   kubectl --namespace broker-tutorial get pods -l "release=prometheus"
@@ -371,6 +371,25 @@ Get your grafana admin user password by running:
 
 
 Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
+I1002 13:57:18.798864 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:57:18.798885 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:57:19.074923 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:57:19.074936 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:57:19.103361 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:57:19.103377 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:57:19.218459 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:57:19.456082 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:57:19.456104 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:57:19.685828 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:57:19.685845 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:57:19.729889 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:57:19.907424 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:57:19.907442 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:57:19.955516 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:57:20.090595 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1002 13:57:20.090608 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1002 13:57:28.785273 3091094 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
+I1002 13:57:28.785274 3091094 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
 ```
 
 ### Install Cert-Manager
@@ -428,17 +447,37 @@ deployment.apps/cert-manager created
 deployment.apps/cert-manager-webhook created
 mutatingwebhookconfiguration.admissionregistration.k8s.io/cert-manager-webhook created
 validatingwebhookconfiguration.admissionregistration.k8s.io/cert-manager-webhook created
+Warning: unrecognized format "int32"
+Warning: unrecognized format "int64"
 ```
 
 Wait for cert-manager to be ready.
 
 ```bash {"stage":"init", "runtime":"bash", "label":"wait for cert-manager"}
 kubectl wait pod --all --for=condition=Ready --namespace=cert-manager --timeout=600s
+
+# The webhook reports Ready before it accepts connections, and trust-manager's
+# Certificate and Issuer are rejected until it does. Probe it with a server-side
+# dry run, which is validated by the webhook but creates nothing.
+until kubectl apply --dry-run=server -f - >/dev/null 2>&1 <<'EOF'
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: webhook-readiness-probe
+  namespace: cert-manager
+spec:
+  selfSigned: {}
+EOF
+do
+  echo "Waiting for the cert-manager webhook to answer" && sleep 5
+done
+echo "cert-manager webhook is answering"
 ```
 ```shell markdown_runner
-pod/cert-manager-67596fb4d7-6gnjq condition met
-pod/cert-manager-cainjector-5fcbcd7fb-r5np8 condition met
-pod/cert-manager-webhook-864d6c4d87-zn9sk condition met
+pod/cert-manager-66487b786-xmhqq condition met
+pod/cert-manager-cainjector-65fdc9b9d7-ffzn5 condition met
+pod/cert-manager-webhook-7d96469bf8-9zchl condition met
+cert-manager webhook is answering
 ```
 
 ### Install Trust Manager
@@ -460,7 +499,7 @@ helm upgrade trust-manager jetstack/trust-manager --install --namespace cert-man
 ```shell markdown_runner
 Release "trust-manager" does not exist. Installing it now.
 NAME: trust-manager
-LAST DEPLOYED: Fri Aug 28 14:53:38 2026
+LAST DEPLOYED: Fri Oct  2 13:58:29 2026
 NAMESPACE: cert-manager
 STATUS: deployed
 REVISION: 1
@@ -470,7 +509,7 @@ NOTES:
 ⚠️  WARNING: Consider increasing the Helm value `replicaCount` to 2 if you require high availability.
 ⚠️  WARNING: Consider setting the Helm value `podDisruptionBudget.enabled` to true if you require high availability.
 
-trust-manager v0.24.0 has been deployed successfully!
+trust-manager v0.25.0 has been deployed successfully!
 Your installation includes a default CA package, using the following
 default CA package image:
 
@@ -482,6 +521,7 @@ with creating your first bundle, check out the documentation on the
 cert-manager website:
 
 https://cert-manager.io/docs/projects/trust-manager/
+I1002 13:58:29.894544 3092885 warnings.go:107] "Warning: unrecognized format \"int64\""
 ```
 
 Wait for the Bundles CRD to be ready.
@@ -492,10 +532,10 @@ kubectl wait pod --all --for=condition=Ready --namespace=cert-manager --timeout=
 ```
 ```shell markdown_runner
 customresourcedefinition.apiextensions.k8s.io/bundles.trust.cert-manager.io condition met
-pod/cert-manager-67596fb4d7-6gnjq condition met
-pod/cert-manager-cainjector-5fcbcd7fb-r5np8 condition met
-pod/cert-manager-webhook-864d6c4d87-zn9sk condition met
-pod/trust-manager-64dfc6649-mgpzq condition met
+pod/cert-manager-66487b786-xmhqq condition met
+pod/cert-manager-cainjector-65fdc9b9d7-ffzn5 condition met
+pod/cert-manager-webhook-7d96469bf8-9zchl condition met
+pod/trust-manager-84d8595f6b-mv4rm condition met
 ```
 
 ### Deploy the Operator
@@ -508,9 +548,9 @@ From the root of the operator repository, install the operator into the
 ```
 ```shell markdown_runner
 Deploying operator to watch single namespace
-Client Version: 4.22.4
-Kustomize Version: v5.7.1
-Kubernetes Version: v1.35.1
+Client Version: 4.18.5
+Kustomize Version: v5.4.2
+Kubernetes Version: v1.34.0
 customresourcedefinition.apiextensions.k8s.io/activemqartemises.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisaddresses.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisscaledowns.broker.amq.io created
@@ -526,6 +566,8 @@ role.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-role created
 rolebinding.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-rolebinding created
 networkpolicy.networking.k8s.io/arkmq-org-broker-controller-manager-netpol created
 deployment.apps/arkmq-org-broker-controller-manager created
+Warning: unrecognized format "int64"
+Warning: unrecognized format "int32"
 ```
 
 Wait for the operator pod to become ready.
@@ -537,12 +579,12 @@ kubectl wait pod --all --for=condition=Ready --namespace=broker-tutorial --timeo
 ```shell markdown_runner
 deployment.apps/arkmq-org-broker-controller-manager condition met
 pod/alertmanager-prometheus-kube-prometheus-alertmanager-0 condition met
-pod/arkmq-org-broker-controller-manager-67bdbdf78d-9v9md condition met
-pod/prometheus-grafana-6445977db5-9qbj5 condition met
-pod/prometheus-kube-prometheus-operator-b489bc45c-m2p28 condition met
-pod/prometheus-kube-state-metrics-58b7869c8f-8sfcb condition met
+pod/arkmq-org-broker-controller-manager-7ffd57666b-rstsg condition met
+pod/prometheus-grafana-58cc74c5cf-rktnr condition met
+pod/prometheus-kube-prometheus-operator-5879b7b6fb-4pkzr condition met
+pod/prometheus-kube-state-metrics-86f6f77478-b4xwx condition met
 pod/prometheus-prometheus-kube-prometheus-prometheus-0 condition met
-pod/prometheus-prometheus-node-exporter-cszx2 condition met
+pod/prometheus-prometheus-node-exporter-x7jq6 condition met
 ```
 
 ## Create Certificate Authority and Issuers
@@ -1023,71 +1065,20 @@ job.batch/sa-consumer condition met
 ## Configure Prometheus Scraping
 
 The `BrokerService` already manages a running broker pod
-(`messaging-service-ss-0`) with a Prometheus metrics endpoint on port `8888`.
-We now deploy a dedicated Prometheus instance and configure it to scrape those
-metrics over mTLS, using the certificate created in the
-[PKI section](#create-certificate-authority-and-issuers).
+(`messaging-service-ss-0`) with a Prometheus metrics endpoint on port `8888`,
+and the operator has already generated the `ServiceMonitor` that scrapes it over
+mTLS, using the certificate created in the
+[PKI section](#create-certificate-authority-and-issuers). It is labelled
+`broker.arkmq.org/monitoring: "true"`, the one label a Prometheus needs to
+select it. We now deploy a dedicated Prometheus instance selecting it.
 
 ### Configure and Deploy Prometheus
 
-```bash {"stage":"scrape", "runtime":"bash", "label":"set broker fqdn"}
-export BROKER_FQDN=messaging-service-ss-0.messaging-service-hdls-svc.broker-tutorial.svc.cluster.local
-```
-```shell markdown_runner
-
-```
-
-Create the metrics `Service` selecting the `BrokerService`-managed pod, a
-`ServiceMonitor` that tells Prometheus how to scrape it with mTLS, a dedicated
-`Prometheus` instance, and a service for it so Grafana can target it directly
-without load-balancing across instances.
+Create a dedicated `Prometheus` instance, and a service for it so Grafana can
+target it directly without load-balancing across instances.
 
 ```bash {"stage":"scrape", "runtime":"bash", "label":"create prometheus resources"}
 kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Service
-metadata:
-  name: messaging-service-metrics
-  namespace: broker-tutorial
-  labels:
-    app: messaging-service
-spec:
-  selector:
-    ActiveMQArtemis: messaging-service
-  ports:
-    - name: metrics
-      port: 8888
-      targetPort: 8888
-      protocol: TCP
----
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: messaging-service-monitor
-  namespace: broker-tutorial
-  labels:
-    app: messaging-service
-spec:
-  selector:
-    matchLabels:
-      app: messaging-service
-  endpoints:
-  - port: metrics
-    scheme: https
-    tlsConfig:
-      serverName: '${BROKER_FQDN}'
-      ca:
-        secret:
-          name: arkmq-org-broker-manager-ca
-          key: ca.pem
-      cert:
-        secret:
-          name: prometheus-cert
-          key: tls.crt
-      keySecret:
-        name: prometheus-cert
-        key: tls.key
----
 apiVersion: monitoring.coreos.com/v1
 kind: Prometheus
 metadata:
@@ -1099,7 +1090,7 @@ spec:
   version: v2.53.0
   serviceMonitorSelector:
     matchLabels:
-      app: messaging-service
+      broker.arkmq.org/monitoring: "true"
   serviceMonitorNamespaceSelector: {}
 ---
 apiVersion: v1
@@ -1118,8 +1109,6 @@ spec:
 EOF
 ```
 ```shell markdown_runner
-service/messaging-service-metrics created
-servicemonitor.monitoring.coreos.com/messaging-service-monitor created
 prometheus.monitoring.coreos.com/artemis-prometheus created
 service/artemis-prometheus-svc created
 ```
@@ -1153,7 +1142,7 @@ kubectl rollout status statefulset/prometheus-artemis-prometheus -n broker-tutor
 ```
 ```shell markdown_runner
 Waiting for 1 pods to be ready...
-statefulset rolling update complete 1 pods at revision prometheus-artemis-prometheus-6698fbd945...
+statefulset rolling update complete 1 pods at revision prometheus-artemis-prometheus-55965484b5...
 ```
 
 ## Deploy and Configure Grafana
@@ -1199,6 +1188,7 @@ kubectl rollout status deployment prometheus-grafana -n broker-tutorial --timeou
 ```
 ```shell markdown_runner
 deployment.apps/prometheus-grafana restarted
+Waiting for deployment "prometheus-grafana" rollout to finish: 0 out of 1 new replicas have been updated...
 Waiting for deployment "prometheus-grafana" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "prometheus-grafana" rollout to finish: 1 old replicas are pending termination...
 deployment "prometheus-grafana" successfully rolled out
@@ -1307,6 +1297,9 @@ Testing Prometheus and Grafana datasource configuration...
   container_cpu_usage_seconds_total is queryable
 ✓ Test 5: Grafana has both datasources configured
   Waiting for Grafana to be fully initialized...
+pod/test-grafana-ds created
+pod/test-grafana-ds condition met
+pod "test-grafana-ds" deleted from broker-tutorial namespace
   Grafana is ready and authenticated
   Found: Artemis-Prometheus (uid: artemis-prometheus)
   Found: Prometheus (uid: prometheus)
@@ -1437,6 +1430,7 @@ kubectl rollout status deployment prometheus-grafana -n broker-tutorial --timeou
 ```shell markdown_runner
 configmap/artemis-dashboard condition met
 deployment.apps/prometheus-grafana restarted
+Waiting for deployment "prometheus-grafana" rollout to finish: 0 out of 1 new replicas have been updated...
 Waiting for deployment "prometheus-grafana" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "prometheus-grafana" rollout to finish: 1 old replicas are pending termination...
 deployment "prometheus-grafana" successfully rolled out
@@ -1514,6 +1508,12 @@ done
 ```shell markdown_runner
 Testing Artemis Broker Metrics dashboard configuration...
 
+pod/test-grafana-search created
+pod/test-grafana-search condition met
+pod "test-grafana-search" deleted from broker-tutorial namespace
+pod/test-grafana-dashboard created
+pod/test-grafana-dashboard condition met
+pod "test-grafana-dashboard" deleted from broker-tutorial namespace
 ✓ Test 1: Dashboard exists with correct title
   Title: Artemis Broker Metrics
 ✓ Test 2: Dashboard has exactly 6 panels
@@ -1568,8 +1568,7 @@ GRAFANA_HOST=grafana.broker-tutorial.${CLUSTER_IP}.nip.io
 until curl -s "http://${GRAFANA_HOST}/api/health" --max-time 3 | grep -q 'database.*ok' &> /dev/null; do echo "Waiting for Grafana Ingress" && sleep 2; done
 ```
 ```shell markdown_runner
-Waiting for Grafana Ingress
-Waiting for Grafana Ingress
+
 ```
 
 Open `http://${GRAFANA_HOST}` in your browser. The username is `admin`. Retrieve
@@ -1745,11 +1744,11 @@ kubectl logs -l ActiveMQArtemis=messaging-service -n broker-tutorial | grep -i c
 
 **Problem:** Prometheus shows broker target as "DOWN"
 ```bash
-kubectl describe servicemonitor messaging-service-monitor -n broker-tutorial
-kubectl get endpoints messaging-service-metrics -n broker-tutorial
+kubectl describe servicemonitor messaging-service-metrics -n broker-tutorial
+kubectl get endpointslice -l kubernetes.io/service-name=messaging-service -n broker-tutorial
 ```
 
-**Solution:** Verify the service selector matches broker pod labels and the metrics port (8888) is accessible:
+**Solution:** The operator generates the `ServiceMonitor` only if the `prometheus-cert` secret existed when it reconciled the `BrokerService`. Verify the metrics port (8888) is accessible:
 ```bash
 kubectl run test-metrics --rm -i --restart=Never --image=curlimages/curl:latest -n broker-tutorial -- \
   curl -sk https://messaging-service-ss-0.messaging-service-hdls-svc.broker-tutorial.svc.cluster.local:8161/metrics
@@ -1858,7 +1857,8 @@ platform on Kubernetes. You now understand how to:
 
 * `BrokerService` and `Broker` always enforce mTLS — no anonymous access
 * The operator auto-configures the control plane (Jolokia, Prometheus) from discovered certificates
-* `ServiceMonitor` resources enable secure metrics collection
+* The operator generates the `ServiceMonitor` that enables secure metrics
+  collection, so no scrape config is written by hand
 * Separate certificates for different components (operator, Prometheus, app clients)
 
 **Monitoring architecture:**
