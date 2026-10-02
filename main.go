@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"os"
 	"sort"
@@ -49,12 +50,18 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	configv1 "github.com/openshift/api/config/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
+	openshifttls "github.com/openshift/controller-runtime-common/pkg/tls"
+	libgocrypto "github.com/openshift/library-go/pkg/crypto"
+
+	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/log"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/sdkk8sutil"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/jolokia"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 
@@ -94,6 +101,7 @@ func printVersion() {
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(configv1.AddToScheme(scheme))
 	utilruntime.Must(routev1.AddToScheme(scheme))
 	utilruntime.Must(gatewayv1.Install(scheme))
 
@@ -184,10 +192,61 @@ func main() {
 	renewDeadline := time.Duration(renewDeadlineSeconds) * time.Second
 	retryPeriod := time.Duration(retryPeriodSeconds) * time.Second
 
+	isOpenshift, err := common.DetectOpenshiftWith(cfg)
+	if err != nil {
+		setupLog.Error(err, "can't determine api server type")
+		os.Exit(1)
+	}
+
+	var tlsProfile configv1.TLSProfileSpec
+	var tlsAdherence configv1.TLSAdherencePolicy
+	if isOpenshift {
+		preClient, err := client.New(cfg, client.Options{Scheme: scheme})
+		if err != nil {
+			setupLog.Error(err, "unable to create pre-manager client for TLS profile fetch")
+			os.Exit(1)
+		}
+
+		tlsProfile, err = openshifttls.FetchAPIServerTLSProfile(context.Background(), preClient)
+		if err != nil {
+			setupLog.Info("unable to fetch cluster TLS profile, using defaults", "error", err)
+			tlsProfile = configv1.TLSProfileSpec{
+				Ciphers:       openshifttls.DefaultTLSCiphers,
+				MinTLSVersion: openshifttls.DefaultMinTLSVersion,
+			}
+		}
+
+		tlsAdherence, err = openshifttls.FetchAPIServerTLSAdherencePolicy(context.Background(), preClient)
+		if err != nil {
+			setupLog.Info("unable to fetch cluster TLS adherence policy, using default", "error", err)
+		}
+	} else {
+		tlsProfile = configv1.TLSProfileSpec{
+			Ciphers:       openshifttls.DefaultTLSCiphers,
+			MinTLSVersion: openshifttls.DefaultMinTLSVersion,
+		}
+	}
+
+	tlsConfigFn, unsupported := openshifttls.NewTLSConfigFromProfile(tlsProfile)
+	if len(unsupported) > 0 {
+		setupLog.Info("TLS profile contains ciphers unsupported by Go", "unsupported", unsupported)
+	}
+
+	jolokia.SetTLSProfile(tlsProfile)
+
+	var brokerTLS *brokerproperties.BrokerTLSSpec
+	if isOpenshift && libgocrypto.ShouldHonorClusterTLSProfile(tlsAdherence) {
+		brokerTLS = brokerproperties.TLSProfileToBrokerSpec(&tlsProfile)
+	}
+
 	mgrOptions := ctrl.Options{
 		Scheme: scheme,
 		Metrics: server.Options{
 			BindAddress: fmt.Sprintf("%s:%d", metricsHost, metricsPort),
+			TLSOpts: []func(*tls.Config){
+				tlsConfigFn,
+				openshifttls.SetNextProtos(openshifttls.HTTP2NextProtos...),
+			},
 		},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
@@ -286,12 +345,6 @@ func main() {
 	name := os.Getenv("POD_NAME")
 	setupAccountName(clnt, context.TODO(), oprNamespace, name)
 
-	isOpenshift, err := common.DetectOpenshiftWith(cfg)
-	if err != nil {
-		setupLog.Error(err, "can't determine api server type")
-		os.Exit(1)
-	}
-
 	gatewayAPIAvailable, err := common.DetectGatewayAPIWith(cfg)
 	if err != nil {
 		setupLog.Error(err, "can't determine gateway-api availability")
@@ -367,7 +420,8 @@ func main() {
 		mgr.GetClient(),
 		mgr.GetScheme(),
 		mgr.GetConfig(),
-		ctrl.Log.WithName("BrokerServiceReconciler"))
+		ctrl.Log.WithName("BrokerServiceReconciler"),
+		brokerTLS)
 
 	if err = serviceReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BrokerService")
@@ -387,6 +441,32 @@ func main() {
 
 	//+kubebuilder:scaffold:builder
 
+	mgrCtx, mgrCancel := context.WithCancel(ctrl.SetupSignalHandler())
+
+	if isOpenshift {
+		watcher := &openshifttls.SecurityProfileWatcher{
+			Client:                    mgr.GetClient(),
+			InitialTLSProfileSpec:     tlsProfile,
+			InitialTLSAdherencePolicy: tlsAdherence,
+			OnProfileChange: func(_ context.Context, oldProfile, newProfile configv1.TLSProfileSpec) {
+				setupLog.Info("cluster TLS profile changed, shutting down to reload",
+					"oldMinTLSVersion", oldProfile.MinTLSVersion,
+					"newMinTLSVersion", newProfile.MinTLSVersion)
+				mgrCancel()
+			},
+			OnAdherencePolicyChange: func(_ context.Context, oldPolicy, newPolicy configv1.TLSAdherencePolicy) {
+				setupLog.Info("cluster TLS adherence policy changed, shutting down to reload",
+					"oldPolicy", oldPolicy,
+					"newPolicy", newPolicy)
+				mgrCancel()
+			},
+		}
+		if err := watcher.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to set up TLS security profile watcher")
+			os.Exit(1)
+		}
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
@@ -398,7 +478,7 @@ func main() {
 
 	setupLog.Info("Starting the manager")
 
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(mgrCtx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

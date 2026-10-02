@@ -59,7 +59,7 @@ func TestBrokerServiceDeployed_WhenBrokerNotReady(t *testing.T) {
 		WithStatusSubresource(svc, &v1beta2.Broker{})).
 		Build()
 
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 	// 1. First reconcile - creates Broker CR but it won't be deployed yet
@@ -104,7 +104,7 @@ func TestBrokerServiceDeployed_AfterPortDiscovery(t *testing.T) {
 		WithStatusSubresource(svc, &v1beta2.Broker{})).
 		Build()
 
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 	// 1. First reconcile - creates Broker CR

@@ -55,6 +55,8 @@ import (
 	"reflect"
 
 	routev1 "github.com/openshift/api/route/v1"
+	openshifttls "github.com/openshift/controller-runtime-common/pkg/tls"
+	libgocrypto "github.com/openshift/library-go/pkg/crypto"
 	netv1 "k8s.io/api/networking/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -873,6 +875,18 @@ func (reconciler *BrokerClusterReconcilerImpl) generateAcceptorsString(customRes
 	// TODO: Optimize for the single broker configuration
 	ensureCOREOn61616Exists := true // as clustered is no longer an option but true by default
 
+	var brokerTLS *brokerproperties.BrokerTLSSpec
+	if reconciler.isOnOpenShift {
+		adherence, _ := openshifttls.FetchAPIServerTLSAdherencePolicy(context.TODO(), client)
+		if libgocrypto.ShouldHonorClusterTLSProfile(adherence) {
+			if profile, err := openshifttls.FetchAPIServerTLSProfile(context.TODO(), client); err != nil {
+				reconciler.log.V(1).Info("Failed to get cluster TLS profile, using CR values only", "error", err)
+			} else {
+				brokerTLS = brokerproperties.TLSProfileToBrokerSpec(&profile)
+			}
+		}
+	}
+
 	acceptorEntry := ""
 	defaultArgs := "tcpSendBufferSize=1048576;tcpReceiveBufferSize=1048576;useEpoll=true;amqpCredits=1000;amqpMinCredits=300"
 
@@ -928,7 +942,7 @@ func (reconciler *BrokerClusterReconcilerImpl) generateAcceptorsString(customRes
 				reconciler.addPemConfigFileSecret(currentSS, sslArgs.PemCfgs)
 			}
 
-			sslOptionalArguments := reconciler.generateAcceptorSSLOptionalArguments(acceptor)
+			sslOptionalArguments := reconciler.generateAcceptorSSLOptionalArguments(acceptor, brokerTLS)
 
 			if sslOptionalArguments != "" {
 				acceptorEntry = acceptorEntry + ";" + sslOptionalArguments
@@ -979,6 +993,18 @@ func (reconciler *BrokerClusterReconcilerImpl) generateAcceptorsString(customRes
 
 func (reconciler *BrokerClusterReconcilerImpl) generateConnectorsString(customResource *v1beta2.BrokerCluster, client rtclient.Client, currentSS *appsv1.StatefulSet) (string, error) {
 
+	var brokerTLS *brokerproperties.BrokerTLSSpec
+	if reconciler.isOnOpenShift {
+		adherence, _ := openshifttls.FetchAPIServerTLSAdherencePolicy(context.TODO(), client)
+		if libgocrypto.ShouldHonorClusterTLSProfile(adherence) {
+			if profile, err := openshifttls.FetchAPIServerTLSProfile(context.TODO(), client); err != nil {
+				reconciler.log.V(1).Info("Failed to get cluster TLS profile, using CR values only", "error", err)
+			} else {
+				brokerTLS = brokerproperties.TLSProfileToBrokerSpec(&profile)
+			}
+		}
+	}
+
 	connectorEntry := ""
 	connectors := customResource.Spec.Connectors
 	for _, connector := range connectors {
@@ -1010,7 +1036,7 @@ func (reconciler *BrokerClusterReconcilerImpl) generateConnectorsString(customRe
 				reconciler.addPemConfigFileSecret(currentSS, sslArgs.PemCfgs)
 			}
 
-			sslOptionalArguments := reconciler.generateConnectorSSLOptionalArguments(connector)
+			sslOptionalArguments := reconciler.generateConnectorSSLOptionalArguments(connector, brokerTLS)
 
 			if sslOptionalArguments != "" {
 				connectorEntry = connectorEntry + ";" + sslOptionalArguments
@@ -1507,15 +1533,24 @@ func (reconciler *BrokerClusterReconcilerImpl) generateCommonSSLFlags(customReso
 	return sslArgs, sslFlags, nil
 }
 
-func (reconciler *BrokerClusterReconcilerImpl) generateAcceptorSSLOptionalArguments(acceptor v1beta2.AcceptorType) string {
+func (reconciler *BrokerClusterReconcilerImpl) generateAcceptorSSLOptionalArguments(acceptor v1beta2.AcceptorType, brokerTLS *brokerproperties.BrokerTLSSpec) string {
 
 	sslOptionalArguments := ""
 
-	if acceptor.EnabledCipherSuites != "" {
-		sslOptionalArguments = sslOptionalArguments + "enabledCipherSuites=" + acceptor.EnabledCipherSuites
+	cipherSuites := acceptor.EnabledCipherSuites
+	if cipherSuites == "" && brokerTLS != nil {
+		cipherSuites = brokerTLS.Ciphers
 	}
-	if acceptor.EnabledProtocols != "" {
-		sslOptionalArguments = sslOptionalArguments + ";" + "enabledProtocols=" + acceptor.EnabledProtocols
+	if cipherSuites != "" {
+		sslOptionalArguments = sslOptionalArguments + "enabledCipherSuites=" + cipherSuites
+	}
+
+	protocols := acceptor.EnabledProtocols
+	if protocols == "" && brokerTLS != nil {
+		protocols = brokerTLS.Protocols
+	}
+	if protocols != "" {
+		sslOptionalArguments = sslOptionalArguments + ";" + "enabledProtocols=" + protocols
 	}
 	if acceptor.NeedClientAuth {
 		sslOptionalArguments = sslOptionalArguments + ";" + "needClientAuth=true"
@@ -1578,15 +1613,24 @@ func (reconciler *BrokerClusterReconcilerImpl) addPemConfigFileSecret(ss *appsv1
 	}
 }
 
-func (reconciler *BrokerClusterReconcilerImpl) generateConnectorSSLOptionalArguments(connector v1beta2.ConnectorType) string {
+func (reconciler *BrokerClusterReconcilerImpl) generateConnectorSSLOptionalArguments(connector v1beta2.ConnectorType, brokerTLS *brokerproperties.BrokerTLSSpec) string {
 
 	sslOptionalArguments := ""
 
-	if connector.EnabledCipherSuites != "" {
-		sslOptionalArguments = sslOptionalArguments + "enabledCipherSuites=" + connector.EnabledCipherSuites
+	cipherSuites := connector.EnabledCipherSuites
+	if cipherSuites == "" && brokerTLS != nil {
+		cipherSuites = brokerTLS.Ciphers
 	}
-	if connector.EnabledProtocols != "" {
-		sslOptionalArguments = sslOptionalArguments + ";" + "enabledProtocols=" + connector.EnabledProtocols
+	if cipherSuites != "" {
+		sslOptionalArguments = sslOptionalArguments + "enabledCipherSuites=" + cipherSuites
+	}
+
+	protocols := connector.EnabledProtocols
+	if protocols == "" && brokerTLS != nil {
+		protocols = brokerTLS.Protocols
+	}
+	if protocols != "" {
+		sslOptionalArguments = sslOptionalArguments + ";" + "enabledProtocols=" + protocols
 	}
 	if connector.NeedClientAuth {
 		sslOptionalArguments = sslOptionalArguments + ";" + "needClientAuth=true"

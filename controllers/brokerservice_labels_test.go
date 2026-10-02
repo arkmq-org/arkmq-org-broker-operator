@@ -83,7 +83,7 @@ func TestPodLabels_StandardKubernetesLabels(t *testing.T) {
 		}).
 		Build()
 
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
@@ -170,7 +170,7 @@ func TestPodLabels_NetworkPolicyMatchingBrokerService(t *testing.T) {
 		}).
 		Build()
 
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
@@ -286,7 +286,7 @@ func TestPodLabels_NetworkPolicyMatchingComponentLabel(t *testing.T) {
 		}).
 		Build()
 
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 

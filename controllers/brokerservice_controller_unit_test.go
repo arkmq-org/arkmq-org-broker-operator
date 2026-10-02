@@ -121,7 +121,7 @@ func TestBrokerServiceReconcileWithAppMove(t *testing.T) {
 	cl := builder.Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// Reconcile S1
 	reqS1 := ctrl.Request{NamespacedName: types.NamespacedName{Name: s1Name, Namespace: ns}}
@@ -214,7 +214,7 @@ func TestBrokerServiceReconcileErrorPropagation(t *testing.T) {
 	cl := builder.Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// Reconcile S1
 	reqS1 := ctrl.Request{NamespacedName: types.NamespacedName{Name: s1Name, Namespace: ns}}
@@ -270,7 +270,7 @@ func TestBrokerServiceReconcileStatusUpdateFailure(t *testing.T) {
 	cl := builder.Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// Reconcile S1
 	reqS1 := ctrl.Request{NamespacedName: types.NamespacedName{Name: s1Name, Namespace: ns}}
@@ -311,7 +311,7 @@ func TestBrokerServiceReconcileRequiresIndex(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(WithCerts(s1, app)...).WithStatusSubresource(s1, app).Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// Reconcile S1
 	reqS1 := ctrl.Request{NamespacedName: types.NamespacedName{Name: s1Name, Namespace: ns}}
@@ -356,7 +356,7 @@ func TestReconcileDeployedConditionTransition(t *testing.T) {
 	cl := builder.Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// 1. Reconcile - should create broker but it won't be ready
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
@@ -504,7 +504,7 @@ func TestBrokerServiceReconcileStatusAppliedApps(t *testing.T) {
 		}).Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 	// 1. First Reconcile: Creates resources
@@ -633,7 +633,7 @@ func TestBrokerServiceReconcileStatusAppliedAppsIncremental(t *testing.T) {
 		}).Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 	// 1. Reconcile with App1
@@ -776,7 +776,7 @@ func TestBrokerServiceReconcileAppsProvisionedCondition(t *testing.T) {
 		Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 	// 1. First Reconcile: Creates resources
@@ -929,7 +929,7 @@ func TestBrokerServiceReconcilePrometheusOverrideSecret(t *testing.T) {
 		}).Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 	// Reconcile
@@ -1019,7 +1019,7 @@ func TestBrokerServiceReconcilePrometheusOverrideNoApps(t *testing.T) {
 		}).Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 	// Reconcile
@@ -1071,7 +1071,7 @@ func TestBrokerServiceValidCondition(t *testing.T) {
 			Build()
 
 		// Create Reconciler
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		// Reconcile
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
@@ -1109,7 +1109,7 @@ func TestBrokerServiceValidCondition(t *testing.T) {
 			Build()
 
 		// Create Reconciler
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		// Reconcile
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: invalidName, Namespace: ns}}
@@ -1155,7 +1155,7 @@ func TestBrokerServiceValidCondition(t *testing.T) {
 			Build()
 
 		// Create Reconciler
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		// First reconcile
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svc.Name, Namespace: ns}}
@@ -1213,7 +1213,7 @@ func TestBrokerServiceIdempotentStatus(t *testing.T) {
 		Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// First reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
@@ -1272,7 +1272,7 @@ func TestBrokerServiceConditionIndependence(t *testing.T) {
 		Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// Reconcile
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
@@ -1346,7 +1346,7 @@ func TestBrokerServiceValidPersistsThroughRuntimeErrors(t *testing.T) {
 		Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// Reconcile - will fail due to API error
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
@@ -1399,7 +1399,7 @@ func TestBrokerServiceConditionTransitionsOnRecovery(t *testing.T) {
 		Build()
 
 	// Create Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 	// 1. First reconcile - broker not ready

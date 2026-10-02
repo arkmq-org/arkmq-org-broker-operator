@@ -72,7 +72,7 @@ func TestLabelConflicts_NoReservedKeys(t *testing.T) {
 		}).
 		Build()
 
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)
@@ -135,7 +135,7 @@ func TestLabelConflicts_ProperDomainPrefixes(t *testing.T) {
 		}).
 		Build()
 
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 	_, err := r.Reconcile(context.TODO(), req)

@@ -97,7 +97,7 @@ func TestBrokerServiceRejectsManuallyAnnotatedApp(t *testing.T) {
 		Build()
 
 	// Create BrokerService Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// Reconcile the service
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: svcNs}}
@@ -243,7 +243,7 @@ func TestBrokerServiceAllowsMatchingApp(t *testing.T) {
 		Build()
 
 	// Create BrokerService Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// Reconcile the service
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: svcNs}}
@@ -363,7 +363,7 @@ func TestBrokerServiceRejectsLabelMismatch(t *testing.T) {
 		Build()
 
 	// Create BrokerService Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// Reconcile the service
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: svcNs}}
@@ -515,7 +515,7 @@ func TestBrokerServiceMixedApps(t *testing.T) {
 		Build()
 
 	// Create BrokerService Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// Reconcile the service
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: svcNs}}
@@ -681,7 +681,7 @@ func TestBrokerServiceRejectsAppsFromPrometheusConfig(t *testing.T) {
 		Build()
 
 	// Create BrokerService Reconciler
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 	// Reconcile the service
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: svcNs}}
