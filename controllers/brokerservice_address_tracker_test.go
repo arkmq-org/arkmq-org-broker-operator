@@ -15,84 +15,65 @@ limitations under the License.
 package controllers
 
 import (
-	"testing"
-
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func TestAddressTracker_OwnershipDetection(t *testing.T) {
-	tracker := newAddressTracker()
+var _ = Describe("address tracker", func() {
 
-	// Local address (owned)
-	localAddr := &broker.AddressRef{
-		Address: "orders",
-		// AppNamespace and AppName empty = owned
-	}
+	It("detects ownership from local address", Label(unitLabel), func() {
+		tracker := newAddressTracker()
 
-	// Cross-app reference (not owned)
-	refAddr := &broker.AddressRef{
-		Address:      "orders",
-		AppNamespace: "other-ns",
-		AppName:      "other-app",
-	}
+		localAddr := &broker.AddressRef{
+			Address: "orders",
+		}
 
-	// Track both
-	entry1 := tracker.track(localAddr)
-	entry2 := tracker.track(refAddr)
+		refAddr := &broker.AddressRef{
+			Address:      "orders",
+			AppNamespace: "other-ns",
+			AppName:      "other-app",
+		}
 
-	// Should point to the same entry (same address name)
-	if len(tracker.names) != 1 {
-		t.Errorf("expected 1 tracked address, got %d", len(tracker.names))
-	}
+		entry1 := tracker.track(localAddr)
+		entry2 := tracker.track(refAddr)
 
-	// The entry should be marked as owned (because we tracked the local version)
-	if !tracker.names["orders"].isOwned {
-		t.Error("expected address to be marked as owned")
-	}
+		Expect(tracker.names).To(HaveLen(1))
+		Expect(tracker.names["orders"].isOwned).To(BeTrue())
 
-	// Both entry pointers should reflect the updated state
-	_ = entry1
-	_ = entry2
-}
+		_ = entry1
+		_ = entry2
+	})
 
-func TestAddressTracker_ReferenceOnly(t *testing.T) {
-	tracker := newAddressTracker()
+	It("marks reference-only address as not owned", Label(unitLabel), func() {
+		tracker := newAddressTracker()
 
-	// Only cross-app reference (not owned by this app)
-	refAddr := &broker.AddressRef{
-		Address:      "shared-queue",
-		AppNamespace: "owner-ns",
-		AppName:      "owner-app",
-	}
+		refAddr := &broker.AddressRef{
+			Address:      "shared-queue",
+			AppNamespace: "owner-ns",
+			AppName:      "owner-app",
+		}
 
-	tracker.track(refAddr)
+		tracker.track(refAddr)
 
-	// Should not be marked as owned
-	if tracker.names["shared-queue"].isOwned {
-		t.Error("expected address NOT to be marked as owned for cross-app reference")
-	}
-}
+		Expect(tracker.names["shared-queue"].isOwned).To(BeFalse())
+	})
 
-func TestAddressTracker_LocalAddressPrecedence(t *testing.T) {
-	tracker := newAddressTracker()
+	It("local address takes precedence over reference", Label(unitLabel), func() {
+		tracker := newAddressTracker()
 
-	// Track reference first
-	refAddr := &broker.AddressRef{
-		Address:      "events",
-		AppNamespace: "other-ns",
-		AppName:      "other-app",
-	}
-	tracker.track(refAddr)
+		refAddr := &broker.AddressRef{
+			Address:      "events",
+			AppNamespace: "other-ns",
+			AppName:      "other-app",
+		}
+		tracker.track(refAddr)
 
-	// Then track local ownership
-	localAddr := &broker.AddressRef{
-		Address: "events",
-		// Empty AppNamespace/AppName = owned
-	}
-	tracker.track(localAddr)
+		localAddr := &broker.AddressRef{
+			Address: "events",
+		}
+		tracker.track(localAddr)
 
-	// Should now be marked as owned
-	if !tracker.names["events"].isOwned {
-		t.Error("expected address to be marked as owned after tracking local version")
-	}
-}
+		Expect(tracker.names["events"].isOwned).To(BeTrue())
+	})
+})

@@ -16,30 +16,25 @@ package controllers
 
 import (
 	"encoding/json"
-	"testing"
+	"fmt"
 
 	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 )
 
-func parseCapabilities(t *testing.T, secret *corev1.Secret, appName string) brokerproperties.CapabilitiesJSON {
-	t.Helper()
+func parseCapabilities(secret *corev1.Secret, appName string) brokerproperties.CapabilitiesJSON {
 	key := "test-" + appName + "-capabilities.json"
 	data := secret.Data[key]
-	if len(data) == 0 {
-		t.Fatalf("no capabilities JSON for key %q", key)
-	}
+	Expect(data).NotTo(BeEmpty(), fmt.Sprintf("no capabilities JSON for key %q", key))
 	var result brokerproperties.CapabilitiesJSON
-	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("failed to unmarshal capabilities JSON: %v", err)
-	}
+	err := json.Unmarshal(data, &result)
+	Expect(err).NotTo(HaveOccurred(), "failed to unmarshal capabilities JSON")
 	return result
 }
 
-// Helper functions for paired tests
-
-func testAddressRegistryNoCapabilities(t *testing.T, useShared bool) {
-	t.Helper()
+func testAddressRegistryNoCapabilities(useShared bool) {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
@@ -60,37 +55,20 @@ func testAddressRegistryNoCapabilities(t *testing.T, useShared bool) {
 	app := builder.Build()
 
 	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
-	caps := parseCapabilities(t, secret, "address-registry")
+	caps := parseCapabilities(secret, "address-registry")
 
-	// Should have addressConfigurations for all declared addresses (since they're owned)
-	if _, ok := caps.AddressConfigurations["events"]; !ok {
-		t.Error("expected addressConfigurations for owned address 'events'")
-	}
-	if _, ok := caps.AddressConfigurations["commands"]; !ok {
-		t.Error("expected addressConfigurations for owned address 'commands'")
-	}
-	if _, ok := caps.AddressConfigurations["queries"]; !ok {
-		t.Error("expected addressConfigurations for owned address 'queries'")
-	}
+	Expect(caps.AddressConfigurations).To(HaveKey("events"), "expected addressConfigurations for owned address 'events'")
+	Expect(caps.AddressConfigurations).To(HaveKey("commands"), "expected addressConfigurations for owned address 'commands'")
+	Expect(caps.AddressConfigurations).To(HaveKey("queries"), "expected addressConfigurations for owned address 'queries'")
 
-	// Should NOT have securityRoles (no capabilities = no RBAC)
-	if _, ok := caps.SecurityRoles["events"]; ok {
-		t.Error("should NOT have securityRoles when app has no capabilities")
-	}
-	if _, ok := caps.SecurityRoles["commands"]; ok {
-		t.Error("should NOT have securityRoles when app has no capabilities")
-	}
-	if _, ok := caps.SecurityRoles["queries"]; ok {
-		t.Error("should NOT have securityRoles when app has no capabilities")
-	}
+	Expect(caps.SecurityRoles).NotTo(HaveKey("events"), "should NOT have securityRoles when app has no capabilities")
+	Expect(caps.SecurityRoles).NotTo(HaveKey("commands"), "should NOT have securityRoles when app has no capabilities")
+	Expect(caps.SecurityRoles).NotTo(HaveKey("queries"), "should NOT have securityRoles when app has no capabilities")
 }
 
-func testSpecAddressesWithCapabilities(t *testing.T, useShared bool) {
-	t.Helper()
+func testSpecAddressesWithCapabilities(useShared bool) {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
@@ -109,224 +87,145 @@ func testSpecAddressesWithCapabilities(t *testing.T, useShared bool) {
 	app := builder.WithProducerOf(NewAddressRef("events").Build()).Build()
 
 	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
-	caps := parseCapabilities(t, secret, "producer")
+	caps := parseCapabilities(secret, "producer")
 
-	// Should have addressConfigurations for both addresses (both are in spec.addresses or spec.sharedAddresses)
-	if _, ok := caps.AddressConfigurations["events"]; !ok {
-		t.Error("expected addressConfigurations for 'events'")
-	}
-	if _, ok := caps.AddressConfigurations["commands"]; !ok {
-		t.Error("expected addressConfigurations for 'commands'")
-	}
+	Expect(caps.AddressConfigurations).To(HaveKey("events"), "expected addressConfigurations for 'events'")
+	Expect(caps.AddressConfigurations).To(HaveKey("commands"), "expected addressConfigurations for 'commands'")
 
-	// Should have RBAC only for addresses used in capabilities
-	if _, ok := caps.SecurityRoles["events"]; !ok {
-		t.Error("expected securityRoles for 'events' (used in capabilities)")
-	}
-	if _, ok := caps.SecurityRoles["commands"]; ok {
-		t.Error("should NOT have securityRoles for 'commands' (not in capabilities)")
-	}
+	Expect(caps.SecurityRoles).To(HaveKey("events"), "expected securityRoles for 'events' (used in capabilities)")
+	Expect(caps.SecurityRoles).NotTo(HaveKey("commands"), "should NOT have securityRoles for 'commands' (not in capabilities)")
 }
 
-func TestProcessCapabilities_OwnedAddress(t *testing.T) {
-	reconciler := BrokerServiceInstanceReconcilerForTest()
-	secret := CreateSecret("test-secret", "test")
+var _ = Describe("brokerservice capabilities", func() {
 
-	app := NewBrokerApp("owner", "test").
-		WithAddresses(NewAddressType("orders").Build()).
-		WithProducerOf(NewAddressRef("orders").Build()).
-		Build()
+	It("generates config for owned address", Label(unitLabel), func() {
+		reconciler := BrokerServiceInstanceReconcilerForTest()
+		secret := CreateSecret("test-secret", "test")
 
-	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+		app := NewBrokerApp("owner", "test").
+			WithAddresses(NewAddressType("orders").Build()).
+			WithProducerOf(NewAddressRef("orders").Build()).
+			Build()
 
-	caps := parseCapabilities(t, secret, "owner")
+		err := reconciler.processCapabilities(secret, app)
+		Expect(err).NotTo(HaveOccurred())
 
-	// Should have addressConfiguration (owned)
-	if _, ok := caps.AddressConfigurations["orders"]; !ok {
-		t.Error("expected addressConfigurations for owned address 'orders'")
-	}
+		caps := parseCapabilities(secret, "owner")
 
-	// Should have RBAC
-	if _, ok := caps.SecurityRoles["orders"]; !ok {
-		t.Error("expected securityRoles for owned address 'orders'")
-	}
-}
+		Expect(caps.AddressConfigurations).To(HaveKey("orders"), "expected addressConfigurations for owned address 'orders'")
+		Expect(caps.SecurityRoles).To(HaveKey("orders"), "expected securityRoles for owned address 'orders'")
+	})
 
-func TestProcessCapabilities_ReferencedAddress(t *testing.T) {
-	reconciler := BrokerServiceInstanceReconcilerForTest()
-	secret := CreateSecret("test-secret", "test")
+	It("generates config for referenced address", Label(unitLabel), func() {
+		reconciler := BrokerServiceInstanceReconcilerForTest()
+		secret := CreateSecret("test-secret", "test")
 
-	app := NewBrokerApp("consumer", "test").
-		WithConsumerOf(NewAddressRef("orders").WithAppRef("other", "owner").Build()).
-		Build()
+		app := NewBrokerApp("consumer", "test").
+			WithConsumerOf(NewAddressRef("orders").WithAppRef("other", "owner").Build()).
+			Build()
 
-	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+		err := reconciler.processCapabilities(secret, app)
+		Expect(err).NotTo(HaveOccurred())
 
-	caps := parseCapabilities(t, secret, "consumer")
+		caps := parseCapabilities(secret, "consumer")
 
-	ordersAddr := caps.AddressConfigurations["orders"]
-	if ordersAddr == nil {
-		t.Fatal("expected addressConfigurations entry for 'orders'")
-	}
+		ordersAddr := caps.AddressConfigurations["orders"]
+		Expect(ordersAddr).NotTo(BeNil(), "expected addressConfigurations entry for 'orders'")
 
-	// Should NOT have routingTypes (not owned)
-	if ordersAddr.RoutingTypes != "" {
-		t.Error("should NOT have routingTypes for referenced address 'orders'")
-	}
+		Expect(ordersAddr.RoutingTypes).To(BeEmpty(), "should NOT have routingTypes for referenced address 'orders'")
+		Expect(ordersAddr.QueueConfigs).NotTo(BeEmpty(), "expected queueConfigs for referenced address 'orders'")
+		Expect(caps.SecurityRoles).To(HaveKey("orders"), "expected securityRoles for referenced address 'orders'")
+	})
 
-	// Should have queue configs (needed even for referenced addresses)
-	if len(ordersAddr.QueueConfigs) == 0 {
-		t.Error("expected queueConfigs for referenced address 'orders'")
-	}
+	It("handles mixed owned and referenced addresses", Label(unitLabel), func() {
+		reconciler := BrokerServiceInstanceReconcilerForTest()
+		secret := CreateSecret("test-secret", "test")
 
-	// Should still have RBAC
-	if _, ok := caps.SecurityRoles["orders"]; !ok {
-		t.Error("expected securityRoles for referenced address 'orders'")
-	}
-}
+		app := NewBrokerApp("mixed", "test").
+			WithAddresses(NewAddressType("local-queue").Build()).
+			WithProducerOf(NewAddressRef("local-queue").Build()).
+			WithConsumerOf(NewAddressRef("shared-queue").WithAppRef("other", "owner").Build()).
+			Build()
 
-func TestProcessCapabilities_MixedOwnedAndReferenced(t *testing.T) {
-	reconciler := BrokerServiceInstanceReconcilerForTest()
-	secret := CreateSecret("test-secret", "test")
+		err := reconciler.processCapabilities(secret, app)
+		Expect(err).NotTo(HaveOccurred())
 
-	app := NewBrokerApp("mixed", "test").
-		WithAddresses(NewAddressType("local-queue").Build()).
-		WithProducerOf(NewAddressRef("local-queue").Build()).
-		WithConsumerOf(NewAddressRef("shared-queue").WithAppRef("other", "owner").Build()).
-		Build()
+		caps := parseCapabilities(secret, "mixed")
 
-	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+		localAddr := caps.AddressConfigurations["local-queue"]
+		Expect(localAddr).NotTo(BeNil(), "expected addressConfigurations for 'local-queue'")
+		sharedAddr := caps.AddressConfigurations["shared-queue"]
+		Expect(sharedAddr).NotTo(BeNil(), "expected addressConfigurations for 'shared-queue'")
 
-	caps := parseCapabilities(t, secret, "mixed")
+		Expect(localAddr.RoutingTypes).NotTo(BeEmpty(), "expected routingTypes for owned address 'local-queue'")
+		Expect(sharedAddr.RoutingTypes).To(BeEmpty(), "should NOT have routingTypes for referenced address 'shared-queue'")
 
-	localAddr := caps.AddressConfigurations["local-queue"]
-	if localAddr == nil {
-		t.Fatal("expected addressConfigurations for 'local-queue'")
-	}
-	sharedAddr := caps.AddressConfigurations["shared-queue"]
-	if sharedAddr == nil {
-		t.Fatal("expected addressConfigurations for 'shared-queue'")
-	}
+		Expect(localAddr.QueueConfigs).NotTo(BeEmpty(), "should have queueConfigs for producer-only address 'local-queue'")
+		Expect(sharedAddr.QueueConfigs).NotTo(BeEmpty(), "expected queueConfigs for referenced consumer address 'shared-queue'")
 
-	// Should have routingTypes for owned address
-	if localAddr.RoutingTypes == "" {
-		t.Error("expected routingTypes for owned address 'local-queue'")
-	}
+		Expect(caps.SecurityRoles).To(HaveKey("local-queue"), "expected securityRoles for owned address 'local-queue'")
+		Expect(caps.SecurityRoles).To(HaveKey("shared-queue"), "expected securityRoles for referenced address 'shared-queue'")
+	})
 
-	// Should NOT have routingTypes for referenced address
-	if sharedAddr.RoutingTypes != "" {
-		t.Error("should NOT have routingTypes for referenced address 'shared-queue'")
-	}
+	It("address registry no capabilities private", Label(unitLabel), func() {
+		testAddressRegistryNoCapabilities(false)
+	})
 
-	// "local-queue" is ProducerOf only but in addresses, so queue configs expected
-	if len(localAddr.QueueConfigs) == 0 {
-		t.Error("should have queueConfigs for producer-only address 'local-queue'")
-	}
-	// "shared-queue" is ConsumerOf, so queue configs expected
-	if len(sharedAddr.QueueConfigs) == 0 {
-		t.Error("expected queueConfigs for referenced consumer address 'shared-queue'")
-	}
+	It("address registry no capabilities shared", Label(unitLabel), func() {
+		testAddressRegistryNoCapabilities(true)
+	})
 
-	// Should have RBAC for both
-	if _, ok := caps.SecurityRoles["local-queue"]; !ok {
-		t.Error("expected securityRoles for owned address 'local-queue'")
-	}
-	if _, ok := caps.SecurityRoles["shared-queue"]; !ok {
-		t.Error("expected securityRoles for referenced address 'shared-queue'")
-	}
-}
+	It("spec addresses with capabilities private", Label(unitLabel), func() {
+		testSpecAddressesWithCapabilities(false)
+	})
 
-func TestProcessCapabilities_AddressRegistryNoCapabilities(t *testing.T) {
-	testAddressRegistryNoCapabilities(t, false)
-}
+	It("spec addresses with capabilities shared", Label(unitLabel), func() {
+		testSpecAddressesWithCapabilities(true)
+	})
 
-func TestProcessCapabilities_AddressRegistryNoCapabilities_Shared(t *testing.T) {
-	testAddressRegistryNoCapabilities(t, true)
-}
+	It("generates queue configs for single consumer", Label(unitLabel), func() {
+		reconciler := BrokerServiceInstanceReconcilerForTest()
+		secret := CreateSecret("test-secret", "test")
 
-func TestProcessCapabilities_SpecAddressesWithCapabilities(t *testing.T) {
-	testSpecAddressesWithCapabilities(t, false)
-}
+		app := NewBrokerApp("consumer", "test").
+			WithConsumerOf(NewAddressRef("orders").WithAppRef("other", "producer").Build()).
+			Build()
 
-func TestProcessCapabilities_SpecAddressesWithCapabilities_Shared(t *testing.T) {
-	testSpecAddressesWithCapabilities(t, true)
-}
+		err := reconciler.processCapabilities(secret, app)
+		Expect(err).NotTo(HaveOccurred())
 
-func TestProcessCapabilities_QueueConfigsForSingleConsumer(t *testing.T) {
-	reconciler := BrokerServiceInstanceReconcilerForTest()
-	secret := CreateSecret("test-secret", "test")
+		caps := parseCapabilities(secret, "consumer")
 
-	app := NewBrokerApp("consumer", "test").
-		WithConsumerOf(NewAddressRef("orders").WithAppRef("other", "producer").Build()).
-		Build()
+		ordersAddr := caps.AddressConfigurations["orders"]
+		Expect(ordersAddr).NotTo(BeNil(), "expected addressConfigurations for 'orders'")
 
-	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+		queueCfg := ordersAddr.QueueConfigs["orders"]
+		Expect(queueCfg).NotTo(BeNil(), "expected queueConfigs entry for single consumer role")
+		Expect(queueCfg.RoutingType).To(Equal(brokerproperties.RoutingTypeAnycast))
+		Expect(queueCfg.Address).To(Equal("orders"))
+	})
 
-	caps := parseCapabilities(t, secret, "consumer")
+	It("generates queue configs for single subscriber", Label(unitLabel), func() {
+		reconciler := BrokerServiceInstanceReconcilerForTest()
+		secret := CreateSecret("test-secret", "test")
 
-	ordersAddr := caps.AddressConfigurations["orders"]
-	if ordersAddr == nil {
-		t.Fatal("expected addressConfigurations for 'orders'")
-	}
+		app := NewBrokerApp("subscriber", "test").
+			WithConsumerOf(NewAddressRef("events").WithAppRef("other", "producer").WithSubscriptions("joe").Build()).
+			Build()
 
-	queueCfg := ordersAddr.QueueConfigs["orders"]
-	if queueCfg == nil {
-		t.Error("expected queueConfigs entry for single consumer role")
-	} else {
-		if queueCfg.RoutingType != brokerproperties.RoutingTypeAnycast {
-			t.Errorf("expected ANYCAST routingType, got %s", queueCfg.RoutingType)
-		}
-		if queueCfg.Address != "orders" {
-			t.Errorf("expected address=orders, got %s", queueCfg.Address)
-		}
-	}
-}
+		err := reconciler.processCapabilities(secret, app)
+		Expect(err).NotTo(HaveOccurred())
 
-func TestProcessCapabilities_QueueConfigsForSingleSubscriber(t *testing.T) {
-	reconciler := BrokerServiceInstanceReconcilerForTest()
-	secret := CreateSecret("test-secret", "test")
+		caps := parseCapabilities(secret, "subscriber")
 
-	app := NewBrokerApp("subscriber", "test").
-		WithConsumerOf(NewAddressRef("events").WithAppRef("other", "producer").WithSubscriptions("joe").Build()).
-		Build()
+		eventsAddr := caps.AddressConfigurations["events"]
+		Expect(eventsAddr).NotTo(BeNil(), "expected addressConfigurations for 'events'")
 
-	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
-
-	caps := parseCapabilities(t, secret, "subscriber")
-
-	eventsAddr := caps.AddressConfigurations["events"]
-	if eventsAddr == nil {
-		t.Fatal("expected addressConfigurations for 'events'")
-	}
-
-	joeCfg := eventsAddr.QueueConfigs["joe"]
-	if joeCfg == nil {
-		t.Error("expected queueConfigs entry for single subscriber role")
-	} else {
-		if joeCfg.RoutingType != brokerproperties.RoutingTypeMulticast {
-			t.Errorf("expected MULTICAST routingType, got %s", joeCfg.RoutingType)
-		}
-		if joeCfg.Address != "events" {
-			t.Errorf("expected address=events, got %s", joeCfg.Address)
-		}
-	}
-}
+		joeCfg := eventsAddr.QueueConfigs["joe"]
+		Expect(joeCfg).NotTo(BeNil(), "expected queueConfigs entry for single subscriber role")
+		Expect(joeCfg.RoutingType).To(Equal(brokerproperties.RoutingTypeMulticast))
+		Expect(joeCfg.Address).To(Equal("events"))
+	})
+})

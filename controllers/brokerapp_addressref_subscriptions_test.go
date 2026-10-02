@@ -1,170 +1,125 @@
 package controllers
 
 import (
-	"strings"
-	"testing"
-
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-// TestProcessCapabilities_AddressRefSubscriptions_ANYCAST tests ANYCAST queue (nil subscriptions)
-func TestProcessCapabilities_AddressRefSubscriptions_ANYCAST(t *testing.T) {
-	reconciler := BrokerServiceInstanceReconcilerForTest()
-	secret := CreateSecret("test-secret", "test")
+var _ = Describe("addressref subscriptions", func() {
 
-	app := NewBrokerApp("anycast-app", "test").
-		WithConsumerOf(NewAddressRef("commands").Build()).
-		Build()
+	It("ANYCAST queue for nil subscriptions", Label(unitLabel), func() {
+		reconciler := BrokerServiceInstanceReconcilerForTest()
+		secret := CreateSecret("test-secret", "test")
 
-	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+		app := NewBrokerApp("anycast-app", "test").
+			WithConsumerOf(NewAddressRef("commands").Build()).
+			Build()
 
-	caps := parseCapabilities(t, secret, "anycast-app")
+		err := reconciler.processCapabilities(secret, app)
+		Expect(err).NotTo(HaveOccurred())
 
-	commandsAddr := caps.AddressConfigurations["commands"]
-	if commandsAddr == nil {
-		t.Fatal("expected addressConfigurations for 'commands'")
-	}
+		caps := parseCapabilities(secret, "anycast-app")
 
-	// Should have ANYCAST routing
-	if commandsAddr.RoutingTypes != brokerproperties.RoutingTypeAnycast {
-		t.Errorf("expected routingTypes=ANYCAST for nil subscriptions, got %s", commandsAddr.RoutingTypes)
-	}
+		commandsAddr := caps.AddressConfigurations["commands"]
+		Expect(commandsAddr).NotTo(BeNil(), "expected addressConfigurations for 'commands'")
 
-	// Should have ANYCAST queue config
-	queueCfg := commandsAddr.QueueConfigs["commands"]
-	if queueCfg == nil {
-		t.Error("expected ANYCAST queue config")
-	} else if queueCfg.RoutingType != brokerproperties.RoutingTypeAnycast {
-		t.Errorf("expected queueConfig routingType=ANYCAST, got %s", queueCfg.RoutingType)
-	}
-}
+		Expect(commandsAddr.RoutingTypes).To(Equal(brokerproperties.RoutingTypeAnycast),
+			"expected routingTypes=ANYCAST for nil subscriptions")
 
-// TestProcessCapabilities_AddressRefSubscriptions_MULTICAST tests MULTICAST topic with subscription queues
-func TestProcessCapabilities_AddressRefSubscriptions_MULTICAST(t *testing.T) {
-	reconciler := BrokerServiceInstanceReconcilerForTest()
-	secret := CreateSecret("test-secret", "test")
+		queueCfg := commandsAddr.QueueConfigs["commands"]
+		Expect(queueCfg).NotTo(BeNil(), "expected ANYCAST queue config")
+		Expect(queueCfg.RoutingType).To(Equal(brokerproperties.RoutingTypeAnycast),
+			"expected queueConfig routingType=ANYCAST")
+	})
 
-	app := NewBrokerApp("multicast-app", "test").
-		WithConsumerOf(NewAddressRef("events").WithSubscriptions("sub1", "sub2").Build()).
-		Build()
+	It("MULTICAST topic with subscription queues", Label(unitLabel), func() {
+		reconciler := BrokerServiceInstanceReconcilerForTest()
+		secret := CreateSecret("test-secret", "test")
 
-	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+		app := NewBrokerApp("multicast-app", "test").
+			WithConsumerOf(NewAddressRef("events").WithSubscriptions("sub1", "sub2").Build()).
+			Build()
 
-	caps := parseCapabilities(t, secret, "multicast-app")
+		err := reconciler.processCapabilities(secret, app)
+		Expect(err).NotTo(HaveOccurred())
 
-	eventsAddr := caps.AddressConfigurations["events"]
-	if eventsAddr == nil {
-		t.Fatal("expected addressConfigurations for 'events'")
-	}
+		caps := parseCapabilities(secret, "multicast-app")
 
-	// Should have MULTICAST routing
-	if eventsAddr.RoutingTypes != brokerproperties.RoutingTypeMulticast {
-		t.Errorf("expected routingTypes=MULTICAST for subscriptions, got %s", eventsAddr.RoutingTypes)
-	}
+		eventsAddr := caps.AddressConfigurations["events"]
+		Expect(eventsAddr).NotTo(BeNil(), "expected addressConfigurations for 'events'")
 
-	// Should have MULTICAST subscription queues
-	sub1 := eventsAddr.QueueConfigs["sub1"]
-	if sub1 == nil || sub1.RoutingType != brokerproperties.RoutingTypeMulticast {
-		t.Error("expected MULTICAST queue sub1")
-	}
-	sub2 := eventsAddr.QueueConfigs["sub2"]
-	if sub2 == nil || sub2.RoutingType != brokerproperties.RoutingTypeMulticast {
-		t.Error("expected MULTICAST queue sub2")
-	}
+		Expect(eventsAddr.RoutingTypes).To(Equal(brokerproperties.RoutingTypeMulticast),
+			"expected routingTypes=MULTICAST for subscriptions")
 
-	// Should have subscriber roles for FQQN (key is the raw "events::sub1", no escaping)
-	if _, ok := caps.SecurityRoles["events::sub1"]; !ok {
-		t.Error("expected subscriber role for events::sub1")
-	}
-	if _, ok := caps.SecurityRoles["events::sub2"]; !ok {
-		t.Error("expected subscriber role for events::sub2")
-	}
-}
+		sub1 := eventsAddr.QueueConfigs["sub1"]
+		Expect(sub1).NotTo(BeNil(), "expected MULTICAST queue sub1")
+		Expect(sub1.RoutingType).To(Equal(brokerproperties.RoutingTypeMulticast))
 
-func TestProcessCapabilities_AddressRefEmptySubscriptions_ProducerANYCAST(t *testing.T) {
-	reconciler := BrokerServiceInstanceReconcilerForTest()
-	secret := CreateSecret("test-secret", "test")
+		sub2 := eventsAddr.QueueConfigs["sub2"]
+		Expect(sub2).NotTo(BeNil(), "expected MULTICAST queue sub2")
+		Expect(sub2.RoutingType).To(Equal(brokerproperties.RoutingTypeMulticast))
 
-	app := NewBrokerApp("producer-app", "test").
-		WithProducerOf(NewAddressRef("notifications").WithSubscriptions().Build()).
-		Build()
+		Expect(caps.SecurityRoles).To(HaveKey("events::sub1"), "expected subscriber role for events::sub1")
+		Expect(caps.SecurityRoles).To(HaveKey("events::sub2"), "expected subscriber role for events::sub2")
+	})
 
-	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+	It("empty subscriptions producer ANYCAST", Label(unitLabel), func() {
+		reconciler := BrokerServiceInstanceReconcilerForTest()
+		secret := CreateSecret("test-secret", "test")
 
-	caps := parseCapabilities(t, secret, "producer-app")
+		app := NewBrokerApp("producer-app", "test").
+			WithProducerOf(NewAddressRef("notifications").WithSubscriptions().Build()).
+			Build()
 
-	notifAddr := caps.AddressConfigurations["notifications"]
-	if notifAddr == nil {
-		t.Fatal("expected addressConfigurations for 'notifications'")
-	}
+		err := reconciler.processCapabilities(secret, app)
+		Expect(err).NotTo(HaveOccurred())
 
-	// Should have ANYCAST routing (empty subs = ANYCAST)
-	if notifAddr.RoutingTypes != brokerproperties.RoutingTypeAnycast {
-		t.Errorf("expected routingTypes=ANYCAST for empty subscriptions, got %s", notifAddr.RoutingTypes)
-	}
+		caps := parseCapabilities(secret, "producer-app")
 
-	// Producer should create queue configs
-	if len(notifAddr.QueueConfigs) == 0 {
-		t.Error("producer should create queue configs")
-	}
-}
+		notifAddr := caps.AddressConfigurations["notifications"]
+		Expect(notifAddr).NotTo(BeNil(), "expected addressConfigurations for 'notifications'")
 
-// TestProcessCapabilities_AddressRefSubscriptions_Conflict tests same-app routing conflict
-func TestProcessCapabilities_AddressRefSubscriptions_Conflict(t *testing.T) {
-	reconciler := BrokerServiceInstanceReconcilerForTest()
-	secret := CreateSecret("test-secret", "test")
+		Expect(notifAddr.RoutingTypes).To(Equal(brokerproperties.RoutingTypeAnycast),
+			"expected routingTypes=ANYCAST for empty subscriptions")
 
-	app := NewBrokerApp("conflict-app", "test").
-		WithConsumerOf(
-			NewAddressRef("mixed").Build(),                           // nil subscriptions = ANYCAST
-			NewAddressRef("mixed").WithSubscriptions("sub1").Build(), // MULTICAST
-		).
-		Build()
+		Expect(notifAddr.QueueConfigs).NotTo(BeEmpty(), "producer should create queue configs")
+	})
 
-	err := reconciler.processCapabilities(secret, app)
-	if err == nil {
-		t.Fatal("expected error for routing type conflict")
-	}
+	It("routing type conflict", Label(unitLabel), func() {
+		reconciler := BrokerServiceInstanceReconcilerForTest()
+		secret := CreateSecret("test-secret", "test")
 
-	if !strings.Contains(err.Error(), "conflict") {
-		t.Errorf("error should mention routing type conflict, got: %v", err)
-	}
+		app := NewBrokerApp("conflict-app", "test").
+			WithConsumerOf(
+				NewAddressRef("mixed").Build(),
+				NewAddressRef("mixed").WithSubscriptions("sub1").Build(),
+			).
+			Build()
 
-	t.Logf("Correctly rejected conflict: %v", err)
-}
+		err := reconciler.processCapabilities(secret, app)
+		Expect(err).To(HaveOccurred(), "expected error for routing type conflict")
+		Expect(err.Error()).To(ContainSubstring("conflict"))
+	})
 
-func TestProcessCapabilities_SharedAddressSubscriptions_OnlyMulticast(t *testing.T) {
-	reconciler := BrokerServiceInstanceReconcilerForTest()
-	secret := CreateSecret("test-secret", "test")
+	It("shared address subscriptions only multicast", Label(unitLabel), func() {
+		reconciler := BrokerServiceInstanceReconcilerForTest()
+		secret := CreateSecret("test-secret", "test")
 
-	app := NewBrokerApp("producer-app", "test").
-		WithSharedAddresses(NewAddressType("events").WithSubscriptions("sub1").Build()).
-		WithProducerOf(v1beta2.AddressRef{Address: "events", PubSub: &[]bool{true}[0]}).Build()
+		app := NewBrokerApp("producer-app", "test").
+			WithSharedAddresses(NewAddressType("events").WithSubscriptions("sub1").Build()).
+			WithProducerOf(v1beta2.AddressRef{Address: "events", PubSub: &[]bool{true}[0]}).Build()
 
-	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+		err := reconciler.processCapabilities(secret, app)
+		Expect(err).NotTo(HaveOccurred())
 
-	caps := parseCapabilities(t, secret, "producer-app")
+		caps := parseCapabilities(secret, "producer-app")
 
-	eventsAddr := caps.AddressConfigurations["events"]
-	if eventsAddr == nil {
-		t.Fatal("expected addressConfigurations for 'events'")
-	}
+		eventsAddr := caps.AddressConfigurations["events"]
+		Expect(eventsAddr).NotTo(BeNil(), "expected addressConfigurations for 'events'")
 
-	// Should have MULTICAST routing only
-	if eventsAddr.RoutingTypes != brokerproperties.RoutingTypeMulticast {
-		t.Errorf("expected routingTypes=MULTICAST, got %s", eventsAddr.RoutingTypes)
-	}
-}
+		Expect(eventsAddr.RoutingTypes).To(Equal(brokerproperties.RoutingTypeMulticast),
+			"expected routingTypes=MULTICAST")
+	})
+})
