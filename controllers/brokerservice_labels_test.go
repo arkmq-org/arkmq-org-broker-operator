@@ -18,12 +18,12 @@ package controllers
 
 import (
 	"context"
-	"testing"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	"github.com/go-logr/logr"
-	"github.com/stretchr/testify/assert"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -46,296 +46,288 @@ func intstrFromInt(i int) intstr.IntOrString {
 	return intstr.FromInt(i)
 }
 
-func TestPodLabels_StandardKubernetesLabels(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-	_ = networkingv1.AddToScheme(scheme)
-	_ = appsv1.AddToScheme(scheme)
+var _ = Describe("brokerservice pod labels", func() {
 
-	ns := "default"
-	svcName := "my-broker"
+	It("applies standard kubernetes labels", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = v1beta2.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
+		_ = networkingv1.AddToScheme(scheme)
+		_ = appsv1.AddToScheme(scheme)
 
-	nsObj := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: ns,
-		},
-	}
+		ns := "default"
+		svcName := "my-broker"
 
-	service := &v1beta2.BrokerService{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      svcName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerServiceSpec{},
-	}
-
-	cl := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(WithCerts(service, nsObj)...).
-		WithStatusSubresource(service).
-		WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
-			app := obj.(*v1beta2.BrokerApp)
-			if app.Status.Service != nil {
-				return []string{app.Status.Service.Key()}
-			}
-			return nil
-		}).
-		Build()
-
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
-
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err)
-
-	broker := &v1beta2.Broker{}
-	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
-	assert.NoError(t, err)
-
-	labels := broker.Spec.Labels
-	assert.Equal(t, svcName, labels[selectors.LabelAppKubernetesInstance])
-	assert.Equal(t, "broker-service", labels[selectors.LabelAppKubernetesComponent])
-	assert.Equal(t, "arkmq-org-broker-operator", labels[selectors.LabelAppKubernetesManagedBy])
-	assert.Equal(t, svcName, labels[selectors.LabelBrokerService])
-	assert.Equal(t, "0", labels[selectors.LabelBrokerPeerIndex])
-}
-
-func TestPodLabels_NetworkPolicyMatchingBrokerService(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-	_ = networkingv1.AddToScheme(scheme)
-	_ = appsv1.AddToScheme(scheme)
-
-	ns := "default"
-	svcName := "my-broker"
-
-	nsObj := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: ns,
-		},
-	}
-
-	netpol := &networkingv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "broker-netpol",
-			Namespace: ns,
-		},
-		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					selectors.LabelBrokerService: svcName,
-				},
+		nsObj := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: ns,
 			},
-			Ingress: []networkingv1.NetworkPolicyIngressRule{
-				{
-					Ports: []networkingv1.NetworkPolicyPort{
-						{
-							Protocol: ptrTo(corev1.ProtocolTCP),
-							Port:     ptrTo(intstrFromInt(61616)),
-						},
-						{
-							Protocol: ptrTo(corev1.ProtocolTCP),
-							Port:     ptrTo(intstrFromInt(61617)),
-						},
-						{
-							Protocol: ptrTo(corev1.ProtocolTCP),
-							Port:     ptrTo(intstrFromInt(61618)),
-						},
-					},
-				},
+		}
+
+		service := &v1beta2.BrokerService{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      svcName,
+				Namespace: ns,
 			},
-		},
-	}
+			Spec: v1beta2.BrokerServiceSpec{},
+		}
 
-	service := &v1beta2.BrokerService{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      svcName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerServiceSpec{},
-	}
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(service, nsObj)...).
+			WithStatusSubresource(service).
+			WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
+				app := obj.(*v1beta2.BrokerApp)
+				if app.Status.Service != nil {
+					return []string{app.Status.Service.Key()}
+				}
+				return nil
+			}).
+			Build()
 
-	cl := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(WithCerts(service, netpol, nsObj)...).
-		WithStatusSubresource(service, &v1beta2.Broker{}).
-		WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
-			app := obj.(*v1beta2.BrokerApp)
-			if app.Status.Service != nil {
-				return []string{app.Status.Service.Key()}
-			}
-			return nil
-		}).
-		Build()
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
 
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+		broker := &v1beta2.Broker{}
+		err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
+		Expect(err).NotTo(HaveOccurred())
 
-	// First reconcile: Creates Broker, no pods yet
-	_, err := r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err)
-
-	updatedService := &v1beta2.BrokerService{}
-	err = cl.Get(context.TODO(), req.NamespacedName, updatedService)
-	assert.NoError(t, err)
-
-	// But Valid condition should be True
-	assert.True(t, meta.IsStatusConditionTrue(updatedService.Status.Conditions, v1beta2.ValidConditionType))
-
-	// Simulate Broker controller creating a StatefulSet
-	ss := &appsv1.StatefulSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      svcName + "-ss",
-			Namespace: ns,
-		},
-		Spec: appsv1.StatefulSetSpec{
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						selectors.LabelAppKubernetesInstance: svcName,
-						selectors.LabelBrokerService:         svcName,
-					},
-				},
-			},
-		},
-	}
-	assert.NoError(t, cl.Create(context.TODO(), ss))
-
-	// Update Broker CR status to mark as Deployed
-	broker := &v1beta2.Broker{}
-	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
-	assert.NoError(t, err)
-	meta.SetStatusCondition(&broker.Status.Conditions, metav1.Condition{
-		Type:   v1beta2.DeployedConditionType,
-		Status: metav1.ConditionTrue,
+		labels := broker.Spec.Labels
+		Expect(labels[selectors.LabelAppKubernetesInstance]).To(Equal(svcName))
+		Expect(labels[selectors.LabelAppKubernetesComponent]).To(Equal("broker-service"))
+		Expect(labels[selectors.LabelAppKubernetesManagedBy]).To(Equal("arkmq-org-broker-operator"))
+		Expect(labels[selectors.LabelBrokerService]).To(Equal(svcName))
+		Expect(labels[selectors.LabelBrokerPeerIndex]).To(Equal("0"))
 	})
-	err = cl.Status().Update(context.TODO(), broker)
-	assert.NoError(t, err)
 
-	// Second reconcile: Discovers ports from StatefulSet pod template labels
-	_, err = r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err)
+	It("network policy matches broker service label", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = v1beta2.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
+		_ = networkingv1.AddToScheme(scheme)
+		_ = appsv1.AddToScheme(scheme)
 
-	err = cl.Get(context.TODO(), req.NamespacedName, updatedService)
-	assert.NoError(t, err)
+		ns := "default"
+		svcName := "my-broker"
 
-}
-
-func TestPodLabels_NetworkPolicyMatchingComponentLabel(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-	_ = networkingv1.AddToScheme(scheme)
-	_ = appsv1.AddToScheme(scheme)
-
-	ns := "default"
-	svcName := "my-broker"
-
-	nsObj := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: ns,
-		},
-	}
-
-	netpol := &networkingv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "all-brokers-policy",
-			Namespace: ns,
-		},
-		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					selectors.LabelAppKubernetesComponent: "broker-service",
-				},
+		nsObj := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: ns,
 			},
-			Ingress: []networkingv1.NetworkPolicyIngressRule{
-				{
-					Ports: []networkingv1.NetworkPolicyPort{
-						{
-							Protocol: ptrTo(corev1.ProtocolTCP),
-							Port:     ptrTo(intstrFromInt(61616)),
-							EndPort:  ptrTo(int32(61620)),
+		}
+
+		netpol := &networkingv1.NetworkPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "broker-netpol",
+				Namespace: ns,
+			},
+			Spec: networkingv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						selectors.LabelBrokerService: svcName,
+					},
+				},
+				Ingress: []networkingv1.NetworkPolicyIngressRule{
+					{
+						Ports: []networkingv1.NetworkPolicyPort{
+							{
+								Protocol: ptrTo(corev1.ProtocolTCP),
+								Port:     ptrTo(intstrFromInt(61616)),
+							},
+							{
+								Protocol: ptrTo(corev1.ProtocolTCP),
+								Port:     ptrTo(intstrFromInt(61617)),
+							},
+							{
+								Protocol: ptrTo(corev1.ProtocolTCP),
+								Port:     ptrTo(intstrFromInt(61618)),
+							},
 						},
 					},
 				},
 			},
-		},
-	}
+		}
 
-	service := &v1beta2.BrokerService{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      svcName,
-			Namespace: ns,
-		},
-		Spec: v1beta2.BrokerServiceSpec{},
-	}
+		service := &v1beta2.BrokerService{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      svcName,
+				Namespace: ns,
+			},
+			Spec: v1beta2.BrokerServiceSpec{},
+		}
 
-	cl := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(WithCerts(service, netpol, nsObj)...).
-		WithStatusSubresource(service, &v1beta2.Broker{}).
-		WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
-			app := obj.(*v1beta2.BrokerApp)
-			if app.Status.Service != nil {
-				return []string{app.Status.Service.Key()}
-			}
-			return nil
-		}).
-		Build()
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(service, netpol, nsObj)...).
+			WithStatusSubresource(service, &v1beta2.Broker{}).
+			WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
+				app := obj.(*v1beta2.BrokerApp)
+				if app.Status.Service != nil {
+					return []string{app.Status.Service.Key()}
+				}
+				return nil
+			}).
+			Build()
 
-	r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
-	// First reconcile: Creates Broker, no pods yet
-	_, err := r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err)
+		_, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
 
-	updatedService := &v1beta2.BrokerService{}
-	err = cl.Get(context.TODO(), req.NamespacedName, updatedService)
-	assert.NoError(t, err)
+		updatedService := &v1beta2.BrokerService{}
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedService)
+		Expect(err).NotTo(HaveOccurred())
 
-	assert.True(t, meta.IsStatusConditionTrue(updatedService.Status.Conditions, v1beta2.ValidConditionType))
+		Expect(meta.IsStatusConditionTrue(updatedService.Status.Conditions, v1beta2.ValidConditionType)).To(BeTrue())
 
-	// Simulate Broker controller creating a StatefulSet with app.kubernetes.io/component label
-	ss := &appsv1.StatefulSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      svcName + "-ss",
-			Namespace: ns,
-		},
-		Spec: appsv1.StatefulSetSpec{
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						selectors.LabelAppKubernetesInstance:  svcName,
+		ss := &appsv1.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      svcName + "-ss",
+				Namespace: ns,
+			},
+			Spec: appsv1.StatefulSetSpec{
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							selectors.LabelAppKubernetesInstance: svcName,
+							selectors.LabelBrokerService:         svcName,
+						},
+					},
+				},
+			},
+		}
+		Expect(cl.Create(context.TODO(), ss)).NotTo(HaveOccurred())
+
+		broker := &v1beta2.Broker{}
+		err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
+		Expect(err).NotTo(HaveOccurred())
+		meta.SetStatusCondition(&broker.Status.Conditions, metav1.Condition{
+			Type:   v1beta2.DeployedConditionType,
+			Status: metav1.ConditionTrue,
+		})
+		err = cl.Status().Update(context.TODO(), broker)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedService)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("network policy matches component label", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = v1beta2.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
+		_ = networkingv1.AddToScheme(scheme)
+		_ = appsv1.AddToScheme(scheme)
+
+		ns := "default"
+		svcName := "my-broker"
+
+		nsObj := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: ns,
+			},
+		}
+
+		netpol := &networkingv1.NetworkPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "all-brokers-policy",
+				Namespace: ns,
+			},
+			Spec: networkingv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{
 						selectors.LabelAppKubernetesComponent: "broker-service",
-						selectors.LabelBrokerService:          svcName,
+					},
+				},
+				Ingress: []networkingv1.NetworkPolicyIngressRule{
+					{
+						Ports: []networkingv1.NetworkPolicyPort{
+							{
+								Protocol: ptrTo(corev1.ProtocolTCP),
+								Port:     ptrTo(intstrFromInt(61616)),
+								EndPort:  ptrTo(int32(61620)),
+							},
+						},
 					},
 				},
 			},
-		},
-	}
-	assert.NoError(t, cl.Create(context.TODO(), ss))
+		}
 
-	// Update Broker CR status to mark as Deployed
-	broker := &v1beta2.Broker{}
-	err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
-	assert.NoError(t, err)
-	meta.SetStatusCondition(&broker.Status.Conditions, metav1.Condition{
-		Type:   v1beta2.DeployedConditionType,
-		Status: metav1.ConditionTrue,
+		service := &v1beta2.BrokerService{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      svcName,
+				Namespace: ns,
+			},
+			Spec: v1beta2.BrokerServiceSpec{},
+		}
+
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(service, netpol, nsObj)...).
+			WithStatusSubresource(service, &v1beta2.Broker{}).
+			WithIndex(&v1beta2.BrokerApp{}, "status.serviceBinding", func(obj client.Object) []string {
+				app := obj.(*v1beta2.BrokerApp)
+				if app.Status.Service != nil {
+					return []string{app.Status.Service.Key()}
+				}
+				return nil
+			}).
+			Build()
+
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+
+		_, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		updatedService := &v1beta2.BrokerService{}
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedService)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(meta.IsStatusConditionTrue(updatedService.Status.Conditions, v1beta2.ValidConditionType)).To(BeTrue())
+
+		ss := &appsv1.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      svcName + "-ss",
+				Namespace: ns,
+			},
+			Spec: appsv1.StatefulSetSpec{
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							selectors.LabelAppKubernetesInstance:  svcName,
+							selectors.LabelAppKubernetesComponent: "broker-service",
+							selectors.LabelBrokerService:          svcName,
+						},
+					},
+				},
+			},
+		}
+		Expect(cl.Create(context.TODO(), ss)).NotTo(HaveOccurred())
+
+		broker := &v1beta2.Broker{}
+		err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, broker)
+		Expect(err).NotTo(HaveOccurred())
+		meta.SetStatusCondition(&broker.Status.Conditions, metav1.Condition{
+			Type:   v1beta2.DeployedConditionType,
+			Status: metav1.ConditionTrue,
+		})
+		err = cl.Status().Update(context.TODO(), broker)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedService)
+		Expect(err).NotTo(HaveOccurred())
 	})
-	err = cl.Status().Update(context.TODO(), broker)
-	assert.NoError(t, err)
-
-	// Second reconcile: Discovers ports from StatefulSet pod template labels
-	_, err = r.Reconcile(context.TODO(), req)
-	assert.NoError(t, err)
-
-	err = cl.Get(context.TODO(), req.NamespacedName, updatedService)
-	assert.NoError(t, err)
-
-}
+})

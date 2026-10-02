@@ -17,200 +17,195 @@ limitations under the License.
 package controllers
 
 import (
-	"testing"
-
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
-	"github.com/stretchr/testify/assert"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestAssignNextAvailablePort_FirstPort(t *testing.T) {
-	usedPorts := make(map[int32]bool)
+var _ = Describe("port assignment", func() {
 
-	port, err := assignNextAvailablePort(usedPorts)
+	Context("assignNextAvailablePort", func() {
+		It("assigns first port when none used", Label(unitLabel), func() {
+			usedPorts := make(map[int32]bool)
 
-	assert.NoError(t, err)
-	assert.Equal(t, int32(61616), port)
-}
+			port, err := assignNextAvailablePort(usedPorts)
 
-func TestAssignNextAvailablePort_MiddlePort(t *testing.T) {
-	usedPorts := map[int32]bool{
-		61616: true,
-		61617: true,
-	}
+			Expect(err).NotTo(HaveOccurred())
+			Expect(port).To(Equal(int32(61616)))
+		})
 
-	port, err := assignNextAvailablePort(usedPorts)
+		It("assigns next port after used ones", Label(unitLabel), func() {
+			usedPorts := map[int32]bool{
+				61616: true,
+				61617: true,
+			}
 
-	assert.NoError(t, err)
-	assert.Equal(t, int32(61618), port)
-}
+			port, err := assignNextAvailablePort(usedPorts)
 
-func TestAssignNextAvailablePort_LastPort(t *testing.T) {
-	// Mark all ports except the last one as used
-	usedPorts := make(map[int32]bool)
-	for port := int32(61616); port < 65535; port++ {
-		usedPorts[port] = true
-	}
+			Expect(err).NotTo(HaveOccurred())
+			Expect(port).To(Equal(int32(61618)))
+		})
 
-	port, err := assignNextAvailablePort(usedPorts)
+		It("assigns last available port", Label(unitLabel), func() {
+			usedPorts := make(map[int32]bool)
+			for port := int32(61616); port < 65535; port++ {
+				usedPorts[port] = true
+			}
 
-	assert.NoError(t, err)
-	assert.Equal(t, int32(65535), port)
-}
+			port, err := assignNextAvailablePort(usedPorts)
 
-func TestAssignNextAvailablePort_Exhausted(t *testing.T) {
-	// Mark all ports as used
-	usedPorts := make(map[int32]bool)
-	for port := int32(61616); port <= 65535; port++ {
-		usedPorts[port] = true
-	}
+			Expect(err).NotTo(HaveOccurred())
+			Expect(port).To(Equal(int32(65535)))
+		})
 
-	port, err := assignNextAvailablePort(usedPorts)
+		It("returns error when all ports exhausted", Label(unitLabel), func() {
+			usedPorts := make(map[int32]bool)
+			for port := int32(61616); port <= 65535; port++ {
+				usedPorts[port] = true
+			}
 
-	assert.Error(t, err)
-	assert.Equal(t, int32(0), port)
-	assert.Contains(t, err.Error(), "exhausted")
-	assert.Contains(t, err.Error(), "61616")
-	assert.Contains(t, err.Error(), "65535")
-}
+			port, err := assignNextAvailablePort(usedPorts)
 
-// TestCollectUsedPorts_NoApps tests collectUsedPorts with no apps
-func TestCollectUsedPorts_NoApps(t *testing.T) {
-	apps := []v1beta2.BrokerApp{}
+			Expect(err).To(HaveOccurred())
+			Expect(port).To(Equal(int32(0)))
+			Expect(err.Error()).To(ContainSubstring("exhausted"))
+			Expect(err.Error()).To(ContainSubstring("61616"))
+			Expect(err.Error()).To(ContainSubstring("65535"))
+		})
+	})
 
-	used := collectUsedPorts(apps, nil)
+	Context("collectUsedPorts", func() {
+		It("returns empty map for no apps", Label(unitLabel), func() {
+			apps := []v1beta2.BrokerApp{}
 
-	assert.Empty(t, used)
-}
+			used := collectUsedPorts(apps, nil)
 
-// TestCollectUsedPorts_SingleApp tests collectUsedPorts with one app
-func TestCollectUsedPorts_SingleApp(t *testing.T) {
-	apps := []v1beta2.BrokerApp{
-		{
-			Status: v1beta2.BrokerAppStatus{
-				Service: &v1beta2.BrokerServiceBindingStatus{
-					AssignedPort: 61616,
+			Expect(used).To(BeEmpty())
+		})
+
+		It("collects port from single app", Label(unitLabel), func() {
+			apps := []v1beta2.BrokerApp{
+				{
+					Status: v1beta2.BrokerAppStatus{
+						Service: &v1beta2.BrokerServiceBindingStatus{
+							AssignedPort: 61616,
+						},
+					},
 				},
-			},
-		},
-	}
+			}
 
-	used := collectUsedPorts(apps, nil)
+			used := collectUsedPorts(apps, nil)
 
-	assert.Len(t, used, 1)
-	assert.True(t, used[61616])
-}
+			Expect(used).To(HaveLen(1))
+			Expect(used[61616]).To(BeTrue())
+		})
 
-// TestCollectUsedPorts_MultipleApps tests collectUsedPorts with multiple apps
-func TestCollectUsedPorts_MultipleApps(t *testing.T) {
-	apps := []v1beta2.BrokerApp{
-		{
-			Status: v1beta2.BrokerAppStatus{
-				Service: &v1beta2.BrokerServiceBindingStatus{
-					AssignedPort: 61616,
+		It("collects ports from multiple apps", Label(unitLabel), func() {
+			apps := []v1beta2.BrokerApp{
+				{
+					Status: v1beta2.BrokerAppStatus{
+						Service: &v1beta2.BrokerServiceBindingStatus{
+							AssignedPort: 61616,
+						},
+					},
 				},
-			},
-		},
-		{
-			Status: v1beta2.BrokerAppStatus{
-				Service: &v1beta2.BrokerServiceBindingStatus{
-					AssignedPort: 61617,
+				{
+					Status: v1beta2.BrokerAppStatus{
+						Service: &v1beta2.BrokerServiceBindingStatus{
+							AssignedPort: 61617,
+						},
+					},
 				},
-			},
-		},
-	}
+			}
 
-	used := collectUsedPorts(apps, nil)
+			used := collectUsedPorts(apps, nil)
 
-	assert.Len(t, used, 2)
-	assert.True(t, used[61616])
-	assert.True(t, used[61617])
-}
+			Expect(used).To(HaveLen(2))
+			Expect(used[61616]).To(BeTrue())
+			Expect(used[61617]).To(BeTrue())
+		})
 
-// TestCollectUsedPorts_ExcludeApp tests that excludeApp is properly skipped
-func TestCollectUsedPorts_ExcludeApp(t *testing.T) {
-	excludeApp := &v1beta2.BrokerApp{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "app-to-exclude",
-			Namespace: "test",
-		},
-		Status: v1beta2.BrokerAppStatus{
-			Service: &v1beta2.BrokerServiceBindingStatus{
-				AssignedPort: 61616,
-			},
-		},
-	}
-
-	apps := []v1beta2.BrokerApp{
-		*excludeApp,
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "app-to-include",
-				Namespace: "test",
-			},
-			Status: v1beta2.BrokerAppStatus{
-				Service: &v1beta2.BrokerServiceBindingStatus{
-					AssignedPort: 61617,
+		It("excludes specified app", Label(unitLabel), func() {
+			excludeApp := &v1beta2.BrokerApp{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "app-to-exclude",
+					Namespace: "test",
 				},
-			},
-		},
-	}
-
-	used := collectUsedPorts(apps, excludeApp)
-
-	// Should only have one port (61617), excluding the app's port (61616)
-	assert.Len(t, used, 1)
-	assert.False(t, used[61616]) // Excluded app's port
-	assert.True(t, used[61617])  // Other app's port
-}
-
-// TestCollectUsedPorts_AppsWithNoService tests apps without service binding
-func TestCollectUsedPorts_AppsWithNoService(t *testing.T) {
-	apps := []v1beta2.BrokerApp{
-		{
-			Status: v1beta2.BrokerAppStatus{
-				Service: nil, // No service binding
-			},
-		},
-		{
-			Status: v1beta2.BrokerAppStatus{
-				Service: &v1beta2.BrokerServiceBindingStatus{
-					AssignedPort: 61616,
+				Status: v1beta2.BrokerAppStatus{
+					Service: &v1beta2.BrokerServiceBindingStatus{
+						AssignedPort: 61616,
+					},
 				},
-			},
-		},
-	}
+			}
 
-	used := collectUsedPorts(apps, nil)
-
-	// Should only count the app with a service binding
-	assert.Len(t, used, 1)
-	assert.True(t, used[61616])
-}
-
-// TestCollectUsedPorts_AppsWithZeroPort tests apps with zero port (not yet assigned)
-func TestCollectUsedPorts_AppsWithZeroPort(t *testing.T) {
-	apps := []v1beta2.BrokerApp{
-		{
-			Status: v1beta2.BrokerAppStatus{
-				Service: &v1beta2.BrokerServiceBindingStatus{
-					AssignedPort: 0, // Not yet assigned
+			apps := []v1beta2.BrokerApp{
+				*excludeApp,
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "app-to-include",
+						Namespace: "test",
+					},
+					Status: v1beta2.BrokerAppStatus{
+						Service: &v1beta2.BrokerServiceBindingStatus{
+							AssignedPort: 61617,
+						},
+					},
 				},
-			},
-		},
-		{
-			Status: v1beta2.BrokerAppStatus{
-				Service: &v1beta2.BrokerServiceBindingStatus{
-					AssignedPort: 61616,
+			}
+
+			used := collectUsedPorts(apps, excludeApp)
+
+			Expect(used).To(HaveLen(1))
+			Expect(used[61616]).To(BeFalse())
+			Expect(used[61617]).To(BeTrue())
+		})
+
+		It("skips apps without service binding", Label(unitLabel), func() {
+			apps := []v1beta2.BrokerApp{
+				{
+					Status: v1beta2.BrokerAppStatus{
+						Service: nil,
+					},
 				},
-			},
-		},
-	}
+				{
+					Status: v1beta2.BrokerAppStatus{
+						Service: &v1beta2.BrokerServiceBindingStatus{
+							AssignedPort: 61616,
+						},
+					},
+				},
+			}
 
-	used := collectUsedPorts(apps, nil)
+			used := collectUsedPorts(apps, nil)
 
-	// Should only count the app with a real port assignment
-	assert.Len(t, used, 1)
-	assert.True(t, used[61616])
-	assert.False(t, used[0]) // Zero port should not be counted
-}
+			Expect(used).To(HaveLen(1))
+			Expect(used[61616]).To(BeTrue())
+		})
+
+		It("skips apps with zero port", Label(unitLabel), func() {
+			apps := []v1beta2.BrokerApp{
+				{
+					Status: v1beta2.BrokerAppStatus{
+						Service: &v1beta2.BrokerServiceBindingStatus{
+							AssignedPort: 0,
+						},
+					},
+				},
+				{
+					Status: v1beta2.BrokerAppStatus{
+						Service: &v1beta2.BrokerServiceBindingStatus{
+							AssignedPort: 61616,
+						},
+					},
+				},
+			}
+
+			used := collectUsedPorts(apps, nil)
+
+			Expect(used).To(HaveLen(1))
+			Expect(used[61616]).To(BeTrue())
+			Expect(used[0]).To(BeFalse())
+		})
+	})
+})

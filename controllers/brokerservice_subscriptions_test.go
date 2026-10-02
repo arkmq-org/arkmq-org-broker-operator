@@ -15,15 +15,12 @@ limitations under the License.
 package controllers
 
 import (
-	"testing"
-
 	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-// Helper functions for paired tests
-
-func testEmptySubscriptionsArrayMulticastOnly(t *testing.T, useShared bool) {
-	t.Helper()
+func testEmptySubscriptionsArrayMulticastOnly(useShared bool) {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
@@ -36,34 +33,24 @@ func testEmptySubscriptionsArrayMulticastOnly(t *testing.T, useShared bool) {
 	app := builder.Build()
 
 	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
-	caps := parseCapabilities(t, secret, "multicast-app")
+	caps := parseCapabilities(secret, "multicast-app")
 
 	eventsAddr := caps.AddressConfigurations["events"]
-	if eventsAddr == nil {
-		t.Fatal("expected addressConfigurations for owned address 'events'")
-	}
+	Expect(eventsAddr).NotTo(BeNil(), "expected addressConfigurations for owned address 'events'")
 
-	if eventsAddr.RoutingTypes != brokerproperties.RoutingTypeMulticast {
-		t.Errorf("expected MULTICAST routing type for empty queues array, got %q", eventsAddr.RoutingTypes)
-	}
+	Expect(eventsAddr.RoutingTypes).To(Equal(brokerproperties.RoutingTypeMulticast),
+		"expected MULTICAST routing type for empty queues array")
 
-	// Should NOT have any queueConfigs (no specific queues declared for multicast-only)
-	if len(eventsAddr.QueueConfigs) > 0 {
-		t.Error("should NOT have queueConfigs for multicast-only address (empty queues array)")
-	}
+	Expect(eventsAddr.QueueConfigs).To(BeEmpty(),
+		"should NOT have queueConfigs for multicast-only address (empty queues array)")
 
-	// Should NOT have RBAC since no capabilities
-	if _, ok := caps.SecurityRoles["events"]; ok {
-		t.Error("should NOT have securityRoles when app has no capabilities")
-	}
+	Expect(caps.SecurityRoles).NotTo(HaveKey("events"),
+		"should NOT have securityRoles when app has no capabilities")
 }
 
-func testSingleQueueAnycastRouting(t *testing.T, useShared bool) {
-	t.Helper()
+func testSingleQueueAnycastRouting(useShared bool) {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
@@ -76,35 +63,25 @@ func testSingleQueueAnycastRouting(t *testing.T, useShared bool) {
 	app := builder.Build()
 
 	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
-	caps := parseCapabilities(t, secret, "anycast-app")
+	caps := parseCapabilities(secret, "anycast-app")
 
 	ordersAddr := caps.AddressConfigurations["orders"]
-	if ordersAddr == nil {
-		t.Fatal("expected addressConfigurations for owned address 'orders'")
-	}
+	Expect(ordersAddr).NotTo(BeNil(), "expected addressConfigurations for owned address 'orders'")
 
-	if ordersAddr.RoutingTypes != brokerproperties.RoutingTypeAnycast {
-		t.Errorf("expected ANYCAST routing type for address with queues, got %q", ordersAddr.RoutingTypes)
-	}
+	Expect(ordersAddr.RoutingTypes).To(Equal(brokerproperties.RoutingTypeAnycast),
+		"expected ANYCAST routing type for address with queues")
 
 	queueCfg := ordersAddr.QueueConfigs["orders"]
-	if queueCfg == nil {
-		t.Fatal("expected queueConfigs for declared queue 'orders'")
-	}
-	if queueCfg.RoutingType != brokerproperties.RoutingTypeAnycast {
-		t.Errorf("expected queueConfigs routingType=ANYCAST for declared queue, got %q", queueCfg.RoutingType)
-	}
-	if queueCfg.Address != "orders" {
-		t.Errorf("expected queueConfigs address=orders, got %q", queueCfg.Address)
-	}
+	Expect(queueCfg).NotTo(BeNil(), "expected queueConfigs for declared queue 'orders'")
+	Expect(queueCfg.RoutingType).To(Equal(brokerproperties.RoutingTypeAnycast),
+		"expected queueConfigs routingType=ANYCAST for declared queue")
+	Expect(queueCfg.Address).To(Equal("orders"),
+		"expected queueConfigs address=orders")
 }
 
-func testMultipleSubsAllCreated(t *testing.T, useShared bool) {
-	t.Helper()
+func testMultipleSubsAllCreated(useShared bool) {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
@@ -117,38 +94,27 @@ func testMultipleSubsAllCreated(t *testing.T, useShared bool) {
 	app := builder.Build()
 
 	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
-	caps := parseCapabilities(t, secret, "multi-queue-app")
+	caps := parseCapabilities(secret, "multi-queue-app")
 
 	tasksAddr := caps.AddressConfigurations["tasks"]
-	if tasksAddr == nil {
-		t.Fatal("expected addressConfigurations for owned address 'tasks'")
-	}
+	Expect(tasksAddr).NotTo(BeNil(), "expected addressConfigurations for owned address 'tasks'")
 
-	if tasksAddr.RoutingTypes != brokerproperties.RoutingTypeMulticast {
-		t.Errorf("expected MULTICAST routing for subscription address, got %q", tasksAddr.RoutingTypes)
-	}
+	Expect(tasksAddr.RoutingTypes).To(Equal(brokerproperties.RoutingTypeMulticast),
+		"expected MULTICAST routing for subscription address")
 
 	for _, queueName := range []string{"high-priority", "low-priority", "default"} {
 		queueCfg := tasksAddr.QueueConfigs[queueName]
-		if queueCfg == nil {
-			t.Errorf("expected queueConfigs for declared queue %q", queueName)
-			continue
-		}
-		if queueCfg.RoutingType != brokerproperties.RoutingTypeMulticast {
-			t.Errorf("expected routingType=MULTICAST for queue %q (subscriptions imply pub/sub), got %q", queueName, queueCfg.RoutingType)
-		}
-		if queueCfg.Address != "tasks" {
-			t.Errorf("expected queue %q to map to address 'tasks', got %q", queueName, queueCfg.Address)
-		}
+		Expect(queueCfg).NotTo(BeNil(), "expected queueConfigs for declared queue %q", queueName)
+		Expect(queueCfg.RoutingType).To(Equal(brokerproperties.RoutingTypeMulticast),
+			"expected routingType=MULTICAST for queue %q (subscriptions imply pub/sub)", queueName)
+		Expect(queueCfg.Address).To(Equal("tasks"),
+			"expected queue %q to map to address 'tasks'", queueName)
 	}
 }
 
-func testSubsWithCapabilitiesSubsAndRBAC(t *testing.T, useShared bool) {
-	t.Helper()
+func testSubsWithCapabilitiesSubsAndRBAC(useShared bool) {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
@@ -163,37 +129,29 @@ func testSubsWithCapabilitiesSubsAndRBAC(t *testing.T, useShared bool) {
 		Build()
 
 	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
-	caps := parseCapabilities(t, secret, "queue-with-caps")
+	caps := parseCapabilities(secret, "queue-with-caps")
 
 	commandsAddr := caps.AddressConfigurations["commands"]
-	if commandsAddr == nil {
-		t.Fatal("expected addressConfigurations for 'commands'")
-	}
-	if commandsAddr.RoutingTypes != brokerproperties.RoutingTypeAnycast {
-		t.Errorf("expected ANYCAST routing, got %q", commandsAddr.RoutingTypes)
-	}
-	if commandsAddr.QueueConfigs["commands"] == nil || commandsAddr.QueueConfigs["commands"].RoutingType != brokerproperties.RoutingTypeAnycast {
-		t.Error("expected queueConfigs for declared queue 'commands' with ANYCAST routing")
-	}
+	Expect(commandsAddr).NotTo(BeNil(), "expected addressConfigurations for 'commands'")
+	Expect(commandsAddr.RoutingTypes).To(Equal(brokerproperties.RoutingTypeAnycast),
+		"expected ANYCAST routing")
+	Expect(commandsAddr.QueueConfigs["commands"]).NotTo(BeNil())
+	Expect(commandsAddr.QueueConfigs["commands"].RoutingType).To(Equal(brokerproperties.RoutingTypeAnycast),
+		"expected queueConfigs for declared queue 'commands' with ANYCAST routing")
 
 	commandsRoles := caps.SecurityRoles["commands"]
-	if commandsRoles == nil {
-		t.Fatal("expected securityRoles for 'commands'")
-	}
-	if p := commandsRoles["test-queue-with-caps-producer"]; p == nil || !p.Send {
-		t.Error("expected producer RBAC role with send=true")
-	}
-	if p := commandsRoles["test-queue-with-caps-consumer"]; p == nil || !p.Consume {
-		t.Error("expected consumer RBAC role with consume=true")
-	}
+	Expect(commandsRoles).NotTo(BeNil(), "expected securityRoles for 'commands'")
+	p := commandsRoles["test-queue-with-caps-producer"]
+	Expect(p).NotTo(BeNil(), "expected producer RBAC role")
+	Expect(p.Send).To(BeTrue(), "expected producer RBAC role with send=true")
+	c := commandsRoles["test-queue-with-caps-consumer"]
+	Expect(c).NotTo(BeNil(), "expected consumer RBAC role")
+	Expect(c.Consume).To(BeTrue(), "expected consumer RBAC role with consume=true")
 }
 
-func testNoQueuesFieldInferredFromCapabilities(t *testing.T, useShared bool) {
-	t.Helper()
+func testNoQueuesFieldInferredFromCapabilities(useShared bool) {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
@@ -206,29 +164,18 @@ func testNoQueuesFieldInferredFromCapabilities(t *testing.T, useShared bool) {
 	app := builder.WithConsumerOf(NewAddressRef("legacy").Build()).Build()
 
 	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
-	caps := parseCapabilities(t, secret, "inferred-queues")
+	caps := parseCapabilities(secret, "inferred-queues")
 
 	legacyAddr := caps.AddressConfigurations["legacy"]
-	if legacyAddr == nil {
-		t.Fatal("expected addressConfigurations for owned address 'legacy'")
-	}
-	if legacyAddr.RoutingTypes == "" {
-		t.Error("expected routingTypes for owned address 'legacy'")
-	}
-	if legacyAddr.QueueConfigs["legacy"] == nil {
-		t.Error("expected queueConfigs inferred from ConsumerOf capability")
-	}
-	if _, ok := caps.SecurityRoles["legacy"]; !ok {
-		t.Error("expected securityRoles from capabilities")
-	}
+	Expect(legacyAddr).NotTo(BeNil(), "expected addressConfigurations for owned address 'legacy'")
+	Expect(legacyAddr.RoutingTypes).NotTo(BeEmpty(), "expected routingTypes for owned address 'legacy'")
+	Expect(legacyAddr.QueueConfigs["legacy"]).NotTo(BeNil(), "expected queueConfigs inferred from ConsumerOf capability")
+	Expect(caps.SecurityRoles).To(HaveKey("legacy"), "expected securityRoles from capabilities")
 }
 
-func testMixedMulticastAndAnycast(t *testing.T, useShared bool) {
-	t.Helper()
+func testMixedMulticastAndAnycast(useShared bool) {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
@@ -247,30 +194,20 @@ func testMixedMulticastAndAnycast(t *testing.T, useShared bool) {
 	app := builder.Build()
 
 	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
-	caps := parseCapabilities(t, secret, "mixed-routing")
+	caps := parseCapabilities(secret, "mixed-routing")
 
-	if caps.AddressConfigurations["events"] == nil {
-		t.Error("expected addressConfigurations for 'events'")
-	}
-	if caps.AddressConfigurations["commands"] == nil {
-		t.Error("expected addressConfigurations for 'commands'")
-	}
+	Expect(caps.AddressConfigurations).To(HaveKey("events"), "expected addressConfigurations for 'events'")
+	Expect(caps.AddressConfigurations).To(HaveKey("commands"), "expected addressConfigurations for 'commands'")
 
-	// Should have queueConfig only for 'commands' (anycast), not 'events' (multicast-only)
-	if len(caps.AddressConfigurations["events"].QueueConfigs) > 0 {
-		t.Error("should NOT have queueConfigs for multicast-only address 'events'")
-	}
-	if caps.AddressConfigurations["commands"].QueueConfigs["commands"] == nil {
-		t.Error("expected queueConfigs for anycast address 'commands'")
-	}
+	Expect(caps.AddressConfigurations["events"].QueueConfigs).To(BeEmpty(),
+		"should NOT have queueConfigs for multicast-only address 'events'")
+	Expect(caps.AddressConfigurations["commands"].QueueConfigs["commands"]).NotTo(BeNil(),
+		"expected queueConfigs for anycast address 'commands'")
 }
 
-func testSubsWithSubscriberCapability(t *testing.T, useShared bool) {
-	t.Helper()
+func testSubsWithSubscriberCapability(useShared bool) {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
@@ -283,81 +220,76 @@ func testSubsWithSubscriberCapability(t *testing.T, useShared bool) {
 	app := builder.WithConsumerOf(NewAddressRef("notifications").WithSubscriptions("push").Build()).Build()
 
 	err := reconciler.processCapabilities(secret, app)
-	if err != nil {
-		t.Fatalf("processCapabilities failed: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 
-	caps := parseCapabilities(t, secret, "subscriber-with-queues")
+	caps := parseCapabilities(secret, "subscriber-with-queues")
 
 	notifAddr := caps.AddressConfigurations["notifications"]
-	if notifAddr == nil {
-		t.Fatal("expected addressConfigurations for 'notifications'")
-	}
+	Expect(notifAddr).NotTo(BeNil(), "expected addressConfigurations for 'notifications'")
 
 	for _, queueName := range []string{"email", "sms", "push"} {
 		queueCfg := notifAddr.QueueConfigs[queueName]
-		if queueCfg == nil {
-			t.Errorf("expected queueConfigs for queue %q", queueName)
-			continue
-		}
-		if queueCfg.RoutingType != brokerproperties.RoutingTypeMulticast {
-			t.Errorf("expected MULTICAST routing for queue %q, got %q", queueName, queueCfg.RoutingType)
-		}
+		Expect(queueCfg).NotTo(BeNil(), "expected queueConfigs for queue %q", queueName)
+		Expect(queueCfg.RoutingType).To(Equal(brokerproperties.RoutingTypeMulticast),
+			"expected MULTICAST routing for queue %q", queueName)
 	}
 }
 
-func TestProcessCapabilities_EmptySubscriptionsArray_MulticastOnly(t *testing.T) {
-	testEmptySubscriptionsArrayMulticastOnly(t, false)
-}
+var _ = Describe("brokerservice subscriptions", func() {
 
-func TestProcessCapabilities_EmptySubscriptionsArray_MulticastOnly_Shared(t *testing.T) {
-	testEmptySubscriptionsArrayMulticastOnly(t, true)
-}
+	It("empty subscriptions array multicast only private", Label(unitLabel), func() {
+		testEmptySubscriptionsArrayMulticastOnly(false)
+	})
 
-func TestProcessCapabilities_SingleQueue_AnycastRouting(t *testing.T) {
-	testSingleQueueAnycastRouting(t, false)
-}
+	It("empty subscriptions array multicast only shared", Label(unitLabel), func() {
+		testEmptySubscriptionsArrayMulticastOnly(true)
+	})
 
-func TestProcessCapabilities_SingleQueue_AnycastRouting_Shared(t *testing.T) {
-	testSingleQueueAnycastRouting(t, true)
-}
+	It("single queue anycast routing private", Label(unitLabel), func() {
+		testSingleQueueAnycastRouting(false)
+	})
 
-func TestProcessCapabilities_MultipleSubs_AllCreated(t *testing.T) {
-	testMultipleSubsAllCreated(t, false)
-}
+	It("single queue anycast routing shared", Label(unitLabel), func() {
+		testSingleQueueAnycastRouting(true)
+	})
 
-func TestProcessCapabilities_MultipleSubs_AllCreated_Shared(t *testing.T) {
-	testMultipleSubsAllCreated(t, true)
-}
+	It("multiple subs all created private", Label(unitLabel), func() {
+		testMultipleSubsAllCreated(false)
+	})
 
-func TestProcessCapabilities_SubsWithCapabilities_SubsAndRBAC(t *testing.T) {
-	testSubsWithCapabilitiesSubsAndRBAC(t, false)
-}
+	It("multiple subs all created shared", Label(unitLabel), func() {
+		testMultipleSubsAllCreated(true)
+	})
 
-func TestProcessCapabilities_SubsWithCapabilities_SubsAndRBAC_Shared(t *testing.T) {
-	testSubsWithCapabilitiesSubsAndRBAC(t, true)
-}
+	It("subs with capabilities subs and RBAC private", Label(unitLabel), func() {
+		testSubsWithCapabilitiesSubsAndRBAC(false)
+	})
 
-func TestProcessCapabilities_NoQueuesField_InferredFromCapabilities(t *testing.T) {
-	testNoQueuesFieldInferredFromCapabilities(t, false)
-}
+	It("subs with capabilities subs and RBAC shared", Label(unitLabel), func() {
+		testSubsWithCapabilitiesSubsAndRBAC(true)
+	})
 
-func TestProcessCapabilities_NoQueuesField_InferredFromCapabilities_Shared(t *testing.T) {
-	testNoQueuesFieldInferredFromCapabilities(t, true)
-}
+	It("no queues field inferred from capabilities private", Label(unitLabel), func() {
+		testNoQueuesFieldInferredFromCapabilities(false)
+	})
 
-func TestProcessCapabilities_MixedMulticastAndAnycast(t *testing.T) {
-	testMixedMulticastAndAnycast(t, false)
-}
+	It("no queues field inferred from capabilities shared", Label(unitLabel), func() {
+		testNoQueuesFieldInferredFromCapabilities(true)
+	})
 
-func TestProcessCapabilities_MixedMulticastAndAnycast_Shared(t *testing.T) {
-	testMixedMulticastAndAnycast(t, true)
-}
+	It("mixed multicast and anycast private", Label(unitLabel), func() {
+		testMixedMulticastAndAnycast(false)
+	})
 
-func TestProcessCapabilities_SubsWithSubscriberCapability(t *testing.T) {
-	testSubsWithSubscriberCapability(t, false)
-}
+	It("mixed multicast and anycast shared", Label(unitLabel), func() {
+		testMixedMulticastAndAnycast(true)
+	})
 
-func TestProcessCapabilities_SubsWithSubscriberCapability_Shared(t *testing.T) {
-	testSubsWithSubscriberCapability(t, true)
-}
+	It("subs with subscriber capability private", Label(unitLabel), func() {
+		testSubsWithSubscriberCapability(false)
+	})
+
+	It("subs with subscriber capability shared", Label(unitLabel), func() {
+		testSubsWithSubscriberCapability(true)
+	})
+})
