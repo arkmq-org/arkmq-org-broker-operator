@@ -434,11 +434,29 @@ Wait for cert-manager to be ready.
 
 ```bash {"stage":"init", "runtime":"bash", "label":"wait for cert-manager"}
 kubectl wait pod --all --for=condition=Ready --namespace=cert-manager --timeout=600s
+
+# The webhook reports Ready before it accepts connections, and trust-manager's
+# Certificate and Issuer are rejected until it does. Probe it with a server-side
+# dry run, which is validated by the webhook but creates nothing.
+until kubectl apply --dry-run=server -f - >/dev/null 2>&1 <<'EOF'
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: webhook-readiness-probe
+  namespace: cert-manager
+spec:
+  selfSigned: {}
+EOF
+do
+  echo "Waiting for the cert-manager webhook to answer" && sleep 5
+done
+echo "cert-manager webhook is answering"
 ```
 ```shell markdown_runner
 pod/cert-manager-67596fb4d7-6gnjq condition met
 pod/cert-manager-cainjector-5fcbcd7fb-r5np8 condition met
 pod/cert-manager-webhook-864d6c4d87-zn9sk condition met
+cert-manager webhook is answering
 ```
 
 ### Install Trust Manager
