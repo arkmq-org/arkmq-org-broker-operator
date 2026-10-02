@@ -15,83 +15,84 @@ limitations under the License.
 package controllers
 
 import (
-	"testing"
-
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
-	"github.com/stretchr/testify/assert"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func TestValidateAddressesDisjoint(t *testing.T) {
-	t.Run("rejects duplicate address in both Addresses and SharedAddresses", func(t *testing.T) {
-		appWithDuplicate := &v1beta2.BrokerApp{
-			Spec: v1beta2.BrokerAppSpec{
-				Addresses:       []v1beta2.AddressType{NewAddressType("queue1").Build()},
-				SharedAddresses: []v1beta2.AddressType{NewAddressType("queue1").Build()}, // Duplicate!
-			},
-		}
+var _ = Describe("brokerapp addresses validation", func() {
 
-		reconciler := &BrokerAppInstanceReconciler{
-			instance: appWithDuplicate,
-		}
+	Context("validateAddressesDisjoint", func() {
+		It("rejects duplicate address in both Addresses and SharedAddresses", Label(unitLabel), func() {
+			appWithDuplicate := &v1beta2.BrokerApp{
+				Spec: v1beta2.BrokerAppSpec{
+					Addresses:       []v1beta2.AddressType{NewAddressType("queue1").Build()},
+					SharedAddresses: []v1beta2.AddressType{NewAddressType("queue1").Build()},
+				},
+			}
 
-		err := reconciler.validateAddressesDisjoint()
+			reconciler := &BrokerAppInstanceReconciler{
+				instance: appWithDuplicate,
+			}
 
-		assert.Error(t, err)
+			err := reconciler.validateAddressesDisjoint()
 
-		// Check it's a ValidationError with correct reason
-		validErr, ok := err.(*ValidationError)
-		assert.True(t, ok, "expected ValidationError")
-		assert.Equal(t, v1beta2.ValidConditionAddressTypeError, validErr.ConditionReason())
-		assert.Contains(t, validErr.Message, "cannot be both private and public")
-		assert.Contains(t, validErr.Message, "queue1")
+			Expect(err).To(HaveOccurred())
+
+			validErr, ok := err.(*ValidationError)
+			Expect(ok).To(BeTrue(), "expected ValidationError")
+			Expect(validErr.ConditionReason()).To(Equal(v1beta2.ValidConditionAddressTypeError))
+			Expect(validErr.Message).To(ContainSubstring("cannot be both private and public"))
+			Expect(validErr.Message).To(ContainSubstring("queue1"))
+		})
+
+		It("allows disjoint addresses", Label(unitLabel), func() {
+			appDisjoint := &v1beta2.BrokerApp{
+				Spec: v1beta2.BrokerAppSpec{
+					Addresses:       []v1beta2.AddressType{NewAddressType("private1").Build()},
+					SharedAddresses: []v1beta2.AddressType{NewAddressType("public1").Build()},
+				},
+			}
+
+			reconciler := &BrokerAppInstanceReconciler{
+				instance: appDisjoint,
+			}
+
+			err := reconciler.validateAddressesDisjoint()
+
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("allows empty SharedAddresses", Label(unitLabel), func() {
+			app := &v1beta2.BrokerApp{
+				Spec: v1beta2.BrokerAppSpec{
+					Addresses: []v1beta2.AddressType{NewAddressType("private1").Build()},
+				},
+			}
+
+			reconciler := &BrokerAppInstanceReconciler{
+				instance: app,
+			}
+
+			err := reconciler.validateAddressesDisjoint()
+
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("allows empty Addresses", Label(unitLabel), func() {
+			app := &v1beta2.BrokerApp{
+				Spec: v1beta2.BrokerAppSpec{
+					SharedAddresses: []v1beta2.AddressType{NewAddressType("public1").Build()},
+				},
+			}
+
+			reconciler := &BrokerAppInstanceReconciler{
+				instance: app,
+			}
+
+			err := reconciler.validateAddressesDisjoint()
+
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
-
-	t.Run("allows disjoint addresses", func(t *testing.T) {
-		appDisjoint := &v1beta2.BrokerApp{
-			Spec: v1beta2.BrokerAppSpec{
-				Addresses:       []v1beta2.AddressType{NewAddressType("private1").Build()},
-				SharedAddresses: []v1beta2.AddressType{NewAddressType("public1").Build()},
-			},
-		}
-
-		reconciler := &BrokerAppInstanceReconciler{
-			instance: appDisjoint,
-		}
-
-		err := reconciler.validateAddressesDisjoint()
-
-		assert.NoError(t, err)
-	})
-
-	t.Run("allows empty SharedAddresses", func(t *testing.T) {
-		app := &v1beta2.BrokerApp{
-			Spec: v1beta2.BrokerAppSpec{
-				Addresses: []v1beta2.AddressType{NewAddressType("private1").Build()},
-			},
-		}
-
-		reconciler := &BrokerAppInstanceReconciler{
-			instance: app,
-		}
-
-		err := reconciler.validateAddressesDisjoint()
-
-		assert.NoError(t, err)
-	})
-
-	t.Run("allows empty Addresses", func(t *testing.T) {
-		app := &v1beta2.BrokerApp{
-			Spec: v1beta2.BrokerAppSpec{
-				SharedAddresses: []v1beta2.AddressType{NewAddressType("public1").Build()},
-			},
-		}
-
-		reconciler := &BrokerAppInstanceReconciler{
-			instance: app,
-		}
-
-		err := reconciler.validateAddressesDisjoint()
-
-		assert.NoError(t, err)
-	})
-}
+})

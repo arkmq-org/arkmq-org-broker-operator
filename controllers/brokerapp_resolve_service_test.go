@@ -16,9 +16,10 @@ package controllers
 
 import (
 	"fmt"
-	"testing"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,12 +27,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func TestResolveBrokerService(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = broker.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
+var _ = Describe("brokerapp resolve service", func() {
 
-	tests := []struct {
+	type resolveServiceTestCase struct {
 		name                   string
 		app                    *broker.BrokerApp
 		services               []broker.BrokerService
@@ -39,7 +37,13 @@ func TestResolveBrokerService(t *testing.T) {
 		expectedBinding        string
 		expectedError          bool
 		expectedValidCondition metav1.ConditionStatus
-	}{
+	}
+
+	scheme := runtime.NewScheme()
+	_ = broker.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	tests := []resolveServiceTestCase{
 		{
 			name: "initial assignment - finds matching service",
 			app: &broker.BrokerApp{
@@ -99,7 +103,7 @@ func TestResolveBrokerService(t *testing.T) {
 			expectedServiceName:    "",
 			expectedBinding:        "",
 			expectedError:          true,
-			expectedValidCondition: metav1.ConditionTrue, // Selector syntax is valid, runtime issue handled in Deployed
+			expectedValidCondition: metav1.ConditionTrue,
 		},
 		{
 			name: "existing annotation - service still matches",
@@ -144,7 +148,7 @@ func TestResolveBrokerService(t *testing.T) {
 				},
 				Spec: broker.BrokerAppSpec{
 					ServiceSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{"env": "prod"}, // Now selecting prod
+						MatchLabels: map[string]string{"env": "prod"},
 					},
 				},
 				Status: broker.BrokerAppStatus{
@@ -160,19 +164,19 @@ func TestResolveBrokerService(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "service1",
 						Namespace: "test",
-						Labels:    map[string]string{"env": "dev"}, // service1 is dev
+						Labels:    map[string]string{"env": "dev"},
 					},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "service2",
 						Namespace: "test",
-						Labels:    map[string]string{"env": "prod"}, // service2 is prod
+						Labels:    map[string]string{"env": "prod"},
 					},
 				},
 			},
 			expectedServiceName:    "service2",
-			expectedBinding:        "test:service2", // Should reassign to service2
+			expectedBinding:        "test:service2",
 			expectedError:          false,
 			expectedValidCondition: metav1.ConditionTrue,
 		},
@@ -196,21 +200,20 @@ func TestResolveBrokerService(t *testing.T) {
 					},
 				},
 			},
-			services:               []broker.BrokerService{}, // Service deleted
+			services:               []broker.BrokerService{},
 			expectedServiceName:    "",
-			expectedBinding:        "test:service1", // Annotation preserved
-			expectedError:          false,           // No error, just no service available
+			expectedBinding:        "test:service1",
+			expectedError:          false,
 			expectedValidCondition: metav1.ConditionTrue,
 		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create fake client with app and services
+		tt := tt
+		It(tt.name, Label(unitLabel), func() {
 			objs := make([]runtime.Object, 0, len(tt.services)+1)
 			objs = append(objs, tt.app)
 			for i := range tt.services {
-				// Add Deployed condition to all services
 				tt.services[i].Status.Conditions = []metav1.Condition{
 					{
 						Type:   broker.DeployedConditionType,
@@ -230,7 +233,6 @@ func TestResolveBrokerService(t *testing.T) {
 				WithRuntimeObjects(objs...)).
 				Build()
 
-			// Create reconciler
 			reconciler := &BrokerAppInstanceReconciler{
 				BrokerAppReconciler: &BrokerAppReconciler{
 					ReconcilerLoop: &ReconcilerLoop{
@@ -244,45 +246,34 @@ func TestResolveBrokerService(t *testing.T) {
 				status:   tt.app.Status.DeepCopy(),
 			}
 
-			// Call resolveBrokerService
 			err := reconciler.resolveBrokerService()
 
-			// Check error expectation
-			if (err != nil) != tt.expectedError {
-				t.Errorf("resolveBrokerService() error = %v, expectedError %v", err, tt.expectedError)
-				return
-			}
-
-			// Check service assignment
-			if tt.expectedServiceName != "" {
-				if reconciler.service == nil {
-					t.Errorf("expected service to be assigned to %s, got nil", tt.expectedServiceName)
-				} else if reconciler.service.Name != tt.expectedServiceName {
-					t.Errorf("expected service name %s, got %s", tt.expectedServiceName, reconciler.service.Name)
-				}
+			if tt.expectedError {
+				Expect(err).To(HaveOccurred())
 			} else {
-				if reconciler.service != nil {
-					t.Errorf("expected no service assignment, got %s", reconciler.service.Name)
-				}
+				Expect(err).NotTo(HaveOccurred())
 			}
 
-			// Check status binding was updated correctly
+			if tt.expectedServiceName != "" {
+				Expect(reconciler.service).NotTo(BeNil(),
+					fmt.Sprintf("expected service to be assigned to %s, got nil", tt.expectedServiceName))
+				Expect(reconciler.service.Name).To(Equal(tt.expectedServiceName))
+			} else {
+				Expect(reconciler.service).To(BeNil())
+			}
+
 			if tt.expectedBinding != "" {
-				// Check the reconciler's status (it writes to a copy, not the instance)
 				var actualBinding string
 				if reconciler.status.Service != nil {
 					actualBinding = fmt.Sprintf("%s:%s", reconciler.status.Service.Namespace, reconciler.status.Service.Name)
 				}
-				if actualBinding != tt.expectedBinding {
-					t.Errorf("expected annotation %s, got %s", tt.expectedBinding, actualBinding)
-				}
+				Expect(actualBinding).To(Equal(tt.expectedBinding))
 			}
 
-			// Check Valid condition
 			validCond := meta.FindStatusCondition(reconciler.status.Conditions, broker.ValidConditionType)
-			if validCond != nil && validCond.Status != tt.expectedValidCondition {
-				t.Errorf("expected Valid condition status %s, got %s", tt.expectedValidCondition, validCond.Status)
+			if validCond != nil {
+				Expect(validCond.Status).To(Equal(tt.expectedValidCondition))
 			}
 		})
 	}
-}
+})

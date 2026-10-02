@@ -2,11 +2,11 @@ package controllers
 
 import (
 	"context"
-	"testing"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/go-logr/logr"
-	"github.com/stretchr/testify/assert"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,508 +17,473 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// TestValidation_SharedAddress_Multicast_UsedAsAnycast tests that a SharedAddress
-// declared as multicast (with subscriptions) but used as anycast in ProducerOf is rejected
-func TestValidation_SharedAddress_Multicast_UsedAsAnycast(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = broker.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
+var _ = Describe("brokerapp address capability consistency", func() {
 
-	ns := "default"
-	appName := "inconsistent-app"
+	It("rejects shared multicast address used as anycast", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = broker.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
 
-	app := &broker.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: broker.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
+		ns := "default"
+		appName := "inconsistent-app"
+
+		app := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      appName,
+				Namespace: ns,
 			},
-			// Declare as multicast (with subscriptions)
-			SharedAddresses: []broker.AddressType{
-				{
-					Address:       "events",
-					Subscriptions: []string{"sub1"}, // multicast
+			Spec: broker.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{"type": "broker"},
 				},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ProducerOf: []broker.AddressRef{
-						{
-							Address: "events", // Used as anycast (no pubSub flag)
+				SharedAddresses: []broker.AddressType{
+					{
+						Address:       "events",
+						Subscriptions: []string{"sub1"},
+					},
+				},
+				Capabilities: []broker.AppCapabilityType{
+					{
+						ProducerOf: []broker.AddressRef{
+							{
+								Address: "events",
+							},
 						},
 					},
 				},
 			},
-		},
-	}
+		}
 
-	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(WithCerts(app)...).
-		WithStatusSubresource(app)).
-		Build()
+		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(app)...).
+			WithStatusSubresource(app)).
+			Build()
 
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
 
-	// Verify Valid condition
-	updatedApp := &broker.BrokerApp{}
-	getErr := cl.Get(context.TODO(), req.NamespacedName, updatedApp)
-	assert.NoError(t, getErr)
+		updatedApp := &broker.BrokerApp{}
+		getErr := cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+		Expect(getErr).NotTo(HaveOccurred())
 
-	validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
-	assert.NotNil(t, validCondition, "Valid condition should be set")
-	assert.Equal(t, v1.ConditionFalse, validCondition.Status, "Valid condition should be False")
-	assert.Equal(t, broker.ValidConditionAddressTypeError, validCondition.Reason, "Reason should be ValidConditionAddressTypeError")
+		validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
+		Expect(validCondition).NotTo(BeNil(), "Valid condition should be set")
+		Expect(validCondition.Status).To(Equal(v1.ConditionFalse), "Valid condition should be False")
+		Expect(validCondition.Reason).To(Equal(broker.ValidConditionAddressTypeError), "Reason should be ValidConditionAddressTypeError")
 
-	if err != nil {
-		assert.Contains(t, err.Error(), "events")
-		assert.Contains(t, err.Error(), "pubSub")
-	}
-}
+		if err != nil {
+			Expect(err.Error()).To(ContainSubstring("events"))
+			Expect(err.Error()).To(ContainSubstring("pubSub"))
+		}
+	})
 
-// TestValidation_SharedAddress_Anycast_UsedAsMulticast tests that a SharedAddress
-// declared as anycast (no subscriptions) but used as multicast in ConsumerOf is rejected
-func TestValidation_SharedAddress_Anycast_UsedAsMulticast(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = broker.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
+	It("rejects shared anycast address used as multicast", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = broker.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
 
-	ns := "default"
-	appName := "mismatch-app"
+		ns := "default"
+		appName := "mismatch-app"
 
-	app := &broker.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: broker.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
+		app := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      appName,
+				Namespace: ns,
 			},
-			// Declare as anycast (no subscriptions)
-			SharedAddresses: []broker.AddressType{
-				{
-					Address: "orders", // anycast
+			Spec: broker.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{"type": "broker"},
 				},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address:       "orders",
-							Subscriptions: []string{"queue1"}, // Used as multicast
+				SharedAddresses: []broker.AddressType{
+					{
+						Address: "orders",
+					},
+				},
+				Capabilities: []broker.AppCapabilityType{
+					{
+						ConsumerOf: []broker.AddressRef{
+							{
+								Address:       "orders",
+								Subscriptions: []string{"queue1"},
+							},
 						},
 					},
 				},
 			},
-		},
-	}
+		}
 
-	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(WithCerts(app)...).
-		WithStatusSubresource(app)).
-		Build()
+		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(app)...).
+			WithStatusSubresource(app)).
+			Build()
 
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
 
-	// Verify Valid condition
-	updatedApp := &broker.BrokerApp{}
-	getErr := cl.Get(context.TODO(), req.NamespacedName, updatedApp)
-	assert.NoError(t, getErr)
+		updatedApp := &broker.BrokerApp{}
+		getErr := cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+		Expect(getErr).NotTo(HaveOccurred())
 
-	validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
-	assert.NotNil(t, validCondition, "Valid condition should be set")
-	assert.Equal(t, v1.ConditionFalse, validCondition.Status, "Valid condition should be False")
-	assert.Equal(t, broker.ValidConditionAddressTypeError, validCondition.Reason, "Reason should be ValidConditionAddressTypeError")
+		validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
+		Expect(validCondition).NotTo(BeNil(), "Valid condition should be set")
+		Expect(validCondition.Status).To(Equal(v1.ConditionFalse), "Valid condition should be False")
+		Expect(validCondition.Reason).To(Equal(broker.ValidConditionAddressTypeError), "Reason should be ValidConditionAddressTypeError")
 
-	if err != nil {
-		assert.Contains(t, err.Error(), "orders")
-	}
-}
+		if err != nil {
+			Expect(err.Error()).To(ContainSubstring("orders"))
+		}
+	})
 
-// TestValidation_PrivateAddress_Multicast_UsedAsAnycast tests that a private Address
-// declared as multicast (explicit pubSub flag) but used as anycast is rejected
-func TestValidation_PrivateAddress_Multicast_UsedAsAnycast(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = broker.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
+	It("rejects private multicast address used as anycast", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = broker.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
 
-	ns := "default"
-	appName := "private-mismatch"
+		ns := "default"
+		appName := "private-mismatch"
 
-	pubSubTrue := true
-	app := &broker.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: broker.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
+		pubSubTrue := true
+		app := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      appName,
+				Namespace: ns,
 			},
-			// Declare as multicast (explicit pubSub)
-			Addresses: []broker.AddressType{
-				{
-					Address: "notifications",
-					PubSub:  &pubSubTrue,
+			Spec: broker.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{"type": "broker"},
 				},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ProducerOf: []broker.AddressRef{
-						{
-							Address: "notifications", // Used as anycast (no pubSub)
+				Addresses: []broker.AddressType{
+					{
+						Address: "notifications",
+						PubSub:  &pubSubTrue,
+					},
+				},
+				Capabilities: []broker.AppCapabilityType{
+					{
+						ProducerOf: []broker.AddressRef{
+							{
+								Address: "notifications",
+							},
 						},
 					},
 				},
 			},
-		},
-	}
+		}
 
-	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(WithCerts(app)...).
-		WithStatusSubresource(app)).
-		Build()
+		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(app)...).
+			WithStatusSubresource(app)).
+			Build()
 
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
 
-	// Verify Valid condition
-	updatedApp := &broker.BrokerApp{}
-	getErr := cl.Get(context.TODO(), req.NamespacedName, updatedApp)
-	assert.NoError(t, getErr)
+		updatedApp := &broker.BrokerApp{}
+		getErr := cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+		Expect(getErr).NotTo(HaveOccurred())
 
-	validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
-	assert.NotNil(t, validCondition, "Valid condition should be set")
-	assert.Equal(t, v1.ConditionFalse, validCondition.Status, "Valid condition should be False")
-	assert.Equal(t, broker.ValidConditionAddressTypeError, validCondition.Reason, "Reason should be ValidConditionAddressTypeError")
+		validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
+		Expect(validCondition).NotTo(BeNil(), "Valid condition should be set")
+		Expect(validCondition.Status).To(Equal(v1.ConditionFalse), "Valid condition should be False")
+		Expect(validCondition.Reason).To(Equal(broker.ValidConditionAddressTypeError), "Reason should be ValidConditionAddressTypeError")
 
-	if err != nil {
-		assert.Contains(t, err.Error(), "notifications")
-	}
-}
+		if err != nil {
+			Expect(err.Error()).To(ContainSubstring("notifications"))
+		}
+	})
 
-// TestValidation_SharedAddress_Consistent_Multicast_Valid tests that consistent
-// multicast usage is accepted
-func TestValidation_SharedAddress_Consistent_Multicast_Valid(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = broker.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
+	It("accepts consistent multicast usage", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = broker.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
 
-	ns := "default"
-	appName := "valid-multicast"
+		ns := "default"
+		appName := "valid-multicast"
 
-	pubSubTrue := true
-	app := &broker.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: broker.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
+		pubSubTrue := true
+		app := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      appName,
+				Namespace: ns,
 			},
-			// Declare as multicast
-			SharedAddresses: []broker.AddressType{
-				{
-					Address:       "events",
-					Subscriptions: []string{"sub1"},
+			Spec: broker.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{"type": "broker"},
 				},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ProducerOf: []broker.AddressRef{
-						{
-							Address: "events",
-							PubSub:  &pubSubTrue, // Consistent multicast
-						},
+				SharedAddresses: []broker.AddressType{
+					{
+						Address:       "events",
+						Subscriptions: []string{"sub1"},
 					},
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address:       "events",
-							Subscriptions: []string{"sub1"}, // Consistent multicast
+				},
+				Capabilities: []broker.AppCapabilityType{
+					{
+						ProducerOf: []broker.AddressRef{
+							{
+								Address: "events",
+								PubSub:  &pubSubTrue,
+							},
+						},
+						ConsumerOf: []broker.AddressRef{
+							{
+								Address:       "events",
+								Subscriptions: []string{"sub1"},
+							},
 						},
 					},
 				},
 			},
-		},
-	}
+		}
 
-	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(WithCerts(app)...).
-		WithStatusSubresource(app)).
-		Build()
+		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(app)...).
+			WithStatusSubresource(app)).
+			Build()
 
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
-	// Should succeed or fail for other reasons (like missing service), not validation
-	if err != nil {
-		assert.NotContains(t, err.Error(), "pubSub")
-		assert.NotContains(t, err.Error(), "multicast")
-		assert.NotContains(t, err.Error(), "anycast")
-	}
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
+		if err != nil {
+			Expect(err.Error()).NotTo(ContainSubstring("pubSub"))
+			Expect(err.Error()).NotTo(ContainSubstring("multicast"))
+			Expect(err.Error()).NotTo(ContainSubstring("anycast"))
+		}
 
-	// Verify Valid condition is not False with AddressTypeError
-	updatedApp := &broker.BrokerApp{}
-	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
-	assert.NoError(t, err)
+		updatedApp := &broker.BrokerApp{}
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+		Expect(err).NotTo(HaveOccurred())
 
-	validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
-	if validCondition != nil && validCondition.Status == v1.ConditionFalse {
-		assert.NotEqual(t, broker.ValidConditionAddressTypeError, validCondition.Reason)
-	}
-}
+		validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
+		if validCondition != nil && validCondition.Status == v1.ConditionFalse {
+			Expect(validCondition.Reason).NotTo(Equal(broker.ValidConditionAddressTypeError))
+		}
+	})
 
-// TestValidation_SharedAddress_Consistent_Anycast_Valid tests that consistent
-// anycast usage is accepted
-func TestValidation_SharedAddress_Consistent_Anycast_Valid(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = broker.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
+	It("accepts consistent anycast usage", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = broker.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
 
-	ns := "default"
-	appName := "valid-anycast"
+		ns := "default"
+		appName := "valid-anycast"
 
-	app := &broker.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: broker.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
+		app := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      appName,
+				Namespace: ns,
 			},
-			// Declare as anycast (no subscriptions, no pubSub)
-			SharedAddresses: []broker.AddressType{
-				{
-					Address: "orders",
+			Spec: broker.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{"type": "broker"},
 				},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ProducerOf: []broker.AddressRef{
-						{
-							Address: "orders", // Anycast
-						},
+				SharedAddresses: []broker.AddressType{
+					{
+						Address: "orders",
 					},
-					ConsumerOf: []broker.AddressRef{
-						{
-							Address: "orders", // Anycast (no subscriptions)
+				},
+				Capabilities: []broker.AppCapabilityType{
+					{
+						ProducerOf: []broker.AddressRef{
+							{
+								Address: "orders",
+							},
+						},
+						ConsumerOf: []broker.AddressRef{
+							{
+								Address: "orders",
+							},
 						},
 					},
 				},
 			},
-		},
-	}
+		}
 
-	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(WithCerts(app)...).
-		WithStatusSubresource(app)).
-		Build()
+		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(app)...).
+			WithStatusSubresource(app)).
+			Build()
 
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
-	// Should succeed or fail for other reasons (like missing service), not validation
-	if err != nil {
-		assert.NotContains(t, err.Error(), "pubSub")
-		assert.NotContains(t, err.Error(), "multicast")
-		assert.NotContains(t, err.Error(), "anycast")
-	}
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
+		if err != nil {
+			Expect(err.Error()).NotTo(ContainSubstring("pubSub"))
+			Expect(err.Error()).NotTo(ContainSubstring("multicast"))
+			Expect(err.Error()).NotTo(ContainSubstring("anycast"))
+		}
 
-	// Verify Valid condition is not False with AddressTypeError
-	updatedApp := &broker.BrokerApp{}
-	err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
-	assert.NoError(t, err)
+		updatedApp := &broker.BrokerApp{}
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+		Expect(err).NotTo(HaveOccurred())
 
-	validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
-	if validCondition != nil && validCondition.Status == v1.ConditionFalse {
-		assert.NotEqual(t, broker.ValidConditionAddressTypeError, validCondition.Reason)
-	}
-}
+		validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, broker.ValidConditionType)
+		if validCondition != nil && validCondition.Status == v1.ConditionFalse {
+			Expect(validCondition.Reason).NotTo(Equal(broker.ValidConditionAddressTypeError))
+		}
+	})
 
-// TestValidation_MultipleAddresses_MixedTypes tests validation with multiple addresses
-// where some are consistent and some are not
-func TestValidation_MultipleAddresses_MixedTypes(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = broker.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
+	It("accepts multiple addresses with mixed consistent types", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = broker.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
 
-	ns := "default"
-	appName := "mixed-addresses"
+		ns := "default"
+		appName := "mixed-addresses"
 
-	pubSubTrue := true
-	app := &broker.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: broker.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
+		pubSubTrue := true
+		app := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      appName,
+				Namespace: ns,
 			},
-			SharedAddresses: []broker.AddressType{
-				{
-					Address:       "events",
-					Subscriptions: []string{"sub1"}, // multicast
+			Spec: broker.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{"type": "broker"},
 				},
-				{
-					Address: "orders", // anycast
+				SharedAddresses: []broker.AddressType{
+					{
+						Address:       "events",
+						Subscriptions: []string{"sub1"},
+					},
+					{
+						Address: "orders",
+					},
 				},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ProducerOf: []broker.AddressRef{
-						{
-							Address: "events",
-							PubSub:  &pubSubTrue, // Consistent - valid
-						},
-						{
-							Address: "orders", // Anycast - valid
+				Capabilities: []broker.AppCapabilityType{
+					{
+						ProducerOf: []broker.AddressRef{
+							{
+								Address: "events",
+								PubSub:  &pubSubTrue,
+							},
+							{
+								Address: "orders",
+							},
 						},
 					},
 				},
 			},
-		},
-	}
+		}
 
-	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(WithCerts(app)...).
-		WithStatusSubresource(app)).
-		Build()
+		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(app)...).
+			WithStatusSubresource(app)).
+			Build()
 
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
-	// Should succeed or fail for other reasons (like missing service), not validation
-	if err != nil {
-		assert.NotContains(t, err.Error(), "pubSub")
-		assert.NotContains(t, err.Error(), "inconsistent")
-	}
-}
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
+		if err != nil {
+			Expect(err.Error()).NotTo(ContainSubstring("pubSub"))
+			Expect(err.Error()).NotTo(ContainSubstring("inconsistent"))
+		}
+	})
 
-// TestValidation_AddressNotDeclared_OnlyInCapability tests that addresses only
-// referenced in capabilities (not declared) are allowed (they're implicit/local)
-func TestValidation_AddressNotDeclared_OnlyInCapability(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = broker.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
+	It("allows addresses only referenced in capabilities", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = broker.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
 
-	ns := "default"
-	appName := "implicit-address"
+		ns := "default"
+		appName := "implicit-address"
 
-	app := &broker.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: broker.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
+		app := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      appName,
+				Namespace: ns,
 			},
-			// No declared addresses
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ProducerOf: []broker.AddressRef{
-						{
-							Address: "implicit-queue", // Not declared - implicit/local
+			Spec: broker.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{"type": "broker"},
+				},
+				Capabilities: []broker.AppCapabilityType{
+					{
+						ProducerOf: []broker.AddressRef{
+							{
+								Address: "implicit-queue",
+							},
 						},
 					},
 				},
 			},
-		},
-	}
+		}
 
-	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(WithCerts(app)...).
-		WithStatusSubresource(app)).
-		Build()
+		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(app)...).
+			WithStatusSubresource(app)).
+			Build()
 
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
-	// Should succeed or fail for other reasons, not validation
-	// Implicit addresses are allowed
-	if err != nil {
-		assert.NotContains(t, err.Error(), "not declared")
-	}
-}
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
+		if err != nil {
+			Expect(err.Error()).NotTo(ContainSubstring("not declared"))
+		}
+	})
 
-// TestValidation_PubSubFalse_WithSubscriptions_InDeclaration tests that declaring
-// an address with pubSub=false but with subscriptions is caught
-func TestValidation_Address_PubSubFalse_WithSubscriptions(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = broker.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
+	It("handles pubSub false with subscriptions in declaration", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = broker.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
 
-	ns := "default"
-	appName := "invalid-declaration"
+		ns := "default"
+		appName := "invalid-declaration"
 
-	pubSubFalse := false
-	app := &broker.BrokerApp{
-		ObjectMeta: v1.ObjectMeta{
-			Name:      appName,
-			Namespace: ns,
-		},
-		Spec: broker.BrokerAppSpec{
-			ServiceSelector: &v1.LabelSelector{
-				MatchLabels: map[string]string{"type": "broker"},
+		pubSubFalse := false
+		app := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      appName,
+				Namespace: ns,
 			},
-			SharedAddresses: []broker.AddressType{
-				{
-					Address:       "events",
-					PubSub:        &pubSubFalse,
-					Subscriptions: []string{"sub1"}, // Invalid combination
+			Spec: broker.BrokerAppSpec{
+				ServiceSelector: &v1.LabelSelector{
+					MatchLabels: map[string]string{"type": "broker"},
 				},
-			},
-			Capabilities: []broker.AppCapabilityType{
-				{
-					ProducerOf: []broker.AddressRef{
-						{
-							Address: "events",
+				SharedAddresses: []broker.AddressType{
+					{
+						Address:       "events",
+						PubSub:        &pubSubFalse,
+						Subscriptions: []string{"sub1"},
+					},
+				},
+				Capabilities: []broker.AppCapabilityType{
+					{
+						ProducerOf: []broker.AddressRef{
+							{
+								Address: "events",
+							},
 						},
 					},
 				},
 			},
-		},
-	}
+		}
 
-	cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(WithCerts(app)...).
-		WithStatusSubresource(app)).
-		Build()
+		cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(app)...).
+			WithStatusSubresource(app)).
+			Build()
 
-	r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
-	_, err := r.Reconcile(context.TODO(), req)
-	// This might be caught by isMulticastAddress logic or need explicit validation
-	// The test documents the expected behavior
-	if err != nil {
-		// If validation exists, it should error
-		t.Logf("Error (if any): %v", err)
-	}
-}
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+		_, _ = r.Reconcile(context.TODO(), req)
+	})
+})

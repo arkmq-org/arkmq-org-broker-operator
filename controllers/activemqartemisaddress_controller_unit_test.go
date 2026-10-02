@@ -18,13 +18,13 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"testing"
 	"time"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/go-logr/logr"
-	"github.com/stretchr/testify/assert"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -37,90 +37,109 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-func TestDeleteExistingAddress(t *testing.T) {
-	testDeleteExistingAddress(t, false)
-}
+var _ = Describe("activemqartemisaddress controller unit", func() {
 
-func TestDeleteExistingAddressWithRemoveFromBrokerOnDelete(t *testing.T) {
-	testDeleteExistingAddress(t, true)
-}
-
-func testDeleteExistingAddress(t *testing.T, removeFromBrokerOnDelete bool) {
-
-	var result ctrl.Result
-	var err error
-
-	addressExists := true
-	interceptorFuncs := interceptor.Funcs{
-		Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			if addressExists && key.Name == "test-name" && reflect.TypeOf(obj) == reflect.TypeOf(&v1beta1.ActiveMQArtemisAddress{}) {
-				v := obj.(*v1beta1.ActiveMQArtemisAddress)
-				v.ObjectMeta = v1.ObjectMeta{
-					Namespace: key.Namespace,
-					Name:      key.Name,
+	It("deletes existing address", Label(unitLabel), func() {
+		addressExists := true
+		interceptorFuncs := interceptor.Funcs{
+			Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if addressExists && key.Name == "test-name" && reflect.TypeOf(obj) == reflect.TypeOf(&v1beta1.ActiveMQArtemisAddress{}) {
+					v := obj.(*v1beta1.ActiveMQArtemisAddress)
+					v.ObjectMeta = v1.ObjectMeta{
+						Namespace: key.Namespace,
+						Name:      key.Name,
+					}
+					v.Spec = v1beta1.ActiveMQArtemisAddressSpec{
+						RemoveFromBrokerOnDelete: false,
+					}
+					return nil
 				}
-				v.Spec = v1beta1.ActiveMQArtemisAddressSpec{
-					RemoveFromBrokerOnDelete: removeFromBrokerOnDelete,
-				}
-				return nil
-			} else {
 				return apierrors.NewNotFound(schema.GroupResource{}, "")
-			}
-		},
-	}
-	fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
 
-	r := NewActiveMQArtemisAddressReconciler(fakeClient, nil, logr.New(log.NullLogSink{}))
+		r := NewActiveMQArtemisAddressReconciler(fakeClient, nil, logr.New(log.NullLogSink{}))
 
-	result, err = r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
+		result, err := r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
 
-	assert.Nil(t, err)
-	assert.False(t, result.Requeue)
-	assert.Equal(t, common.GetReconcileResyncPeriod(), result.RequeueAfter)
+		Expect(err).To(BeNil())
+		Expect(result.RequeueAfter).To(Equal(common.GetReconcileResyncPeriod()))
 
-	addressExists = false
+		addressExists = false
 
-	result, err = r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
+		result, err = r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
 
-	assert.Nil(t, err)
-	assert.False(t, result.Requeue)
-	assert.Equal(t, time.Duration(0), result.RequeueAfter)
-}
+		Expect(err).To(BeNil())
+		Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+	})
 
-func TestDeleteAddressWithNotFoundError(t *testing.T) {
+	It("deletes existing address with remove from broker on delete", Label(unitLabel), func() {
+		addressExists := true
+		interceptorFuncs := interceptor.Funcs{
+			Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if addressExists && key.Name == "test-name" && reflect.TypeOf(obj) == reflect.TypeOf(&v1beta1.ActiveMQArtemisAddress{}) {
+					v := obj.(*v1beta1.ActiveMQArtemisAddress)
+					v.ObjectMeta = v1.ObjectMeta{
+						Namespace: key.Namespace,
+						Name:      key.Name,
+					}
+					v.Spec = v1beta1.ActiveMQArtemisAddressSpec{
+						RemoveFromBrokerOnDelete: true,
+					}
+					return nil
+				}
+				return apierrors.NewNotFound(schema.GroupResource{}, "")
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
 
-	interceptorFuncs := interceptor.Funcs{
-		Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			return apierrors.NewNotFound(schema.GroupResource{}, "")
-		},
-	}
-	fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
+		r := NewActiveMQArtemisAddressReconciler(fakeClient, nil, logr.New(log.NullLogSink{}))
 
-	r := NewActiveMQArtemisAddressReconciler(fakeClient, nil, logr.New(log.NullLogSink{}))
+		result, err := r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
 
-	result, err := r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
+		Expect(err).To(BeNil())
+		Expect(result.RequeueAfter).To(Equal(common.GetReconcileResyncPeriod()))
 
-	assert.Nil(t, err)
-	assert.False(t, result.Requeue)
-	assert.Equal(t, time.Duration(0), result.RequeueAfter)
-}
+		addressExists = false
 
-func TestDeleteAddressWithInternalError(t *testing.T) {
+		result, err = r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
 
-	internalError := apierrors.NewInternalError(errors.New("internal-error"))
+		Expect(err).To(BeNil())
+		Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+	})
 
-	interceptorFuncs := interceptor.Funcs{
-		Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			return internalError
-		},
-	}
-	fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
+	It("handles not found error on delete", Label(unitLabel), func() {
+		interceptorFuncs := interceptor.Funcs{
+			Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				return apierrors.NewNotFound(schema.GroupResource{}, "")
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
 
-	r := NewActiveMQArtemisAddressReconciler(fakeClient, nil, logr.New(log.NullLogSink{}))
+		r := NewActiveMQArtemisAddressReconciler(fakeClient, nil, logr.New(log.NullLogSink{}))
 
-	result, err := r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
+		result, err := r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
 
-	assert.Equal(t, internalError, err)
-	assert.False(t, result.Requeue)
-	assert.Equal(t, time.Duration(0), result.RequeueAfter)
-}
+		Expect(err).To(BeNil())
+		Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+	})
+
+	It("handles internal error on delete", Label(unitLabel), func() {
+		internalError := apierrors.NewInternalError(errors.New("internal-error"))
+
+		interceptorFuncs := interceptor.Funcs{
+			Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				return internalError
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
+
+		r := NewActiveMQArtemisAddressReconciler(fakeClient, nil, logr.New(log.NullLogSink{}))
+
+		result, err := r.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "test-namespace", Name: "test-name"}})
+
+		Expect(err).To(Equal(internalError))
+		Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+	})
+})
