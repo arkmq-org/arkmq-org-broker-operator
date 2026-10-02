@@ -136,7 +136,8 @@ func (r *BrokerClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ConfigMap{}).
 		Owns(&corev1.Service{}).
 		Owns(&netv1.Ingress{}).
-		Owns(&policyv1.PodDisruptionBudget{})
+		Owns(&policyv1.PodDisruptionBudget{}).
+		Owns(&netv1.NetworkPolicy{})
 
 	if r.isOnOpenShift {
 		builder.Owns(&routev1.Route{})

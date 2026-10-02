@@ -1256,6 +1256,52 @@ The operator supports a level of indirection when resolving versions, there are 
 The operator will validate the CR specifies both image and initImage or a Version. It will also validate that a specified version matches the internal list of supported versions.
 The CR Status sub resource will contain feedback via the Valid Condition if validation fails.
 
+## Operand NetworkPolicy
+
+The operator automatically creates a Kubernetes `NetworkPolicy` for each broker deployment.
+This policy controls which network traffic is allowed to reach the broker pods at L3/L4 level.
+
+### Default behaviour
+
+When a broker CR is reconciled, the operator generates a `NetworkPolicy` named `{cr-name}-netpol`
+in the same namespace as the broker. For BrokerCluster resources, the policy opens ingress only for
+ports declared in `spec.acceptors`. For Broker resources (restricted mode), only the Jolokia (8778)
+and Prometheus (8888) agent ports are opened. Only ingress is restricted; egress is left unmanaged
+(no egress policy type is set).
+
+Ports configured through broker properties or other mechanisms (JGroups, console, default protocol
+port) are **not** automatically added. To open additional ports, use a `ResourceTemplate` (see
+[Custom Modifications via a Strategic Merge Patch](#custom-modifications-via-a-strategic-merge-patch)).
+
+### BrokerService NetworkPolicy
+
+When a BrokerService creates a child Broker, the operator automatically generates a NetworkPolicy
+for the child broker that includes the restricted-mode ports (8778, 8888).
+
+### Enabling operand NetworkPolicy creation
+
+To enable automatic creation of NetworkPolicies for all broker deployments managed by the
+operator, set the `BROKER_NETWORK_POLICY` environment variable to `true` on the operator
+manager container:
+
+```yaml
+env:
+  - name: BROKER_NETWORK_POLICY
+    value: "true"
+```
+
+When this variable is not set or set to `false`, the operator will not create or manage any
+NetworkPolicy objects for broker pods. You are then responsible for managing network access to
+the brokers yourself, either through manually crafted NetworkPolicies or through your cluster's
+network plugin configuration.
+
+### Operator pod NetworkPolicy
+
+The operator ships its own `NetworkPolicy` (`controller-manager-netpol`) that restricts ingress to
+the health-probe (8081) and metrics (8383) ports. This policy is applied at install time regardless
+of the installation method (deploy scripts, OLM, or Helm charts) and is independent of the operand
+policy described above.
+
 ## Disabling reconcile with the `arkmq.org/block-reconcile` annotation
 
 In cases where a rollout of the stateful set is necessitated via a new feature or bug fix but not immediately desirable, potentially because of the necessary broker restart, it is possible to block the reconcile of a CR. Applying the `arkmq.org/block-reconcile` boolean annotation to a CR will indicate that the operator should not reconcile the CR. The CR status will reflect the blocked state via an additional `ReconcileBlocked` Condition. Once the annotation is removed or set to false on the CR, reconcile will resume.
