@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
-	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
@@ -94,11 +94,11 @@ func TestPodLabels_StandardKubernetesLabels(t *testing.T) {
 	assert.NoError(t, err)
 
 	labels := broker.Spec.Labels
-	assert.Equal(t, svcName, labels[common.LabelAppKubernetesInstance])
-	assert.Equal(t, "broker-service", labels[common.LabelAppKubernetesComponent])
-	assert.Equal(t, "arkmq-org-broker-operator", labels[common.LabelAppKubernetesManagedBy])
-	assert.Equal(t, svcName, labels[common.LabelBrokerService])
-	assert.Equal(t, "0", labels[common.LabelBrokerPeerIndex])
+	assert.Equal(t, svcName, labels[selectors.LabelAppKubernetesInstance])
+	assert.Equal(t, "broker-service", labels[selectors.LabelAppKubernetesComponent])
+	assert.Equal(t, "arkmq-org-broker-operator", labels[selectors.LabelAppKubernetesManagedBy])
+	assert.Equal(t, svcName, labels[selectors.LabelBrokerService])
+	assert.Equal(t, "0", labels[selectors.LabelBrokerPeerIndex])
 }
 
 func TestPodLabels_NetworkPolicyMatchingBrokerService(t *testing.T) {
@@ -125,7 +125,7 @@ func TestPodLabels_NetworkPolicyMatchingBrokerService(t *testing.T) {
 		Spec: networkingv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					common.LabelBrokerService: svcName,
+					selectors.LabelBrokerService: svcName,
 				},
 			},
 			Ingress: []networkingv1.NetworkPolicyIngressRule{
@@ -195,8 +195,8 @@ func TestPodLabels_NetworkPolicyMatchingBrokerService(t *testing.T) {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						common.LabelAppKubernetesInstance: svcName,
-						common.LabelBrokerService:         svcName,
+						selectors.LabelAppKubernetesInstance: svcName,
+						selectors.LabelBrokerService:         svcName,
 					},
 				},
 			},
@@ -248,7 +248,7 @@ func TestPodLabels_NetworkPolicyMatchingComponentLabel(t *testing.T) {
 		Spec: networkingv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					common.LabelAppKubernetesComponent: "broker-service",
+					selectors.LabelAppKubernetesComponent: "broker-service",
 				},
 			},
 			Ingress: []networkingv1.NetworkPolicyIngressRule{
@@ -310,9 +310,9 @@ func TestPodLabels_NetworkPolicyMatchingComponentLabel(t *testing.T) {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						common.LabelAppKubernetesInstance:  svcName,
-						common.LabelAppKubernetesComponent: "broker-service",
-						common.LabelBrokerService:          svcName,
+						selectors.LabelAppKubernetesInstance:  svcName,
+						selectors.LabelAppKubernetesComponent: "broker-service",
+						selectors.LabelBrokerService:          svcName,
 					},
 				},
 			},

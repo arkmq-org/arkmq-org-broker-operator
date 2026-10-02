@@ -33,6 +33,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/templates"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -187,12 +188,12 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 	desired.Spec.PersistenceEnabled = false
 	desired.Spec.Labels = map[string]string{
 		// Standard Kubernetes labels
-		common.LabelAppKubernetesInstance:  reconciler.instance.Name,
-		common.LabelAppKubernetesComponent: "broker-service",
-		common.LabelAppKubernetesManagedBy: "arkmq-org-broker-operator",
+		selectors.LabelAppKubernetesInstance:  reconciler.instance.Name,
+		selectors.LabelAppKubernetesComponent: "broker-service",
+		selectors.LabelAppKubernetesManagedBy: "arkmq-org-broker-operator",
 		// Domain-specific labels
-		common.LabelBrokerService:   reconciler.instance.Name,
-		common.LabelBrokerPeerIndex: "0",
+		selectors.LabelBrokerService:   reconciler.instance.Name,
+		selectors.LabelBrokerPeerIndex: "0",
 	}
 	desired.Spec.Env = reconciler.instance.Spec.Env
 	desired.Spec.Resources = reconciler.instance.Spec.Resources
@@ -508,7 +509,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processService() error {
 	}
 
 	desired.Spec.Selector = map[string]string{
-		common.LabelBrokerService: reconciler.instance.Name,
+		selectors.LabelBrokerService: reconciler.instance.Name,
 	}
 	reconciler.TrackDesired(desired)
 	return nil

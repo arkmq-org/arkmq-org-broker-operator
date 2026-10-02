@@ -89,7 +89,6 @@ const (
 	BrokerPropertiesName     = "broker" + PropertiesSuffix
 	JaasConfigKey            = "login.config"
 	LoggingConfigKey         = "logging" + PropertiesSuffix
-	PodNameLabelKey          = "statefulset.kubernetes.io/pod-name"
 	ServiceTypePostfix       = "svc"
 	RouteTypePostfix         = "rte"
 	IngressTypePostfix       = "ing"
@@ -1035,7 +1034,7 @@ func (reconciler *BrokerClusterReconcilerImpl) configureAcceptorsExposure(custom
 		for k, v := range originalLabels {
 			serviceRoutelabels[k] = v
 		}
-		serviceRoutelabels[PodNameLabelKey] = namer.SsNameBuilder.Name() + "-" + ordinalString
+		serviceRoutelabels[selectors.PodNameLabelKey] = namer.SsNameBuilder.Name() + "-" + ordinalString
 
 		for _, acceptor := range customResource.Spec.Acceptors {
 			nameSuffix := acceptor.Name + "-" + ordinalString
@@ -1279,7 +1278,7 @@ func extractOrdinal(desired rtclient.Object) string {
 	switch desired := desired.(type) {
 	case *corev1.Service:
 		{
-			podName, found := desired.Spec.Selector[PodNameLabelKey]
+			podName, found := desired.Spec.Selector[selectors.PodNameLabelKey]
 			if found {
 				ordinal = ordinalFromPodName(podName)
 			}
@@ -1287,7 +1286,7 @@ func extractOrdinal(desired rtclient.Object) string {
 		}
 	case *netv1.Ingress, *routev1.Route, *gatewayv1.TLSRoute, *gatewayv1.HTTPRoute:
 		{
-			podName, found := desired.GetLabels()[PodNameLabelKey]
+			podName, found := desired.GetLabels()[selectors.PodNameLabelKey]
 			if found {
 				ordinal = ordinalFromPodName(podName)
 			}
@@ -1361,7 +1360,7 @@ func (reconciler *BrokerClusterReconcilerImpl) configureConnectorsExposure(custo
 		for k, v := range originalLabels {
 			serviceRoutelabels[k] = v
 		}
-		serviceRoutelabels[PodNameLabelKey] = namer.SsNameBuilder.Name() + "-" + ordinalString
+		serviceRoutelabels[selectors.PodNameLabelKey] = namer.SsNameBuilder.Name() + "-" + ordinalString
 
 		for _, connector := range customResource.Spec.Connectors {
 
@@ -1403,7 +1402,7 @@ func (reconciler *BrokerClusterReconcilerImpl) configureConsoleExposure(customRe
 		for k, v := range originalLabels {
 			serviceRoutelabels[k] = v
 		}
-		serviceRoutelabels[PodNameLabelKey] = namer.SsNameBuilder.Name() + "-" + ordinalString
+		serviceRoutelabels[selectors.PodNameLabelKey] = namer.SsNameBuilder.Name() + "-" + ordinalString
 
 		targetPortName := consoleName + "-" + ordinalString
 		targetServiceName := customResource.Name + "-" + targetPortName + "-" + ServiceTypePostfix

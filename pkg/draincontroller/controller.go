@@ -59,8 +59,6 @@ import (
 )
 
 const controllerAgentName = "statefulset-drain-controller"
-const AnnotationStatefulSet = "statefulsets.kubernetes.io/drainer-pod-owner" // TODO: can we replace this with an OwnerReference with the StatefulSet as the owner?
-const AnnotationDrainerPodTemplate = "statefulsets.kubernetes.io/drainer-pod-template"
 
 const LabelDrainPod = "drain-pod"
 const DrainServiceAccountName = "drain-pod-service-account"
@@ -368,11 +366,6 @@ func (c *Controller) processStatefulSet(sts *appsv1.StatefulSet) error {
 	}
 	c.log.V(2).Info("Statefulset " + sts.Name + " Spec.VolumeClaimTemplates is " + strconv.Itoa((len(sts.Spec.VolumeClaimTemplates))))
 
-	//if sts.Annotations[AnnotationDrainerPodTemplate] == "" {
-	//	log.V(1).Info("Ignoring StatefulSet '%s' because it does not define a drain pod template.", sts.Name)
-	//	return nil
-	//}
-
 	claimsGroupedByOrdinal, err := c.getClaims(sts)
 	if err != nil {
 		err = fmt.Errorf("error while getting list of PVCs in namespace %s: %s", sts.Namespace, err)
@@ -627,7 +620,7 @@ func (c *Controller) cleanUpDrainPodIfNeeded(sts *appsv1.StatefulSet, pod *corev
 }
 
 func isDrainPod(pod *corev1.Pod) bool {
-	return pod != nil && pod.ObjectMeta.Annotations[AnnotationStatefulSet] != ""
+	return pod != nil && pod.Annotations[selectors.AnnotationStatefulSet] != ""
 }
 
 // enqueueStatefulSet takes a StatefulSet resource and converts it into a namespace/name
@@ -686,9 +679,9 @@ func (c *Controller) handlePod(obj interface{}) {
 	}
 	c.log.V(2).Info("Processing object: " + object.GetName())
 
-	stsNameFromAnnotation := object.GetAnnotations()[AnnotationStatefulSet]
+	stsNameFromAnnotation := object.GetAnnotations()[selectors.AnnotationStatefulSet]
 	if stsNameFromAnnotation != "" {
-		c.log.V(2).Info("Found pod with " + AnnotationStatefulSet + " annotation pointing to StatefulSet " + stsNameFromAnnotation + ". Enqueueing StatefulSet.")
+		c.log.V(2).Info("Found pod with " + selectors.AnnotationStatefulSet + " annotation pointing to StatefulSet " + stsNameFromAnnotation + ". Enqueueing StatefulSet.")
 		sts, err := c.statefulSetLister.StatefulSets(object.GetNamespace()).Get(stsNameFromAnnotation)
 		if err != nil {
 			c.log.V(2).Info("Error retrieving StatefulSet " + stsNameFromAnnotation + ": " + err.Error())
@@ -750,7 +743,6 @@ func (c *Controller) newPod(sts *appsv1.StatefulSet, ordinal int) (*corev1.Pod, 
 
 	ssNames := c.ssNamesMap[ssNamesKey]
 
-	//podTemplateJson := sts.Annotations[AnnotationDrainerPodTemplate]
 	//TODO: Remove this blatant hack
 	podTemplateJson := globalPodTemplateJson
 	podTemplateJson = strings.Replace(podTemplateJson, "CRNAME", ssNames["CRNAME"], -1)
@@ -794,7 +786,7 @@ func (c *Controller) newPod(sts *appsv1.StatefulSet, ordinal int) (*corev1.Pod, 
 	if pod.Annotations == nil {
 		pod.Annotations = map[string]string{}
 	}
-	pod.Annotations[AnnotationStatefulSet] = sts.Name
+	pod.Annotations[selectors.AnnotationStatefulSet] = sts.Name
 
 	// TODO: cannot set blockOwnerDeletion if an ownerReference refers to a resource you can't set finalizers on: User "system:serviceaccount:kube-system:statefulset-drain-controller" cannot update statefulsets/finalizers.apps
 	if pod.OwnerReferences == nil {

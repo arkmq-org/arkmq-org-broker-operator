@@ -19,7 +19,7 @@ import (
 	"testing"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
-	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
@@ -134,8 +134,8 @@ func TestBrokerServiceDeployed_AfterPortDiscovery(t *testing.T) {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						common.LabelAppKubernetesInstance: svcName,
-						common.LabelBrokerService:         svcName,
+						selectors.LabelAppKubernetesInstance: svcName,
+						selectors.LabelBrokerService:         svcName,
 					},
 				},
 			},

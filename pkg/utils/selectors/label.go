@@ -13,6 +13,20 @@ const (
 	LabelPartOfKey = "app.kubernetes.io/part-of"
 	// LabelPartOfValue is the shared value for all pods managed by this operator.
 	LabelPartOfValue = "broker.arkmq.org"
+
+	// Standard Kubernetes label keys
+	LabelAppKubernetesInstance  = "app.kubernetes.io/instance"
+	LabelAppKubernetesComponent = "app.kubernetes.io/component"
+	LabelAppKubernetesManagedBy = "app.kubernetes.io/managed-by"
+
+	// Domain-specific label keys
+	LabelBrokerService   = "broker.arkmq.org/service"
+	LabelBrokerPeerIndex = "broker.arkmq.org/peer-index"
+
+	// Standard Kubernetes annotation keys
+	AnnotationStatefulSet        = "statefulsets.kubernetes.io/drainer-pod-owner"
+	AnnotationDrainerPodTemplate = "statefulsets.kubernetes.io/drainer-pod-template"
+	PodNameLabelKey              = "statefulset.kubernetes.io/pod-name"
 )
 
 type LabelerInterface interface {

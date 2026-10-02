@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
-	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -92,11 +91,11 @@ func TestLabelConflicts_NoReservedKeys(t *testing.T) {
 	assert.False(t, hasApplication, "Must not use reserved label key 'application'")
 
 	// Verify we're using standard Kubernetes labels with proper prefixes
-	assert.Contains(t, labels, common.LabelAppKubernetesInstance)
-	assert.Contains(t, labels, common.LabelAppKubernetesComponent)
-	assert.Contains(t, labels, common.LabelAppKubernetesManagedBy)
-	assert.Contains(t, labels, common.LabelBrokerService)
-	assert.Contains(t, labels, common.LabelBrokerPeerIndex)
+	assert.Contains(t, labels, selectors.LabelAppKubernetesInstance)
+	assert.Contains(t, labels, selectors.LabelAppKubernetesComponent)
+	assert.Contains(t, labels, selectors.LabelAppKubernetesManagedBy)
+	assert.Contains(t, labels, selectors.LabelBrokerService)
+	assert.Contains(t, labels, selectors.LabelBrokerPeerIndex)
 }
 
 func TestLabelConflicts_ProperDomainPrefixes(t *testing.T) {

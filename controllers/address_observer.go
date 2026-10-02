@@ -7,6 +7,7 @@ import (
 
 	ss "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/statefulsets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	"github.com/go-logr/logr"
 
 	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
@@ -20,9 +21,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-const AnnotationStatefulSet = "statefulsets.kubernetes.io/drainer-pod-owner"
-const AnnotationDrainerPodTemplate = "statefulsets.kubernetes.io/drainer-pod-template"
 
 type AddressObserver struct {
 	// kubeclientset is a standard kubernetes clientset
@@ -101,7 +99,7 @@ func (c *AddressObserver) newPodReady(ready *types.NamespacedName) {
 		return
 	}
 
-	stsNameFromAnnotation := pod.Annotations[AnnotationStatefulSet]
+	stsNameFromAnnotation := pod.Annotations[selectors.AnnotationStatefulSet]
 	if stsNameFromAnnotation != "" {
 		c.log.V(1).Info("Ignoring drainer pod", "pod", realPodName)
 		return
