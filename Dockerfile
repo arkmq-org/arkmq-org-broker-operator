@@ -72,4 +72,4 @@ ENTRYPOINT ["${USER_HOME}/bin/entrypoint"]
 LABEL name="arkmq-org/arkmq-org-broker-operator"
 LABEL description="ArkMQ Broker Operator"
 LABEL maintainer="ArkMQ <info@arkmq.org>"
-LABEL version="2.1.5"
+LABEL version="3.0.0"

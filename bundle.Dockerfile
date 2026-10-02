@@ -23,5 +23,5 @@ COPY bundle/tests/scorecard /tests/scorecard/
 LABEL name="arkmq-org/arkmq-org-broker-operator-bundle"
 LABEL description="ArkMQ Broker Operator Bundle"
 LABEL maintainer="ArkMQ <info@arkmq.org>"
-LABEL version="2.1.5"
+LABEL version="3.0.0"
 LABEL com.redhat.openshift.versions="v4.12"

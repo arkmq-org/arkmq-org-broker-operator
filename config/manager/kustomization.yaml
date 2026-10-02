@@ -15,4 +15,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: quay.io/arkmq-org/arkmq-org-broker-operator
-  newTag: 2.1.5
+  newTag: 3.0.0

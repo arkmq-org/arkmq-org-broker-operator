@@ -16,7 +16,7 @@ controllerManager:
         type: RuntimeDefault
     image:
       repository: quay.io/arkmq-org/arkmq-org-broker-operator
-      tag: 2.1.5
+      tag: 3.0.0
       pullPolicy: null
     resources:
       limits:

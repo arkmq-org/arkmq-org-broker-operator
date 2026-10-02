@@ -17,5 +17,5 @@ annotations:
   name: "arkmq-org/arkmq-org-broker-operator-bundle"
   description: "ArkMQ Broker Operator Bundle"
   maintainer: "ArkMQ <info@arkmq.org>"
-  version: "2.1.5"
+  version: "3.0.0"
   com.redhat.openshift.versions: "v4.12"
