@@ -122,91 +122,118 @@ You can view the list of minikube maintainers at: https://github.com/kubernetes/
 
 ### Build the Camel Pipeline Image
 
-The Camel pipeline image is built using your local Docker daemon (which has
-internet access for Maven dependencies) and then loaded directly into Minikube.
+The Camel pipeline image is built by your local container tool (which has
+internet access for Maven dependencies) and then loaded into Minikube. Either
+`docker` or `podman` works; the image is handed to Minikube as a tar archive so
+the step does not depend on which one you have.
 The source lives alongside this tutorial in [`camel-jms-app/`](camel-jms-app/).
 The `Containerfile` is a multi-stage build — Maven and the JDK run inside the
 builder container, so no local JDK or Maven installation is required.
 
 ```bash {"stage":"init", "label":"build camel jms image", "rootdir":"$initial_dir", "runtime":"bash"}
-docker build -f docs/tutorials/brokerservice/camel-jms-app/Containerfile docs/tutorials/brokerservice/camel-jms-app/ -t camel-jms-app:latest
-minikube image load camel-jms-app:latest --profile brokerservice-monitoring
+CONTAINER_TOOL=$(command -v docker || command -v podman)
+if [ -z "${CONTAINER_TOOL}" ]; then
+  echo "Neither docker nor podman was found on PATH" >&2
+  exit 1
+fi
+
+"${CONTAINER_TOOL}" build \
+  -f docs/tutorials/brokerservice/camel-jms-app/Containerfile \
+  docs/tutorials/brokerservice/camel-jms-app/ \
+  -t camel-jms-app:latest
+
+# minikube image load reads a name from the docker daemon, which podman does not
+# populate, so go through a tar archive instead
+CAMEL_IMAGE_TAR=$(mktemp -t camel-jms-app-XXXXXX.tar)
+"${CONTAINER_TOOL}" save camel-jms-app:latest -o "${CAMEL_IMAGE_TAR}"
+minikube image load "${CAMEL_IMAGE_TAR}" --profile brokerservice-monitoring
+rm -f "${CAMEL_IMAGE_TAR}"
+
+# podman normalises an unqualified build tag to localhost/<name> while docker
+# keeps it bare. The deployments reference the bare name, so add it when the
+# prefixed one is what landed.
+if minikube image ls --profile brokerservice-monitoring | grep -qx 'localhost/camel-jms-app:latest'; then
+  minikube image tag localhost/camel-jms-app:latest camel-jms-app:latest \
+    --profile brokerservice-monitoring
+fi
 ```
 ```shell markdown_runner
-#0 building with "default" instance using docker driver
+[1/2] STEP 1/8: FROM registry.access.redhat.com/ubi9/openjdk-21 AS builder
+[1/2] STEP 2/8: USER root
+--> c89f634500be
+[1/2] STEP 3/8: WORKDIR /build
+--> 66241d4bb930
+[1/2] STEP 4/8: RUN microdnf install -y maven --setopt=install_weak_deps=0 && microdnf clean all
+Downloading metadata...
+Downloading metadata...
+Downloading metadata...
+Nothing to do.
+Complete.
+--> 6d08da2ea51f
+[1/2] STEP 5/8: COPY pom.xml pom.xml
+--> 6647bed66d7a
+[1/2] STEP 6/8: RUN mvn dependency:resolve-plugins dependency:resolve -q
+--> cb9bd38cf145
+[1/2] STEP 7/8: COPY src/ src/
+--> b21e4b2e005b
+[1/2] STEP 8/8: RUN mvn package -DskipTests -q
+--> 258a3ee45a1f
+[2/2] STEP 1/11: FROM registry.access.redhat.com/ubi9/openjdk-21-runtime
+[2/2] STEP 2/11: ENV LANGUAGE='en_US:en'
+--> 06e713251d83
+[2/2] STEP 3/11: COPY --chown=185 --from=builder /build/target/quarkus-app/lib/       /deployments/lib/
+--> f302c522e050
+[2/2] STEP 4/11: COPY --chown=185 --from=builder /build/target/quarkus-app/*.jar       /deployments/
+--> d01ec5ab9c3c
+[2/2] STEP 5/11: COPY --chown=185 --from=builder /build/target/quarkus-app/app/        /deployments/app/
+--> 70ac21b2361a
+[2/2] STEP 6/11: COPY --chown=185 --from=builder /build/target/quarkus-app/quarkus/    /deployments/quarkus/
+--> af54ee6b0756
+[2/2] STEP 7/11: EXPOSE 8080
+--> a04a566b01ca
+[2/2] STEP 8/11: USER 185
+--> 321b10d16aaf
+[2/2] STEP 9/11: ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=127.0.0.1 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -Xbootclasspath/a:/deployments/lib/main/de.dentrassi.crypto.pem-keystore-3.0.0.jar:/deployments/lib/main/com.hierynomus.asn-one-0.6.0.jar:/deployments/lib/main/org.slf4j.slf4j-api-2.0.18.jar -Djava.security.properties=/app/tls/pem/java.security"
+--> 4d560376f072
+[2/2] STEP 10/11: ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
+--> 7ace9f3b0b74
+[2/2] STEP 11/11: ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
+[2/2] COMMIT camel-jms-app:latest
+--> ebd8492d032d
+Successfully tagged localhost/camel-jms-app:latest
+ebd8492d032d3e6c4cd41829e55fa4b775ee0769704bcbe804617022bd6961f2
+Trying to pull registry.access.redhat.com/ubi9/openjdk-21:latest...
+Getting image source signatures
+Checking if image destination supports signatures
+Copying blob sha256:207da760819c8247a463fb2268005066114a491e5b3e296fcd0b7a79400b2f1e
+Copying blob sha256:eb6cbddf5f403250ac934b73c78eb43e655a49768a13d13e279ba79d950d145f
+Copying config sha256:a68923bc3ba9d685d18e3c6df60a529aa88b526573df468061c73fb9defc994c
+Writing manifest to image destination
+Storing signatures
 
-#1 [internal] load build definition from Containerfile
-#1 transferring dockerfile: 1.43kB done
-#1 DONE 0.0s
+(microdnf:2): librhsm-WARNING **: 11:46:19.570: Found 0 entitlement certificates
 
-#2 [internal] load metadata for registry.access.redhat.com/ubi9/openjdk-21:latest
-#2 ...
+(microdnf:2): librhsm-WARNING **: 11:46:19.571: Found 0 entitlement certificates
 
-#3 [internal] load metadata for registry.access.redhat.com/ubi9/openjdk-21-runtime:latest
-#3 DONE 0.4s
+(microdnf:1): librhsm-WARNING **: 11:46:20.562: Found 0 entitlement certificates
 
-#2 [internal] load metadata for registry.access.redhat.com/ubi9/openjdk-21:latest
-#2 DONE 0.4s
-
-#4 [internal] load .dockerignore
-#4 transferring context: 217B done
-#4 DONE 0.0s
-
-#5 [internal] load build context
-#5 DONE 0.0s
-
-#6 [builder 1/7] FROM registry.access.redhat.com/ubi9/openjdk-21:latest@sha256:40929d99200a97ae859994d3a41080befb871c26ae116f7d24bc9aeaa7d31d46
-#6 resolve registry.access.redhat.com/ubi9/openjdk-21:latest@sha256:40929d99200a97ae859994d3a41080befb871c26ae116f7d24bc9aeaa7d31d46 0.1s done
-#6 DONE 0.1s
-
-#7 [stage-1 1/5] FROM registry.access.redhat.com/ubi9/openjdk-21-runtime:latest@sha256:f10cc334bd39f39ad35bcefc5ac0ce1ad25bda499f6abf73ccb8afdd1ea6d3c1
-#7 resolve registry.access.redhat.com/ubi9/openjdk-21-runtime:latest@sha256:f10cc334bd39f39ad35bcefc5ac0ce1ad25bda499f6abf73ccb8afdd1ea6d3c1 0.1s done
-#7 DONE 0.1s
-
-#5 [internal] load build context
-#5 transferring context: 21.73kB done
-#5 DONE 0.0s
-
-#8 [stage-1 2/5] COPY --chown=185 --from=builder /build/target/quarkus-app/lib/       /deployments/lib/
-#8 CACHED
-
-#9 [builder 6/7] COPY src/ src/
-#9 CACHED
-
-#10 [builder 2/7] WORKDIR /build
-#10 CACHED
-
-#11 [stage-1 3/5] COPY --chown=185 --from=builder /build/target/quarkus-app/*.jar       /deployments/
-#11 CACHED
-
-#12 [builder 5/7] RUN mvn dependency:resolve-plugins dependency:resolve -q
-#12 CACHED
-
-#13 [builder 7/7] RUN mvn package -DskipTests -q
-#13 CACHED
-
-#14 [stage-1 4/5] COPY --chown=185 --from=builder /build/target/quarkus-app/app/        /deployments/app/
-#14 CACHED
-
-#15 [builder 3/7] RUN microdnf install -y maven --setopt=install_weak_deps=0 && microdnf clean all
-#15 CACHED
-
-#16 [builder 4/7] COPY pom.xml pom.xml
-#16 CACHED
-
-#17 [stage-1 5/5] COPY --chown=185 --from=builder /build/target/quarkus-app/quarkus/    /deployments/quarkus/
-#17 CACHED
-
-#18 exporting to image
-#18 exporting layers done
-#18 exporting manifest sha256:7ec3c5074e20334c6fcaab1e44a352c72ff106940d1572b1ff3a1b93a3995d73 done
-#18 exporting config sha256:026c59c2230ae766a5a6f6dc34fd59e2c8c4778a971e1576fa46fc79bfd4455a done
-#18 exporting attestation manifest sha256:649c3c636d40884ab73092455503e4ecdd87c139aa7eefb342d60bec78eb8035
-#18 exporting attestation manifest sha256:649c3c636d40884ab73092455503e4ecdd87c139aa7eefb342d60bec78eb8035 0.0s done
-#18 exporting manifest list sha256:f4452bccb929c1a82c29d440d25ac10b3cd0e0818a211eb030d73ad9907f120d 0.0s done
-#18 naming to docker.io/library/camel-jms-app:latest done
-#18 unpacking to docker.io/library/camel-jms-app:latest 0.0s done
-#18 DONE 0.1s
+(microdnf:1): librhsm-WARNING **: 11:46:20.563: Found 0 entitlement certificates
+Trying to pull registry.access.redhat.com/ubi9/openjdk-21-runtime:latest...
+Getting image source signatures
+Checking if image destination supports signatures
+Copying blob sha256:6e30b8bbcac0f26e0bed25820e66283110ca62b30a9c55bf6d441c49c6c1d3ca
+Copying blob sha256:207da760819c8247a463fb2268005066114a491e5b3e296fcd0b7a79400b2f1e
+Copying config sha256:42aa29730f7e14815bf8b62c19bf107a45e5b1e08c1e0d32d68c97fd0e0310e8
+Writing manifest to image destination
+Storing signatures
+Copying blob sha256:15bd75a4e0d9c6eb2dca6324dca83e1c68d5eadc93d821b6201290e0f244e42b
+Copying blob sha256:b6acd93080909baef2f968dde1481778fa832ac6750964894e209f206c0e76a0
+Copying blob sha256:5ed4b882a59c46831a9645f5fe06efe0c6fa04cad8dccd890b9067b3892af095
+Copying blob sha256:5bd296c84f61e94ee5a7073bb1634ba1aea98a5229a50738eb3253a3e6182166
+Copying blob sha256:a34855efb70bf61a81d8c1e02485ded51be18c8a518455f1e89c9f167b1c0e9a
+Copying blob sha256:b346bc1ef3f6fe2b4293ec9985372b2d00e6bd1804a178cc5c47ec034dec249d
+Copying config sha256:ebd8492d032d3e6c4cd41829e55fa4b775ee0769704bcbe804617022bd6961f2
+Writing manifest to image destination
 ```
 
 The first build takes a few minutes while Maven downloads dependencies and
@@ -285,11 +312,29 @@ Wait for `cert-manager` to be ready:
 
 ```bash {"stage":"init", "label":"wait for cert-manager", "runtime":"bash"}
 kubectl wait deployment --for=condition=Available -n cert-manager --timeout=600s cert-manager cert-manager-cainjector cert-manager-webhook
+
+# The webhook reports Available before it accepts connections, and trust-manager's
+# Certificate and Issuer are rejected until it does. Probe it with a server-side
+# dry run, which is validated by the webhook but creates nothing.
+until kubectl apply --dry-run=server -f - >/dev/null 2>&1 <<'EOF'
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: webhook-readiness-probe
+  namespace: cert-manager
+spec:
+  selfSigned: {}
+EOF
+do
+  echo "Waiting for the cert-manager webhook to answer" && sleep 5
+done
+echo "cert-manager webhook is answering"
 ```
 ```shell markdown_runner
 deployment.apps/cert-manager condition met
 deployment.apps/cert-manager-cainjector condition met
 deployment.apps/cert-manager-webhook condition met
+cert-manager webhook is answering
 ```
 
 ### Install Trust Manager
@@ -2014,8 +2059,12 @@ The baseline shipping configuration is:
 
 To fully tear down the tutorial environment, delete the Minikube cluster. This removes the entire cluster including the operator, all deployed resources, and all cluster-scoped CRDs:
 
-```bash
+```bash {"stage":"teardown", "requires":"init/minikube_start", "runtime":"bash", "label":"delete minikube cluster"}
 minikube delete --profile brokerservice-monitoring
+```
+```shell markdown_runner
+* Deleting "brokerservice-monitoring" in kvm2 ...
+* Removed all traces of the "brokerservice-monitoring" cluster.
 ```
 
 If you want to clean up only the tutorial resources while keeping the cluster running, delete the namespace and the ClusterIssuers explicitly. ClusterIssuers are not namespace-scoped and survive namespace deletion, so they must be removed separately:
