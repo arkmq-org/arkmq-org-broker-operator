@@ -68,6 +68,7 @@ const (
 
 	// https://cert-manager.io/docs/trust/trust-manager/#preparing-for-production
 	// New naming convention (preferred)
+	OperatorName                    = "arkmq-org-broker-operator"
 	DefaultOperatorCertSecretName   = "arkmq-org-broker-manager-cert"
 	DefaultOperatorCASecretName     = "arkmq-org-broker-manager-ca"
 	DefaultOperandCertSecretName    = "broker-cert"     // or can be prefixed with `cr.Name-`

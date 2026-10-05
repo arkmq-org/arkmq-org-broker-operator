@@ -616,7 +616,7 @@ var _ = Describe("brokerservice controller unit", func() {
 
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 		Expect(err).NotTo(HaveOccurred())
-		expectedApps := []string{fmt.Sprintf("%s/%s@0", ns, app1Name), fmt.Sprintf("%s-%s", ns, app2Name)}
+		expectedApps := []string{fmt.Sprintf("%s/%s@0", ns, app1Name), fmt.Sprintf("%s/%s@0", ns, app2Name)}
 		sort.Strings(expectedApps)
 		sort.Strings(updatedSvc.Status.ProvisionedApps)
 		Expect(updatedSvc.Status.ProvisionedApps).To(Equal(expectedApps))
@@ -964,7 +964,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		})
 	})
 
-	It("idempotent status", Label(unitLabel), func() {
+	It("idempotent status after creation", Label(unitLabel), func() {
 		scheme := runtime.NewScheme()
 		_ = v1beta2.AddToScheme(scheme)
 		_ = networkingv1.AddToScheme(scheme)
@@ -993,7 +993,15 @@ var _ = Describe("brokerservice controller unit", func() {
 		updatedSvc := &v1beta2.BrokerService{}
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 		Expect(err).NotTo(HaveOccurred())
-		firstStatus := updatedSvc.Status.DeepCopy()
+		initialStatus := updatedSvc.Status.DeepCopy()
+		Expect(meta.FindStatusCondition(initialStatus.Conditions, v1beta2.AppsProvisionedConditionType).Message).To(ContainSubstring("not found"))
+
+		_, err = r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
+		Expect(err).NotTo(HaveOccurred())
+		firstStatus := updatedSvc.Status
 
 		_, err = r.Reconcile(context.TODO(), req)
 		Expect(err).NotTo(HaveOccurred())
@@ -1303,5 +1311,266 @@ var _ = Describe("brokerservice controller unit", func() {
 
 		_, err := reconciler.appIdentityEntries([]v1beta2.BrokerApp{newBrokerApp("ns1", "app-alpha")})
 		Expect(err).To(HaveOccurred())
+	})
+
+	It("no requeues when broker ready but external configs empty", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = v1beta2.AddToScheme(scheme)
+		_ = networkingv1.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
+
+		ns := "default"
+		svcName := "my-service"
+		appName := "my-app"
+
+		common.SetOperatorCASecretName("op_ca")
+		DeferCleanup(common.UnsetOperatorCASecretName)
+
+		common.SetOperatorNameSpace(ns)
+		DeferCleanup(common.UnsetOperatorNameSpace)
+
+		namespace := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: ns},
+		}
+		oc := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "op_ca", Namespace: ns},
+			Data:       map[string][]byte{"ca.pem": []byte("bla")},
+		}
+
+		svc := &v1beta2.BrokerService{
+			ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
+			Spec:       v1beta2.BrokerServiceSpec{Image: StringToPtr("placeholder")},
+		}
+
+		app := &v1beta2.BrokerApp{
+			ObjectMeta: metav1.ObjectMeta{Name: appName, Namespace: ns},
+			Spec:       v1beta2.BrokerAppSpec{},
+			Status: v1beta2.BrokerAppStatus{
+				Service: &v1beta2.BrokerServiceBindingStatus{
+					Name: svcName, Namespace: ns,
+					Secret: "binding-secret", AssignedPort: 61616,
+				},
+			},
+		}
+
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(namespace, oc, svc, app)...).
+			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
+				a := rawObj.(*v1beta2.BrokerApp)
+				if a.Status.Service != nil {
+					return []string{a.Status.Service.Key()}
+				}
+				return nil
+			}).Build()
+
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+
+		_, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		brokerCR := &v1beta2.Broker{}
+		err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
+		Expect(err).NotTo(HaveOccurred())
+
+		brokerCR.Status.Conditions = []metav1.Condition{
+			{Type: v1beta2.DeployedConditionType, Status: metav1.ConditionTrue, Reason: "AllPodsReady"},
+			{Type: v1beta2.ReadyConditionType, Status: metav1.ConditionTrue, Reason: "ResourceReady"},
+		}
+		err = cl.Status().Update(context.TODO(), brokerCR)
+		Expect(err).NotTo(HaveOccurred())
+
+		result, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(result.RequeueAfter == 0).To(BeTrue(),
+			"expected no RequeueAfter when broker is Ready but ExternalConfigs is empty, got %v", result)
+
+		updatedSvc := &v1beta2.BrokerService{}
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(updatedSvc.Status.ProvisionedApps).To(BeEmpty())
+
+		appsProv := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.AppsProvisionedConditionType)
+		Expect(appsProv).NotTo(BeNil())
+		Expect(appsProv.Status).To(Equal(metav1.ConditionFalse))
+	})
+
+	It("no requeues when external config version stale", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = v1beta2.AddToScheme(scheme)
+		_ = networkingv1.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
+
+		ns := "default"
+		svcName := "my-service"
+		appName := "my-app"
+
+		common.SetOperatorCASecretName("op_ca")
+		DeferCleanup(common.UnsetOperatorCASecretName)
+
+		common.SetOperatorNameSpace(ns)
+		DeferCleanup(common.UnsetOperatorNameSpace)
+
+		namespace := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: ns},
+		}
+		oc := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "op_ca", Namespace: ns},
+			Data:       map[string][]byte{"ca.pem": []byte("bla")},
+		}
+
+		svc := &v1beta2.BrokerService{
+			ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
+			Spec:       v1beta2.BrokerServiceSpec{Image: StringToPtr("placeholder")},
+		}
+
+		app := &v1beta2.BrokerApp{
+			ObjectMeta: metav1.ObjectMeta{Name: appName, Namespace: ns},
+			Spec:       v1beta2.BrokerAppSpec{},
+			Status: v1beta2.BrokerAppStatus{
+				Service: &v1beta2.BrokerServiceBindingStatus{
+					Name: svcName, Namespace: ns,
+					Secret: "binding-secret", AssignedPort: 61616,
+				},
+			},
+		}
+
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(namespace, oc, svc, app)...).
+			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
+				a := rawObj.(*v1beta2.BrokerApp)
+				if a.Status.Service != nil {
+					return []string{a.Status.Service.Key()}
+				}
+				return nil
+			}).Build()
+
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+
+		_, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		brokerCR := &v1beta2.Broker{}
+		err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
+		Expect(err).NotTo(HaveOccurred())
+
+		secretName := AppPropertiesSecretName(svcName)
+		brokerCR.Status.Conditions = []metav1.Condition{
+			{Type: v1beta2.DeployedConditionType, Status: metav1.ConditionTrue, Reason: "AllPodsReady"},
+			{Type: v1beta2.ReadyConditionType, Status: metav1.ConditionTrue, Reason: "ResourceReady"},
+		}
+		brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
+			{Name: secretName, ResourceVersion: "stale-version-that-wont-match"},
+		}
+		err = cl.Status().Update(context.TODO(), brokerCR)
+		Expect(err).NotTo(HaveOccurred())
+
+		result, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(result.RequeueAfter == 0).To(BeTrue(),
+			"expected no RequeueAfter ExternalConfigs version is stale, got %v", result)
+
+		updatedSvc := &v1beta2.BrokerService{}
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(updatedSvc.Status.ProvisionedApps).To(BeEmpty())
+	})
+
+	It("no requeue when external configs synced", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = v1beta2.AddToScheme(scheme)
+		_ = networkingv1.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
+
+		ns := "default"
+		svcName := "my-service"
+		appName := "my-app"
+
+		common.SetOperatorCASecretName("op_ca")
+		DeferCleanup(common.UnsetOperatorCASecretName)
+
+		common.SetOperatorNameSpace(ns)
+		DeferCleanup(common.UnsetOperatorNameSpace)
+
+		namespace := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: ns},
+		}
+		oc := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "op_ca", Namespace: ns},
+			Data:       map[string][]byte{"ca.pem": []byte("bla")},
+		}
+
+		svc := &v1beta2.BrokerService{
+			ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
+			Spec:       v1beta2.BrokerServiceSpec{Image: StringToPtr("placeholder")},
+		}
+
+		app := &v1beta2.BrokerApp{
+			ObjectMeta: metav1.ObjectMeta{Name: appName, Namespace: ns},
+			Spec:       v1beta2.BrokerAppSpec{},
+			Status: v1beta2.BrokerAppStatus{
+				Service: &v1beta2.BrokerServiceBindingStatus{
+					Name: svcName, Namespace: ns,
+					Secret: "binding-secret", AssignedPort: 61616,
+				},
+			},
+		}
+
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(namespace, oc, svc, app)...).
+			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
+				a := rawObj.(*v1beta2.BrokerApp)
+				if a.Status.Service != nil {
+					return []string{a.Status.Service.Key()}
+				}
+				return nil
+			}).Build()
+
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+
+		_, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		secretName := AppPropertiesSecretName(svcName)
+		secret := &corev1.Secret{}
+		err = cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, secret)
+		Expect(err).NotTo(HaveOccurred())
+
+		brokerCR := &v1beta2.Broker{}
+		err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
+		Expect(err).NotTo(HaveOccurred())
+
+		brokerCR.Status.Conditions = []metav1.Condition{
+			{Type: v1beta2.DeployedConditionType, Status: metav1.ConditionTrue, Reason: "AllPodsReady"},
+			{Type: v1beta2.ReadyConditionType, Status: metav1.ConditionTrue, Reason: "ResourceReady"},
+		}
+		brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
+			{Name: secretName, ResourceVersion: secret.ResourceVersion},
+		}
+		err = cl.Status().Update(context.TODO(), brokerCR)
+		Expect(err).NotTo(HaveOccurred())
+
+		result, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(time.Duration(0)), "should not requeue when ExternalConfigs is synced")
+
+		updatedSvc := &v1beta2.BrokerService{}
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(updatedSvc.Status.ProvisionedApps).NotTo(BeEmpty())
+
+		appsProv := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.AppsProvisionedConditionType)
+		Expect(appsProv).NotTo(BeNil())
+		Expect(appsProv.Status).To(Equal(metav1.ConditionTrue))
 	})
 })

@@ -47,8 +47,6 @@ import (
 
 var _ = Describe("broker-service-poc", func() {
 
-	var installedCertManager bool = false
-
 	BeforeEach(func() {
 		BeforeEachSpec()
 
@@ -60,7 +58,6 @@ var _ = Describe("broker-service-poc", func() {
 			//if cert manager/trust manager is not installed, install it
 			if !CertManagerInstalled() {
 				Expect(InstallCertManager()).To(Succeed())
-				installedCertManager = true
 			}
 
 			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
@@ -86,7 +83,7 @@ var _ = Describe("broker-service-poc", func() {
 			By("installing operator cert")
 			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
 				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-				candidate.Spec.CommonName = "arkmq-org-broker-operator"
+				candidate.Spec.CommonName = common.OperatorName
 				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
 					Name: caIssuer.Name,
 					Kind: "ClusterIssuer",
@@ -98,19 +95,6 @@ var _ = Describe("broker-service-poc", func() {
 	})
 
 	AfterEach(func() {
-
-		if false && os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			UnInstallCaBundle(common.DefaultOperatorCASecretName)
-			UninstallClusteredIssuer(caIssuerName)
-			UninstallCert(rootCert.Name, rootCert.Namespace)
-			UninstallCert(common.DefaultOperatorCertSecretName, defaultNamespace)
-			UninstallClusteredIssuer(rootIssuerName)
-
-			if installedCertManager {
-				Expect(UninstallCertManager()).To(Succeed())
-				installedCertManager = false
-			}
-		}
 		AfterEachSpec()
 	})
 

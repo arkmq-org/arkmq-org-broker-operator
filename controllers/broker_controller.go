@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"path"
+	"slices"
 	"sort"
 
 	"github.com/RHsyseng/operator-utils/pkg/resource/compare"
@@ -144,7 +145,9 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 		if !reconcileBlocked {
 			err = reconciler.Process(customResource, *namer, r.Client, r.Scheme)
 		}
-		reconciler.ProcessBrokerStatus(customResource, r.Client, r.Scheme)
+		if reconciler.ProcessBrokerStatus(customResource, r.Client, r.Scheme) {
+			requeueRequest = true
+		}
 	}
 
 	brokerstatus.UpdateBlockedStatus(customResource, reconcileBlocked)
@@ -975,7 +978,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		}
 
 		// Apply control plane overrides if they exist
-		if err := applyControlPlaneOverridesForBroker(customResource, client, brokerPropertiesMapData); err != nil {
+		if err := reconciler.applyControlPlaneOverridesForBroker(customResource, client, brokerPropertiesMapData); err != nil {
 			return nil, err
 		}
 
@@ -1194,6 +1197,9 @@ func (reconciler *BrokerReconcilerImpl) brokerPropertiesConfigSystemPropValue(mo
 	return result
 }
 
+// when the CR has a full Spec, the intent is that the Spec is fully formed, such that there are not server side defaults in the mix.
+// For probes, we historically allow a partial spec, so we need to be careful to not overide server side applied defaults with empty values
+
 func (reconciler *BrokerReconcilerImpl) configureStartupProbe(container *corev1.Container, probeFromCr *corev1.Probe) *corev1.Probe {
 
 	var startupProbe = container.StartupProbe
@@ -1276,14 +1282,11 @@ func (reconciler *BrokerReconcilerImpl) configureReadinessProbe(container *corev
 	return readinessProbe
 }
 
-// when the CR has a full Spec, the intent is that the Spec is fully formed, such that there are not server side defaults in the mix.
-// For probes, we historically allow a partial spec, so we need to be careful to not overide server side applied defaults with empty values
-
 // applyControlPlaneOverrides applies control plane configuration overrides from secrets.
 // It first checks for CR-specific override secret ([cr-name]-control-plane-override),
 // then falls back to shared override secret (control-plane-override).
 // Each key in the override secret completely replaces the corresponding key in brokerPropertiesMapData.
-func applyControlPlaneOverridesForBroker(customResource *v1beta2.Broker, client rtclient.Client, brokerPropertiesMapData map[string][]byte) error {
+func (reconciler *BrokerReconcilerImpl) applyControlPlaneOverridesForBroker(customResource *v1beta2.Broker, client rtclient.Client, brokerPropertiesMapData map[string][]byte) error {
 	ctx := context.Background()
 
 	// Try CR-specific override secret first
@@ -1311,6 +1314,8 @@ func applyControlPlaneOverridesForBroker(customResource *v1beta2.Broker, client 
 			return err
 		}
 	}
+
+	reconciler.log.V(1).Info("applying overrides from secret", "name", overrideSecret.Name, "keys", slices.Collect(maps.Keys(overrideSecret.Data)))
 
 	// Apply overrides - complete replacement per key
 	maps.Copy(brokerPropertiesMapData, overrideSecret.Data)

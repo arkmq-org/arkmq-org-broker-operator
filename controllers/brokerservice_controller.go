@@ -190,7 +190,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 		// Standard Kubernetes labels
 		selectors.LabelAppKubernetesInstance:  reconciler.instance.Name,
 		selectors.LabelAppKubernetesComponent: "broker-service",
-		selectors.LabelAppKubernetesManagedBy: "arkmq-org-broker-operator",
+		selectors.LabelAppKubernetesManagedBy: common.OperatorName,
 		// Domain-specific labels
 		selectors.LabelBrokerService:   reconciler.instance.Name,
 		selectors.LabelBrokerPeerIndex: "0",
@@ -368,7 +368,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 					deployedCondition.Status = metav1.ConditionTrue
 					deployedCondition.Reason = broker.ReadyConditionReason
 				} else {
-					deployedCondition.Message = fmt.Sprintf("not ready broker status %v", deployed.Status)
+					deployedCondition.Message = fmt.Sprintf("awaiting deployed condition, broker status %v", deployed.Status)
 				}
 			}
 
@@ -395,10 +395,18 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 							} else {
 								reconciler.status.ProvisionedApps = nil
 							}
+						} else {
+							appsProvisionedCondition.Message = fmt.Sprintf("externalConfig version mismatch, expected: %s, current: %s, broker status: %v", secret.ResourceVersion, appliedSecretVersion, deployed.Status)
 						}
 					}
+				} else {
+					appsProvisionedCondition.Message = fmt.Sprintf("pending externalConfig, broker status: %v", deployed.Status)
 				}
+			} else {
+				appsProvisionedCondition.Message = fmt.Sprintf("not ready, broker status: %v", deployed.Status)
 			}
+		} else {
+			appsProvisionedCondition.Message = "broker not found"
 		}
 	}
 	meta.SetStatusCondition(&reconciler.status.Conditions, deployedCondition)
@@ -1104,6 +1112,9 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 	}
 	desired.Data[common.GetCertRolesKey(common.HttpAuthenticatorRealm)] = certRoles
 
+	for k, v := range desired.Data {
+		reconciler.log.V(1).Info("Override", "Key", k, "Value", string(v))
+	}
 	reconciler.TrackDesired(desired)
 	return nil
 }

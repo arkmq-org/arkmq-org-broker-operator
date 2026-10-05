@@ -46,7 +46,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 )
 
@@ -872,5 +874,69 @@ var _ = Describe("broker controller unit", func() {
 					"brokerPropertiesConfigSystemPropValue must end with ,$(EXTRA_BROKER_PROPERTIES)")
 			})
 		}
+	})
+
+	It("Reconcile requeues when ProcessBrokerStatus returns retry", Label(unitLabel), func() {
+		ns := "test-ns"
+
+		s := runtime.NewScheme()
+		_ = v1beta2.SchemeBuilder.AddToScheme(s)
+		_ = corev1.AddToScheme(s)
+		_ = appsv1.AddToScheme(s)
+
+		cr := &v1beta2.Broker{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "test-broker",
+				Namespace: ns,
+				Annotations: map[string]string{
+					common.BlockReconcileAnnotation: "true",
+				},
+			},
+		}
+		meta.SetStatusCondition(&cr.Status.Conditions, v1.Condition{
+			Type:   v1beta2.DeployedConditionType,
+			Status: v1.ConditionTrue,
+			Reason: v1beta2.DeployedConditionReadyReason,
+		})
+
+		certPEM, keyPEM := mustTestKeyPairGinkgo()
+
+		operatorCert := &corev1.Secret{
+			ObjectMeta: v1.ObjectMeta{Name: common.DefaultOperatorCertSecretName, Namespace: ns},
+			Data:       map[string][]byte{"tls.crt": certPEM, "tls.key": keyPEM},
+		}
+		operatorCA := &corev1.Secret{
+			ObjectMeta: v1.ObjectMeta{Name: common.DefaultOperatorCASecretName, Namespace: ns},
+			Data:       map[string][]byte{"ca.pem": certPEM},
+		}
+		operandCert := &corev1.Secret{
+			ObjectMeta: v1.ObjectMeta{Name: common.DefaultOperandCertSecretName, Namespace: ns},
+			Data:       map[string][]byte{"tls.crt": certPEM, "tls.key": keyPEM},
+		}
+
+		common.SetOperatorNameSpace(ns)
+		DeferCleanup(common.UnsetOperatorNameSpace)
+
+		cl := fake.NewClientBuilder().WithScheme(s).
+			WithObjects(cr, operatorCert, operatorCA, operandCert).
+			WithStatusSubresource(cr).Build()
+
+		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+		r.Client = cl
+		r.Scheme = s
+
+		req := ctrl.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      "test-broker",
+				Namespace: ns,
+			},
+		}
+
+		res, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(Equal(common.GetReconcileResyncPeriod()),
+			"Reconcile must requeue when ProcessBrokerStatus returns true "+
+				"(jolokia unreachable); the if block at broker_controller.go:148 "+
+				"captures this retry signal into requeueRequest")
 	})
 })

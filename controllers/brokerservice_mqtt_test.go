@@ -87,7 +87,7 @@ var _ = Describe("broker-service mqtt", func() {
 			By("installing operator cert")
 			InstallCert(common.DefaultOperatorCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
 				candidate.Spec.SecretName = common.DefaultOperatorCertSecretName
-				candidate.Spec.CommonName = "activemq-artemis-operator"
+				candidate.Spec.CommonName = common.OperatorName
 				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
 					Name: caIssuer.Name,
 					Kind: "ClusterIssuer",

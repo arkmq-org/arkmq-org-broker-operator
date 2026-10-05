@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -98,7 +99,7 @@ var _ = Describe("brokerservice pod labels", func() {
 		labels := broker.Spec.Labels
 		Expect(labels[selectors.LabelAppKubernetesInstance]).To(Equal(svcName))
 		Expect(labels[selectors.LabelAppKubernetesComponent]).To(Equal("broker-service"))
-		Expect(labels[selectors.LabelAppKubernetesManagedBy]).To(Equal("arkmq-org-broker-operator"))
+		Expect(labels[selectors.LabelAppKubernetesManagedBy]).To(Equal(common.OperatorName))
 		Expect(labels[selectors.LabelBrokerService]).To(Equal(svcName))
 		Expect(labels[selectors.LabelBrokerPeerIndex]).To(Equal("0"))
 	})
