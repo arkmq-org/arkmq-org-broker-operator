@@ -1380,7 +1380,7 @@ func (reconciler *BrokerAppInstanceReconciler) setDeployedCondition(err error) {
 		condition.Message = err.Error()
 	} else if reconciler.status.Service != nil && reconciler.service != nil {
 		// Check if actually deployed
-		appIdentity := AppIdentity(reconciler.instance)
+		appIdentity := AppIdentityWithGeneration(reconciler.instance)
 		isProvisioned := false
 		for _, appliedApp := range reconciler.service.Status.ProvisionedApps {
 			if appliedApp == appIdentity {

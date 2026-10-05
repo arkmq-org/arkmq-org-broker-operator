@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"time"
 
 	ss "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/statefulsets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
@@ -58,11 +57,6 @@ func (c *AddressObserver) Run(C chan types.NamespacedName, ctx context.Context) 
 		case <-ctx.Done():
 			c.log.V(1).Info("address_observer received done on ctx, exiting event loop")
 			return nil
-
-		default:
-			//log.V(1).Info("address_observer selected default, waiting a second")
-			// NOTE: Sender will be blocked if this select is sleeping, might need decreased time here
-			time.Sleep(500 * time.Millisecond)
 		}
 	}
 }

@@ -858,7 +858,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, createdService)).Should(Succeed())
 				if verbose {
-					fmt.Printf("Service ProvisionedApps: %v\n", createdService.Status.ProvisionedApps)
+					fmt.Printf("Service Status: %v\n", createdService.Status)
 				}
 				g.Expect(createdService.Status.ProvisionedApps).Should(HaveLen(1))
 				g.Expect(createdService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(app1Name)))

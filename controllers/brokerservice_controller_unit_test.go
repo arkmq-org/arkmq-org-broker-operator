@@ -475,7 +475,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		err = cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, secret)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(secret.ResourceVersion).NotTo(BeEmpty())
-		Expect(secret.Annotations[common.ProvisionedAppsAnnotation]).To(Equal(fmt.Sprintf("%s-%s", ns, appName)))
+		Expect(secret.Annotations[common.ProvisionedAppsAnnotation]).To(Equal(fmt.Sprintf("%s/%s@0", ns, appName)))
 
 		brokerCR := &v1beta2.Broker{}
 		err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
@@ -495,7 +495,7 @@ var _ = Describe("brokerservice controller unit", func() {
 
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(updatedSvc.Status.ProvisionedApps).To(Equal([]string{fmt.Sprintf("%s-%s", ns, appName)}))
+		Expect(updatedSvc.Status.ProvisionedApps).To(Equal([]string{fmt.Sprintf("%s/%s@0", ns, appName)}))
 	})
 
 	It("status applied apps incremental", Label(unitLabel), func() {
@@ -576,7 +576,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		updatedSvc := &v1beta2.BrokerService{}
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(updatedSvc.Status.ProvisionedApps).To(Equal([]string{fmt.Sprintf("%s-%s", ns, app1Name)}))
+		Expect(updatedSvc.Status.ProvisionedApps).To(Equal([]string{fmt.Sprintf("%s/%s@0", ns, app1Name)}))
 
 		app2 := &v1beta2.BrokerApp{
 			ObjectMeta: metav1.ObjectMeta{Name: app2Name, Namespace: ns},
@@ -601,7 +601,7 @@ var _ = Describe("brokerservice controller unit", func() {
 
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(updatedSvc.Status.ProvisionedApps).To(Equal([]string{fmt.Sprintf("%s-%s", ns, app1Name)}))
+		Expect(updatedSvc.Status.ProvisionedApps).To(Equal([]string{fmt.Sprintf("%s/%s@0", ns, app1Name)}))
 
 		err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
 		Expect(err).NotTo(HaveOccurred())
@@ -616,7 +616,7 @@ var _ = Describe("brokerservice controller unit", func() {
 
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 		Expect(err).NotTo(HaveOccurred())
-		expectedApps := []string{fmt.Sprintf("%s-%s", ns, app1Name), fmt.Sprintf("%s-%s", ns, app2Name)}
+		expectedApps := []string{fmt.Sprintf("%s/%s@0", ns, app1Name), fmt.Sprintf("%s-%s", ns, app2Name)}
 		sort.Strings(expectedApps)
 		sort.Strings(updatedSvc.Status.ProvisionedApps)
 		Expect(updatedSvc.Status.ProvisionedApps).To(Equal(expectedApps))

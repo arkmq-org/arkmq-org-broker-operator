@@ -90,7 +90,7 @@ var _ = Describe("brokerapp controller unit", func() {
 		Expect(string(bindingSecret.Data["port"])).To(Equal(fmt.Sprintf("%d", updatedApp.Status.Service.AssignedPort)))
 		Expect(string(bindingSecret.Data["uri"])).To(Equal(fmt.Sprintf("amqps://%s.%s.svc.%s:%d", svcName, ns, common.GetClusterDomain(), updatedApp.Status.Service.AssignedPort)))
 
-		svc.Status.ProvisionedApps = []string{AppIdentity(app)}
+		svc.Status.ProvisionedApps = []string{AppIdentityWithGeneration(app)}
 		err = cl.Status().Update(context.TODO(), svc)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -296,7 +296,7 @@ var _ = Describe("brokerapp controller unit", func() {
 		err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, updatedSvc)
 		Expect(err).NotTo(HaveOccurred())
 
-		appIdentity := AppIdentity(app)
+		appIdentity := AppIdentityWithGeneration(app)
 		updatedSvc.Status.ProvisionedApps = []string{appIdentity}
 		err = cl.Status().Update(context.TODO(), updatedSvc)
 		Expect(err).NotTo(HaveOccurred())

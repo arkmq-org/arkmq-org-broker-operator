@@ -21,14 +21,16 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
 	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
-	mqtt "github.com/eclipse/paho.mqtt.golang"
+
+	"github.com/eclipse/paho.golang/autopaho"
+	"github.com/eclipse/paho.golang/paho"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -49,8 +51,6 @@ import (
 
 var _ = Describe("broker-service mqtt", func() {
 
-	var installedCertManager bool = false
-
 	BeforeEach(func() {
 		BeforeEachSpec()
 
@@ -62,7 +62,6 @@ var _ = Describe("broker-service mqtt", func() {
 			//if cert manager/trust manager is not installed, install it
 			if !CertManagerInstalled() {
 				Expect(InstallCertManager()).To(Succeed())
-				installedCertManager = true
 			}
 
 			rootIssuer = InstallClusteredIssuer(rootIssuerName, nil)
@@ -100,25 +99,12 @@ var _ = Describe("broker-service mqtt", func() {
 	})
 
 	AfterEach(func() {
-
-		if false && os.Getenv("USE_EXISTING_CLUSTER") == "true" {
-			UnInstallCaBundle(common.DefaultOperatorCASecretName)
-			UninstallClusteredIssuer(caIssuerName)
-			UninstallCert(rootCert.Name, rootCert.Namespace)
-			UninstallCert(common.DefaultOperatorCertSecretName, defaultNamespace)
-			UninstallClusteredIssuer(rootIssuerName)
-
-			if installedCertManager {
-				Expect(UninstallCertManager()).To(Succeed())
-				installedCertManager = false
-			}
-		}
 		AfterEachSpec()
 	})
 
 	Context("mqtt round trip simple", func() {
 
-		It("non persistent", func() {
+		It("consumer then producer", func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -182,7 +168,8 @@ var _ = Describe("broker-service mqtt", func() {
 
 					Capabilities: []brokerv1beta2.AppCapabilityType{
 						{
-							ProducerOf: []brokerv1beta2.AddressRef{{Address: "mytopic"}, {Address: "mytopic/A"}, {Address: "mytopic/B"}},
+							// lets add a ProducerOf via an update
+							//ProducerOf: []brokerv1beta2.AddressRef{{Address: "mytopic"}, {Address: "mytopic/A"}, {Address: "mytopic/B"}},
 
 							ConsumerOf: []brokerv1beta2.AddressRef{
 								{
@@ -250,42 +237,111 @@ var _ = Describe("broker-service mqtt", func() {
 
 			tlsConfig := &tls.Config{RootCAs: certpool, Certificates: []tls.Certificate{clientKeyPair}, ServerName: acceptorIngressHost, InsecureSkipVerify: true}
 
-			opts := mqtt.NewClientOptions()
-			opts.AddBroker("ssl://" + clusterIngressHost + ":443")
-			opts.SetClientID("my-client")
-			opts.SetTLSConfig(tlsConfig)
-			opts.SetKeepAlive(30)
+			serverURL, err := url.Parse("ssl://" + clusterIngressHost + ":443")
+			Expect(err).Should(BeNil())
 
-			// Define the onConnect handler
-			opts.OnConnect = func(c mqtt.Client) {
-				fmt.Println("Successfully connected to the broker!")
-			}
-
+			By("setting up subscriber connection")
 			messageReceived := false
-			messageHandler := func(client mqtt.Client, msg mqtt.Message) {
+			subRouter := paho.NewStandardRouter()
+			subRouter.RegisterHandler("mytopic", func(p *paho.Publish) {
 				messageReceived = true
-				fmt.Printf("Received message: '%s' from topic: %s\n", msg.Payload(), msg.Topic())
-			}
+				fmt.Printf("Received message: '%s' from topic: %s\n", p.Payload, p.Topic)
+			})
 
-			// Create and connect the client
-			client := mqtt.NewClient(opts)
+			subscriber, err := autopaho.NewConnection(ctx, autopaho.ClientConfig{
+				ServerUrls: []*url.URL{serverURL},
+				TlsCfg:     tlsConfig,
+				KeepAlive:  30,
+				ClientConfig: paho.ClientConfig{
+					ClientID: "my-client",
+					Router:   subRouter,
+				},
+			})
+			Expect(err).Should(BeNil())
 
-			log.Printf("mqtt client: %v", client)
+			subConnectCtx, subConnectCancel := context.WithTimeout(ctx, existingClusterTimeout)
+			defer subConnectCancel()
+			Expect(subscriber.AwaitConnection(subConnectCtx)).Should(Succeed())
 
-			if token := client.Connect(); token.Wait() && token.Error() != nil {
-				log.Printf("mqtt token: %v", token)
+			_, err = subscriber.Subscribe(ctx, &paho.Subscribe{
+				Subscriptions: []paho.SubscribeOptions{
+					{Topic: "mytopic", QoS: 1},
+				},
+			})
+			Expect(err).Should(BeNil())
 
-				log.Fatalf("Failed to connect to broker: %v", token.Error())
-			}
+			By("setting up publisher connection - expect publish to fail")
+			publisher, err := autopaho.NewConnection(ctx, autopaho.ClientConfig{
+				ServerUrls: []*url.URL{serverURL},
+				TlsCfg:     tlsConfig,
+				KeepAlive:  30,
+				ClientConfig: paho.ClientConfig{
+					ClientID: "my-client-pub",
+				},
+			})
+			Expect(err).Should(BeNil())
 
-			if token := client.Subscribe("mytopic", 1, messageHandler); token.Wait() && token.Error() != nil {
-				log.Fatalf("Failed to subscribe to topic: %v", token.Error())
-			}
+			pubConnectCtx, pubConnectCancel := context.WithTimeout(ctx, existingClusterTimeout)
+			defer pubConnectCancel()
+			Expect(publisher.AwaitConnection(pubConnectCtx)).Should(Succeed())
 
+			// MQTT v5 returns a reason code in PUBACK for unauthorized access
 			text := "Hello MQTT from Go!"
-			if token := client.Publish("mytopic", 0, false, text); token.Wait() && token.Error() != nil {
-				log.Fatalf("Failed to publish to topic: %v", token.Error())
-			}
+			_, err = publisher.Publish(ctx, &paho.Publish{
+				Topic:   "mytopic",
+				QoS:     1,
+				Payload: []byte(text),
+			})
+			Expect(err).ShouldNot(BeNil())
+			fmt.Printf("Publish correctly rejected: %v\n", err)
+
+			Expect(publisher.Disconnect(ctx)).Should(Succeed())
+
+			By("updating app to add producer capability")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, appKey, createdApp)).Should(Succeed())
+				createdApp.Spec.Capabilities = append(createdApp.Spec.Capabilities, brokerv1beta2.AppCapabilityType{
+					ProducerOf: []brokerv1beta2.AddressRef{{Address: "mytopic"}, {Address: "mytopic/A"}, {Address: "mytopic/B"}},
+				})
+				g.Expect(k8sClient.Update(ctx, createdApp)).Should(Succeed())
+
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, appKey, createdApp)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("App STATUS: %v\n\n", createdApp.Status.Conditions)
+				}
+				readyCond := meta.FindStatusCondition(createdApp.Status.Conditions, brokerv1beta2.ReadyConditionType)
+				g.Expect(readyCond).ShouldNot(BeNil())
+				g.Expect(readyCond.Status).Should(Equal(metav1.ConditionTrue))
+				g.Expect(readyCond.ObservedGeneration).Should(Equal(createdApp.Generation))
+
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			// publish should now succeed on a new connection,
+			// that gets newly authenticated and authorized and can see the permissions from the ProducerOf capability
+			publisher2, err := autopaho.NewConnection(ctx, autopaho.ClientConfig{
+				ServerUrls: []*url.URL{serverURL},
+				TlsCfg:     tlsConfig,
+				KeepAlive:  30,
+				ClientConfig: paho.ClientConfig{
+					ClientID: "my-client-pub",
+				},
+			})
+			Expect(err).Should(BeNil())
+
+			pubConnectCtx2, pubConnectCancel2 := context.WithTimeout(ctx, existingClusterTimeout)
+			defer pubConnectCancel2()
+			Expect(publisher2.AwaitConnection(pubConnectCtx2)).Should(Succeed())
+
+			_, err = publisher2.Publish(ctx, &paho.Publish{
+				Topic:   "mytopic",
+				QoS:     1,
+				Payload: []byte(text),
+			})
+			Expect(err).Should(BeNil())
 
 			Eventually(func(g Gomega) {
 				g.Expect(messageReceived).Should(BeTrue())
@@ -302,7 +358,8 @@ var _ = Describe("broker-service mqtt", func() {
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			// Disconnect
-			client.Disconnect(250)
+			Expect(publisher2.Disconnect(ctx)).Should(Succeed())
+			Expect(subscriber.Disconnect(ctx)).Should(Succeed())
 
 			By("removing acceptor ingress")
 			Expect(k8sClient.Delete(ctx, acceptorIngress)).Should(Succeed())
@@ -480,7 +537,7 @@ var _ = Describe("broker-service mqtt", func() {
 			// reports "not Authorized". There is no condition to wait on for the
 			// reload, so retry until it accepts us -- a fixed delay is a fluke
 			// away from failing on a slower machine, which is how this broke.
-			connectMqtt := func(appName, clientID, ingressHost string) (mqtt.Client, *bool) {
+			connectMqtt := func(appName, clientID, ingressHost, topic string) (*autopaho.ConnectionManager, *bool) {
 				certSecret, err := secrets.RetriveSecret(
 					types.NamespacedName{Namespace: defaultNamespace, Name: appName + common.AppCertSecretSuffix},
 					make(map[string]string), k8sClient)
@@ -489,57 +546,59 @@ var _ = Describe("broker-service mqtt", func() {
 				Expect(err).Should(BeNil())
 
 				received := false
-				var client mqtt.Client
+				router := paho.NewStandardRouter()
+				router.RegisterHandler(topic, func(p *paho.Publish) {
+					received = true
+					fmt.Printf("%s received: '%s' on %s\n", clientID, p.Payload, p.Topic)
+				})
 
-				Eventually(func(g Gomega) {
-					candidate := mqtt.NewClient(mqtt.NewClientOptions().
-						AddBroker("ssl://" + clusterIngressHost + ":443").
-						SetClientID(clientID).
-						SetTLSConfig(&tls.Config{
-							RootCAs:            certpool,
-							Certificates:       []tls.Certificate{keyPair},
-							ServerName:         ingressHost,
-							InsecureSkipVerify: true,
-						}).
-						SetKeepAlive(30))
+				serverURL, err := url.Parse("ssl://" + clusterIngressHost + ":443")
+				Expect(err).Should(BeNil())
 
-					token := candidate.Connect()
-					g.Expect(token.WaitTimeout(10*time.Second)).Should(BeTrue(), "%s connect timed out", appName)
-					g.Expect(token.Error()).Should(Succeed(), "%s connect failed", appName)
-					client = candidate
-				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+				cm, err := autopaho.NewConnection(ctx, autopaho.ClientConfig{
+					ServerUrls: []*url.URL{serverURL},
+					TlsCfg: &tls.Config{
+						RootCAs:            certpool,
+						Certificates:       []tls.Certificate{keyPair},
+						ServerName:         ingressHost,
+						InsecureSkipVerify: true,
+					},
+					KeepAlive: 30,
+					ClientConfig: paho.ClientConfig{
+						ClientID: clientID,
+						Router:   router,
+					},
+				})
+				Expect(err).Should(BeNil())
 
-				return client, &received
+				connectCtx, connectCancel := context.WithTimeout(ctx, existingClusterTimeout)
+				defer connectCancel()
+				Expect(cm.AwaitConnection(connectCtx)).Should(Succeed())
+
+				_, err = cm.Subscribe(ctx, &paho.Subscribe{
+					Subscriptions: []paho.SubscribeOptions{
+						{Topic: topic, QoS: 1},
+					},
+				})
+				Expect(err).Should(BeNil())
+
+				return cm, &received
 			}
 
 			By("app-alpha: MQTT pub/sub on alpha-topic")
-			alphaClient, alphaReceived := connectMqtt(appAlpha.Name, "alpha-client", alphaIngressHost)
-			token := alphaClient.Subscribe("alpha-topic", 1, func(_ mqtt.Client, msg mqtt.Message) {
-				*alphaReceived = true
-				fmt.Printf("alpha received: '%s' on %s\n", msg.Payload(), msg.Topic())
+			alphaClient, alphaReceived := connectMqtt(appAlpha.Name, "alpha-client", alphaIngressHost, "alpha-topic")
+			_, err = alphaClient.Publish(ctx, &paho.Publish{
+				Topic: "alpha-topic", QoS: 1, Payload: []byte("hello from alpha"),
 			})
-			if token.Wait() && token.Error() != nil {
-				Fail(fmt.Sprintf("alpha subscribe failed: %v", token.Error()))
-			}
-			token = alphaClient.Publish("alpha-topic", 0, false, "hello from alpha")
-			if token.Wait() && token.Error() != nil {
-				Fail(fmt.Sprintf("alpha publish failed: %v", token.Error()))
-			}
+			Expect(err).Should(BeNil())
 			Eventually(func() bool { return *alphaReceived }, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
 
 			By("app-beta: MQTT pub/sub on beta-topic")
-			betaClient, betaReceived := connectMqtt(appBeta.Name, "beta-client", betaIngressHost)
-			token = betaClient.Subscribe("beta-topic", 1, func(_ mqtt.Client, msg mqtt.Message) {
-				*betaReceived = true
-				fmt.Printf("beta received: '%s' on %s\n", msg.Payload(), msg.Topic())
+			betaClient, betaReceived := connectMqtt(appBeta.Name, "beta-client", betaIngressHost, "beta-topic")
+			_, err = betaClient.Publish(ctx, &paho.Publish{
+				Topic: "beta-topic", QoS: 1, Payload: []byte("hello from beta"),
 			})
-			if token.Wait() && token.Error() != nil {
-				Fail(fmt.Sprintf("beta subscribe failed: %v", token.Error()))
-			}
-			token = betaClient.Publish("beta-topic", 0, false, "hello from beta")
-			if token.Wait() && token.Error() != nil {
-				Fail(fmt.Sprintf("beta publish failed: %v", token.Error()))
-			}
+			Expect(err).Should(BeNil())
 			Eventually(func() bool { return *betaReceived }, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
 
 			serverName := common.OrdinalFQDNS(serviceName, defaultNamespace, 0)
@@ -574,8 +633,8 @@ var _ = Describe("broker-service mqtt", func() {
 				g.Expect(body).Should(MatchRegexp(`broker_queue_message_count.*queue="beta-client\.beta-topic"`))
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			alphaClient.Disconnect(250)
-			betaClient.Disconnect(250)
+			Expect(alphaClient.Disconnect(ctx)).Should(Succeed())
+			Expect(betaClient.Disconnect(ctx)).Should(Succeed())
 
 			By("removing acceptor ingresses")
 			Expect(k8sClient.Delete(ctx, alphaAccIng)).Should(Succeed())

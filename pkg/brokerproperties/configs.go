@@ -97,6 +97,7 @@ type JaasModuleParams struct {
 	TextFileDNRole string `json:"org.apache.activemq.jaas.textfiledn.role"`
 	TextFileDNUser string `json:"org.apache.activemq.jaas.textfiledn.user"`
 	BaseDir        string `json:"baseDir"`
+	Reload         bool   `json:"reload"`
 }
 
 type JaasLoginModule struct {
