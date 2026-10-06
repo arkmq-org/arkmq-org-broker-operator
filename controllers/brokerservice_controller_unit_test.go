@@ -39,6 +39,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -1572,5 +1573,349 @@ var _ = Describe("brokerservice controller unit", func() {
 		appsProv := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.AppsProvisionedConditionType)
 		Expect(appsProv).NotTo(BeNil())
 		Expect(appsProv.Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	Context("persistence", func() {
+		It("processBroker sets PersistenceEnabled and Storage on child Broker CR when limits[arkmq.org/journal-storage] is set", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+
+			ns := "default"
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: "my-svc", Namespace: ns},
+				Spec: v1beta2.BrokerServiceSpec{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							v1beta2.ResourceJournalStorage: resource.MustParse("5Gi"),
+						},
+					},
+					JournalStorageClass: "fast",
+				},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(svc)...).
+				WithStatusSubresource(svc)).
+				Build()
+
+			reconciler := newServiceReconcilerWithClient(cl)
+			reconciler.instance = svc
+			reconciler.status = svc.Status.DeepCopy()
+
+			err := reconciler.processBroker()
+			Expect(err).NotTo(HaveOccurred())
+
+			var desired *v1beta2.Broker
+			for _, obj := range common.ToResourceList(reconciler.desired) {
+				if b, ok := obj.(*v1beta2.Broker); ok {
+					desired = b
+					break
+				}
+			}
+			Expect(desired).NotTo(BeNil(), "Broker CR should be tracked as a desired resource")
+			Expect(desired.Spec.PersistenceEnabled).To(BeTrue(), "PersistenceEnabled should be set on child Broker CR")
+			Expect(desired.Spec.Storage.Size).To(Equal("5Gi"))
+			Expect(desired.Spec.Storage.StorageClassName).To(Equal("fast"))
+		})
+
+		It("processBroker without limits[arkmq.org/journal-storage] leaves emptyDir behaviour", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+
+			ns := "default"
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: "my-svc-nopvc", Namespace: ns},
+				Spec:       v1beta2.BrokerServiceSpec{},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(svc)...).
+				WithStatusSubresource(svc)).
+				Build()
+
+			reconciler := newServiceReconcilerWithClient(cl)
+			reconciler.instance = svc
+			reconciler.status = svc.Status.DeepCopy()
+
+			err := reconciler.processBroker()
+			Expect(err).NotTo(HaveOccurred())
+
+			var desired *v1beta2.Broker
+			for _, obj := range common.ToResourceList(reconciler.desired) {
+				if b, ok := obj.(*v1beta2.Broker); ok {
+					desired = b
+					break
+				}
+			}
+			Expect(desired).NotTo(BeNil())
+			Expect(desired.Spec.PersistenceEnabled).To(BeFalse())
+		})
+
+		It("processBroker strips storage from container resources passed to child Broker CR", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+
+			ns := "default"
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: "my-svc-strip", Namespace: ns},
+				Spec: v1beta2.BrokerServiceSpec{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							corev1.ResourceMemory:          resource.MustParse("512Mi"),
+							v1beta2.ResourceJournalStorage: resource.MustParse("10Gi"),
+						},
+					},
+				},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(svc)...).
+				WithStatusSubresource(svc)).
+				Build()
+
+			reconciler := newServiceReconcilerWithClient(cl)
+			reconciler.instance = svc
+			reconciler.status = svc.Status.DeepCopy()
+
+			err := reconciler.processBroker()
+			Expect(err).NotTo(HaveOccurred())
+
+			var desired *v1beta2.Broker
+			for _, obj := range common.ToResourceList(reconciler.desired) {
+				if b, ok := obj.(*v1beta2.Broker); ok {
+					desired = b
+					break
+				}
+			}
+			Expect(desired).NotTo(BeNil())
+			Expect(desired.Spec.PersistenceEnabled).To(BeTrue())
+			_, hasStorage := desired.Spec.Resources.Limits[v1beta2.ResourceJournalStorage]
+			Expect(hasStorage).To(BeFalse(), "storage key must be stripped from container resources")
+			Expect(desired.Spec.Resources.Limits[corev1.ResourceMemory]).To(Equal(resource.MustParse("512Mi")))
+			// original BrokerService spec must not be mutated
+			_, originalHasStorage := svc.Spec.Resources.Limits[v1beta2.ResourceJournalStorage]
+			Expect(originalHasStorage).To(BeTrue(), "original BrokerService spec must not be mutated")
+		})
+	})
+
+	Context("storage validation", func() {
+		It("valid limits[arkmq.org/journal-storage] passes validation", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+			_ = networkingv1.AddToScheme(scheme)
+
+			ns := "default"
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: "svc-valid-storage", Namespace: ns},
+				Spec: v1beta2.BrokerServiceSpec{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							v1beta2.ResourceJournalStorage: resource.MustParse("10Gi"),
+						},
+					},
+				},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(svc)...).
+				WithStatusSubresource(svc)).
+				Build()
+
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svc.Name, Namespace: ns}}
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &v1beta2.BrokerService{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updated)).To(Succeed())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(v1beta2.ValidConditionSuccessReason))
+			Expect(cond.Message).To(BeEmpty())
+		})
+
+		It("zero limits[arkmq.org/journal-storage] sets Valid=False", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+			_ = networkingv1.AddToScheme(scheme)
+
+			ns := "default"
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: "svc-bad-storage", Namespace: ns},
+				Spec: v1beta2.BrokerServiceSpec{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							v1beta2.ResourceJournalStorage: resource.MustParse("0"),
+						},
+					},
+				},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(svc)...).
+				WithStatusSubresource(svc)).
+				Build()
+
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svc.Name, Namespace: ns}}
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &v1beta2.BrokerService{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updated)).To(Succeed())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1beta2.ValidConditionFailureReason))
+			Expect(cond.Message).NotTo(BeEmpty())
+		})
+
+		It("negative limits[arkmq.org/journal-storage] sets Valid=False", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+			_ = networkingv1.AddToScheme(scheme)
+
+			ns := "default"
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: "svc-negative-storage", Namespace: ns},
+				Spec: v1beta2.BrokerServiceSpec{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							v1beta2.ResourceJournalStorage: resource.MustParse("-1Gi"),
+						},
+					},
+				},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(svc)...).
+				WithStatusSubresource(svc)).
+				Build()
+
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svc.Name, Namespace: ns}}
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &v1beta2.BrokerService{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updated)).To(Succeed())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1beta2.ValidConditionFailureReason))
+			Expect(cond.Message).To(ContainSubstring("must be greater than zero"))
+		})
+
+		It("no limits[arkmq.org/journal-storage] is valid — ephemeral broker", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+			_ = networkingv1.AddToScheme(scheme)
+
+			ns := "default"
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: "svc-ephemeral", Namespace: ns},
+				Spec:       v1beta2.BrokerServiceSpec{},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(svc)...).
+				WithStatusSubresource(svc)).
+				Build()
+
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svc.Name, Namespace: ns}}
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &v1beta2.BrokerService{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updated)).To(Succeed())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal(v1beta2.ValidConditionSuccessReason))
+			Expect(cond.Message).To(BeEmpty())
+		})
+	})
+
+	Context("reconcile propagates persistence to broker", func() {
+		It("propagates limits[arkmq.org/journal-storage] and journalStorageClass to child Broker CR", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+
+			ns := "default"
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: "my-persistent-svc", Namespace: ns},
+				Spec: v1beta2.BrokerServiceSpec{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							v1beta2.ResourceJournalStorage: resource.MustParse("5Gi"),
+						},
+					},
+					JournalStorageClass: "fast",
+				},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(svc)...).
+				WithStatusSubresource(svc, &v1beta2.Broker{})).
+				Build()
+
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svc.Name, Namespace: ns}}
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			brokerCR := &v1beta2.Broker{}
+			err = cl.Get(context.TODO(), types.NamespacedName{Name: svc.Name, Namespace: ns}, brokerCR)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(brokerCR.Spec.PersistenceEnabled).To(BeTrue())
+			Expect(brokerCR.Spec.Storage.Size).To(Equal("5Gi"))
+			Expect(brokerCR.Spec.Storage.StorageClassName).To(Equal("fast"))
+		})
+
+		It("no limits[arkmq.org/journal-storage] does not set persistence on child Broker CR", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+
+			ns := "default"
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: "my-ephemeral-svc", Namespace: ns},
+				Spec:       v1beta2.BrokerServiceSpec{},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(svc)...).
+				WithStatusSubresource(svc, &v1beta2.Broker{})).
+				Build()
+
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svc.Name, Namespace: ns}}
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			brokerCR := &v1beta2.Broker{}
+			err = cl.Get(context.TODO(), types.NamespacedName{Name: svc.Name, Namespace: ns}, brokerCR)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(brokerCR.Spec.PersistenceEnabled).To(BeFalse())
+		})
 	})
 })
