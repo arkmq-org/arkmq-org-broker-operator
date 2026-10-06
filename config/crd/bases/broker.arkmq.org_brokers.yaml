@@ -3726,10 +3726,6 @@ spec:
                   type: string
                 description: Specifies the node selector for broker pods.
                 type: object
-              persistenceEnabled:
-                description: If true, use a persistent volume via PVC for journal
-                  storage.
-                type: boolean
               podDisruptionBudget:
                 description: Specifies the pod disruption budget.
                 properties:
@@ -4478,7 +4474,9 @@ spec:
                     type: integer
                 type: object
               storage:
-                description: Specifies the storage configuration (used when PersistenceEnabled=true).
+                description: Specifies the storage configuration. When size is set,
+                  the broker uses a persistent volume via PVC for journal storage;
+                  otherwise it uses ephemeral storage.
                 properties:
                   size:
                     description: The storage size

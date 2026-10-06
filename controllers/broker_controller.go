@@ -628,7 +628,7 @@ func formatTemplatedStringForBroker(customResource *v1beta2.Broker, template str
 
 func (reconciler *BrokerReconcilerImpl) CurrentDeployedResources(customResource *v1beta2.Broker, client rtclient.Client) {
 	var err error
-	if customResource.Spec.PersistenceEnabled {
+	if customResource.Spec.Storage.Size != "" {
 		pvcKey := types.NamespacedName{
 			Namespace: customResource.Namespace,
 			Name:      customResource.Name + "-" + namer.CrToSS(customResource.Name) + "-0",
@@ -1082,8 +1082,9 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 	newContainersArray := []corev1.Container{}
 	podSpec.Containers = append(newContainersArray, *container)
-	brokerVolumes := brokervolumes.MakeVolumes(customResource.Name, customResource.Spec.PersistenceEnabled, customResource.Spec.ExtraVolumes, customResource.Spec.ExtraVolumeClaimTemplates)
-	if !customResource.Spec.PersistenceEnabled {
+	persistent := customResource.Spec.Storage.Size != ""
+	brokerVolumes := brokervolumes.MakeVolumes(customResource.Name, persistent, customResource.Spec.ExtraVolumes, customResource.Spec.ExtraVolumeClaimTemplates)
+	if !persistent {
 		brokerVolumes = append([]corev1.Volume{volumes.MakeEmptyDirVolumeFor(customResource.Name)}, brokerVolumes...)
 	}
 	if len(extraVolumes) > 0 {
@@ -1520,11 +1521,8 @@ func (reconciler *BrokerReconcilerImpl) PersistentVolumeClaimArrayForCR(customRe
 	var existing, current *corev1.PersistentVolumeClaim
 	pvcArray := make([]corev1.PersistentVolumeClaim, 0)
 
-	if customResource.Spec.PersistenceEnabled {
-		capacity := "2Gi"
-		if customResource.Spec.Storage.Size != "" {
-			capacity = customResource.Spec.Storage.Size
-		}
+	if customResource.Spec.Storage.Size != "" {
+		capacity := customResource.Spec.Storage.Size
 
 		tempateClaim := &v1beta2.VolumeClaimTemplate{
 			ObjectMeta: v1beta2.ObjectMeta{
@@ -2087,17 +2085,15 @@ func (reconciler *BrokerReconcilerImpl) validateRequiredSecrets(client rtclient.
 
 func (reconciler *BrokerReconcilerImpl) validateStorage() (*metav1.Condition, bool) {
 
-	if reconciler.customResource.Spec.PersistenceEnabled {
-		if reconciler.customResource.Spec.Storage.Size != "" {
-			_, err := resource.ParseQuantity(reconciler.customResource.Spec.Storage.Size)
-			if err != nil {
-				return &metav1.Condition{
-					Type:    v1beta2.ValidConditionType,
-					Status:  metav1.ConditionFalse,
-					Reason:  v1beta2.ValidConditionFailureReason,
-					Message: fmt.Sprintf(".Spec.Storage.Size quantity string is invalid, %v", err),
-				}, false
-			}
+	if reconciler.customResource.Spec.Storage.Size != "" {
+		_, err := resource.ParseQuantity(reconciler.customResource.Spec.Storage.Size)
+		if err != nil {
+			return &metav1.Condition{
+				Type:    v1beta2.ValidConditionType,
+				Status:  metav1.ConditionFalse,
+				Reason:  v1beta2.ValidConditionFailureReason,
+				Message: fmt.Sprintf(".Spec.Storage.Size quantity string is invalid, %v", err),
+			}, false
 		}
 	}
 	return nil, false
