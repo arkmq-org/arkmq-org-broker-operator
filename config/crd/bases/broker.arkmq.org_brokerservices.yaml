@@ -215,6 +215,13 @@ spec:
                 type: array
               image:
                 type: string
+              journalStorageClass:
+                description: |-
+                  JournalStorageClass is the name of the StorageClass to use when
+                  provisioning the persistent volume for broker journal storage. Only used
+                  when resources.limits[arkmq.org/journal-storage] is set. If empty, the
+                  cluster default StorageClass is used.
+                type: string
               resources:
                 description: ResourceRequirements describes the compute resource requirements.
                 properties:

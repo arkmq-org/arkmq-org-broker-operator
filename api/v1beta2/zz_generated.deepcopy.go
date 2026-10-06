@@ -1014,7 +1014,6 @@ func (in *BrokerSpec) DeepCopyInto(out *BrokerSpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	out.Storage = in.Storage
 	if in.BrokerProperties != nil {
 		in, out := &in.BrokerProperties, &out.BrokerProperties
 		*out = make([]string, len(*in))

@@ -4,6 +4,5 @@ metadata:
   name: ex-broker
 spec:
   image: placeholder
-  persistenceEnabled: false
 status:
   conditions: []

@@ -47,14 +47,6 @@ type BrokerSpec struct {
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Environment Variables"
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
-	// If true, use a persistent volume via PVC for journal storage.
-	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Persistence Enabled",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:booleanSwitch"}
-	PersistenceEnabled bool `json:"persistenceEnabled,omitempty"`
-
-	// Specifies the storage configuration (used when PersistenceEnabled=true).
-	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Storage Configurations"
-	Storage StorageType `json:"storage,omitempty"`
-
 	// Optional list of key=value properties applied to the broker configuration bean.
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Broker Properties"
 	BrokerProperties []string `json:"brokerProperties,omitempty"`

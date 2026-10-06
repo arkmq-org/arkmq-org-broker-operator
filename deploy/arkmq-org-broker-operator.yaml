@@ -18580,9 +18580,6 @@ spec:
                   type: string
                 description: Specifies the node selector for broker pods.
                 type: object
-              persistenceEnabled:
-                description: If true, use a persistent volume via PVC for journal storage.
-                type: boolean
               podDisruptionBudget:
                 description: Specifies the pod disruption budget.
                 properties:
@@ -19307,16 +19304,6 @@ spec:
                     format: int32
                     type: integer
                 type: object
-              storage:
-                description: Specifies the storage configuration (used when PersistenceEnabled=true).
-                properties:
-                  size:
-                    description: The storage size
-                    type: string
-                  storageClassName:
-                    description: The storageClassName to be used in PVC
-                    type: string
-                type: object
               tolerations:
                 description: Specifies tolerations for broker pods.
                 items:
@@ -19867,6 +19854,13 @@ spec:
                   type: object
                 type: array
               image:
+                type: string
+              journalStorageClass:
+                description: |-
+                  JournalStorageClass is the name of the StorageClass to use when
+                  provisioning the persistent volume for broker journal storage. Only used
+                  when resources.limits[arkmq.org/journal-storage] is set. If empty, the
+                  cluster default StorageClass is used.
                 type: string
               resources:
                 description: ResourceRequirements describes the compute resource requirements.
