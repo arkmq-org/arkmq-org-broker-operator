@@ -337,8 +337,8 @@ spec:
                   type: object
                 type: array
               provisionedApps:
-                description: List of BrokerApp identities that have been applied to
-                  the service
+                description: BrokerApps that have been applied to the service, each
+                  as <namespace>/<name>@<generation>
                 items:
                   type: string
                 type: array
