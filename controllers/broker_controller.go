@@ -144,7 +144,9 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 		if !reconcileBlocked {
 			err = reconciler.Process(customResource, *namer, r.Client, r.Scheme)
 		}
-		reconciler.ProcessBrokerStatus(customResource, r.Client, r.Scheme)
+		if reconciler.ProcessBrokerStatus(customResource, r.Client, r.Scheme) {
+			requeueRequest = true
+		}
 	}
 
 	brokerstatus.UpdateBlockedStatus(customResource, reconcileBlocked)
@@ -1141,6 +1143,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	sidecarContainer.Image = brokerversion.ResolveImage(customResource, common.BrokerImageKey)
 	sidecarContainer.Command = []string{"/bin/bash", path.Join(sidecarSecretPath, brokerStatusScriptKey)}
 	sidecarContainer.RestartPolicy = &sidecarRestartPolicy
+	sidecarContainer.TerminationMessagePolicy = corev1.TerminationMessageFallbackToLogsOnError
 	sidecarContainer.Env = []corev1.EnvVar{
 		{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{
 			FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.name"},
