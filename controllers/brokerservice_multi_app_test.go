@@ -905,7 +905,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 
 			By("verify an app1 and app2 client can consume a message produced by app3")
 
-			brokerImage := version.LatestKubeImage
+			brokerImage := version.GetDefaultKubeImage()
 
 			By("provisioning pemcfg secret for client certs in both namespaces")
 			boolFalse := false
