@@ -67,7 +67,7 @@ type ConnectorConfig struct {
 
 var _ = Describe("artemis controller with cert manager test", Label("controller-cert-mgr-test"), func() {
 	var installedCertManager bool = false
-	var installedTrustManager bool = false
+	var installedTrustManager = false
 
 	BeforeEach(func() {
 		BeforeEachSpec()
