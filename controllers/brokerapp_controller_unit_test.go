@@ -742,4 +742,35 @@ var _ = Describe("brokerapp controller unit", func() {
 
 		Expect(newAppReconcilerWithClient(cl, "app-alpha", "ns1").verifyAppCert()).NotTo(HaveOccurred())
 	})
+
+	It("address clash rejects a subscription another app already declared", Label(unitLabel), func() {
+		ns := "default"
+		svcName := "my-broker-service"
+		svc := NewBrokerService(svcName, ns).Build()
+
+		publisher := NewBrokerApp("publisher", ns).
+			WithSharedAddresses(NewAddressType("events").WithPubSub(true).Build()).
+			WithServiceBinding(svcName, ns, "", 0).
+			Build()
+		first := NewBrokerApp("first", ns).
+			WithConsumerOf(NewAddressRef("events").WithAppRef(ns, "publisher").WithSubscriptions("audit").Build()).
+			WithServiceBinding(svcName, ns, "", 0).
+			Build()
+		env := NewTestEnvironment(ns, svc, publisher, first)
+
+		check := func(subscription string) error {
+			second := NewBrokerApp("second", ns).
+				WithConsumerOf(NewAddressRef("events").WithAppRef(ns, "publisher").WithSubscriptions(subscription).Build()).
+				Build()
+			reconciler := newAppReconcilerWithClient(env.Client, second.Name, second.Namespace)
+			reconciler.instance.Spec = second.Spec
+			return reconciler.checkAddressClashOnService(svc)
+		}
+
+		err := check("audit")
+		Expect(err).To(HaveOccurred(), "two apps would share one subscription queue")
+		Expect(err.Error()).To(ContainSubstring("subscription 'events::audit' already declared by default/first"))
+
+		Expect(check("billing")).To(Succeed())
+	})
 })

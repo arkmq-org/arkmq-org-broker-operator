@@ -1435,7 +1435,9 @@ for:
 
 - an anycast queue belongs to the app that declares the address;
 - a subscription queue belongs to the app that declares the subscription, the
-  consumer, not to the app that owns the multicast address.
+  consumer, not to the app that owns the multicast address. A subscription
+  belongs to one app only: an app declaring a subscription another app on the
+  service already declares on the same address is rejected.
 
 Queues nobody declares, such as those an MQTT client
 creates for an undeclared subscription, keep the service's namespace; give each

@@ -864,13 +864,32 @@ func (reconciler *BrokerAppInstanceReconciler) getAvailableMemory(service *broke
 	return available, nil
 }
 
-// checkAddressClashOnService checks if this app's direct addresses conflict with
-// apps already provisioned on the given service
+// collectSubscriptions returns the subscription queues an app consumes from, as
+// FQQNs. A subscription queue is named by its subscriber, so two apps naming the
+// same one on the same address would share it.
+func collectSubscriptions(app *broker.BrokerApp) map[string]bool {
+	subscriptions := make(map[string]bool)
+	for _, capability := range app.Spec.Capabilities {
+		for _, addressRef := range capability.ConsumerOf {
+			if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
+				continue
+			}
+			for _, queueName := range addressRef.Subscriptions {
+				subscriptions[addressRef.Address+FQQNSeparator+queueName] = true
+			}
+		}
+	}
+	return subscriptions
+}
+
+// checkAddressClashOnService checks if this app's direct addresses or
+// subscriptions conflict with apps already provisioned on the given service
 func (reconciler *BrokerAppInstanceReconciler) checkAddressClashOnService(service *broker.BrokerService) error {
 	myDirectAddresses := collectOwnedAddresses(reconciler.instance)
+	mySubscriptions := collectSubscriptions(reconciler.instance)
 
-	// If this app doesn't use any direct addresses, no clash possible
-	if len(myDirectAddresses) == 0 {
+	// If this app doesn't use any direct addresses or subscriptions, no clash possible
+	if len(myDirectAddresses) == 0 && len(mySubscriptions) == 0 {
 		return nil
 	}
 
@@ -889,6 +908,15 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressClashOnService(servic
 			if otherAddresses[myAddr] {
 				return fmt.Errorf("address '%s' already declared by %s/%s (use addressRef to share addresses)",
 					myAddr, otherApp.Namespace, otherApp.Name)
+			}
+		}
+
+		// a subscription shared between apps is not modelled yet, so it is a clash
+		otherSubscriptions := collectSubscriptions(&otherApp)
+		for mySubscription := range mySubscriptions {
+			if otherSubscriptions[mySubscription] {
+				return fmt.Errorf("subscription '%s' already declared by %s/%s (subscriptions cannot be shared between apps)",
+					mySubscription, otherApp.Namespace, otherApp.Name)
 			}
 		}
 	}

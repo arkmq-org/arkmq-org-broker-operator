@@ -81,7 +81,9 @@ that owns it:
   produce to it or consume from it name that app in their `AddressRef`;
 - a subscription queue belongs to the app that declares the subscription, the
   consumer. The app that owns the multicast address does not own it, and does
-  not see it in its own namespace.
+  not see it in its own namespace. A second app declaring the same subscription
+  on the same address is rejected, so a subscription queue has one owner;
+  sharing one between apps is not modelled yet.
 
 Broker-wide series, JVM and process, match no per-queue rule and keep the
 service's namespace. With `honorLabels`, a Prometheus that does not enforce its
