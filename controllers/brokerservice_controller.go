@@ -165,6 +165,15 @@ func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
 		}
 	}
 
+	// Validate journal storage quantity when resources.limits[arkmq.org/journal-storage] is set
+	if storageQty, ok := reconciler.instance.Spec.Resources.Limits[broker.ResourceJournalStorage]; ok {
+		if storageQty.CmpInt64(0) <= 0 {
+			return NewValidationError(
+				broker.ValidConditionFailureReason,
+				".Spec.Resources.Limits[arkmq.org/journal-storage] must be greater than zero")
+		}
+	}
+
 	return nil
 }
 
@@ -186,7 +195,15 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 	} else {
 		desired = common.GenerateBroker(reconciler.instance.Name, reconciler.instance.Namespace)
 	}
-	desired.Spec.PersistenceEnabled = false
+	containerResources := reconciler.instance.Spec.Resources.DeepCopy()
+	if storageQty, ok := containerResources.Limits[broker.ResourceJournalStorage]; ok {
+		desired.Spec.PersistenceEnabled = true
+		desired.Spec.Storage.Size = storageQty.String()
+		desired.Spec.Storage.StorageClassName = reconciler.instance.Spec.JournalStorageClass
+		delete(containerResources.Limits, broker.ResourceJournalStorage)
+	} else {
+		desired.Spec.PersistenceEnabled = false
+	}
 	desired.Spec.Labels = map[string]string{
 		// App-specific recommended labels (name/instance/part-of are set by the Broker labeler).
 		selectors.LabelAppKubernetesComponent: "broker-service",
@@ -196,7 +213,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 		selectors.LabelBrokerPeerIndex: "0",
 	}
 	desired.Spec.Env = reconciler.instance.Spec.Env
-	desired.Spec.Resources = reconciler.instance.Spec.Resources
+	desired.Spec.Resources = *containerResources
 
 	if reconciler.instance.Spec.Image != nil {
 		desired.Spec.Image = *reconciler.instance.Spec.Image

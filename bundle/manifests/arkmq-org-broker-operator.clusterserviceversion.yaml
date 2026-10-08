@@ -6857,6 +6857,15 @@ spec:
         path: env
       - displayName: Broker image
         path: image
+      - description: |-
+          JournalStorageClass is the name of the StorageClass to use when
+          provisioning the persistent volume for broker journal storage. Only used
+          when resources.limits[arkmq.org/journal-storage] is set. If empty, the
+          cluster default StorageClass is used.
+        displayName: Journal Storage Class
+        path: journalStorageClass
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
       - displayName: Resources
         path: resources
       statusDescriptors:
