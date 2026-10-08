@@ -1311,3 +1311,44 @@ func EscapeForRegex(s string) string {
 	s = strings.ReplaceAll(s, "-", "\\-")
 	return s
 }
+
+func ResolveEnabledControllers() map[string]bool {
+	allControllers := []string{
+		"ActiveMQArtemis",
+		"ActiveMQArtemisAddress",
+		"ActiveMQArtemisSecurity",
+		"ActiveMQArtemisScaledown",
+		"BrokerCluster",
+		"Broker",
+		"BrokerApp",
+		"BrokerService",
+	}
+
+	enabled := make(map[string]bool, len(allControllers))
+
+	value, ok := os.LookupEnv("ENABLED_CONTROLLERS")
+	if !ok || strings.TrimSpace(value) == "" {
+		for _, name := range allControllers {
+			enabled[name] = true
+		}
+		return enabled
+	}
+
+	ctrl.Log.V(1).Info("Set by env-var 'ENABLED_CONTROLLERS': " + value)
+
+	for _, name := range allControllers {
+		enabled[name] = false
+	}
+	for _, entry := range strings.Split(value, ",") {
+		name := strings.TrimSpace(entry)
+		if name == "" {
+			continue
+		}
+		if _, exists := enabled[name]; exists {
+			enabled[name] = true
+		} else {
+			ctrl.Log.Info("ENABLED_CONTROLLERS: unrecognized controller name, ignoring", "name", name)
+		}
+	}
+	return enabled
+}

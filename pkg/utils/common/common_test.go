@@ -285,6 +285,73 @@ var _ = Describe("Common Test", func() {
 	})
 })
 
+var _ = Describe("Enabled Controllers", func() {
+	AfterEach(func() {
+		Expect(os.Unsetenv("ENABLED_CONTROLLERS")).To(Succeed())
+	})
+
+	It("defaults to all controllers enabled when env var is unset", func() {
+		enabled := ResolveEnabledControllers()
+		Expect(enabled).To(HaveLen(8))
+		Expect(enabled["ActiveMQArtemis"]).To(BeTrue())
+		Expect(enabled["BrokerCluster"]).To(BeTrue())
+		Expect(enabled["BrokerApp"]).To(BeTrue())
+		Expect(enabled["BrokerService"]).To(BeTrue())
+	})
+
+	It("defaults to all controllers enabled when env var is whitespace", func() {
+		Expect(os.Setenv("ENABLED_CONTROLLERS", "   ")).To(Succeed())
+		enabled := ResolveEnabledControllers()
+		Expect(enabled["ActiveMQArtemis"]).To(BeTrue())
+		Expect(enabled["BrokerCluster"]).To(BeTrue())
+	})
+
+	It("enables only specified controllers", func() {
+		Expect(os.Setenv("ENABLED_CONTROLLERS", "BrokerCluster,Broker,BrokerApp,BrokerService")).To(Succeed())
+		enabled := ResolveEnabledControllers()
+		Expect(enabled["BrokerCluster"]).To(BeTrue())
+		Expect(enabled["Broker"]).To(BeTrue())
+		Expect(enabled["BrokerApp"]).To(BeTrue())
+		Expect(enabled["BrokerService"]).To(BeTrue())
+		Expect(enabled["ActiveMQArtemis"]).To(BeFalse())
+		Expect(enabled["ActiveMQArtemisAddress"]).To(BeFalse())
+		Expect(enabled["ActiveMQArtemisSecurity"]).To(BeFalse())
+		Expect(enabled["ActiveMQArtemisScaledown"]).To(BeFalse())
+	})
+
+	It("trims whitespace around controller names", func() {
+		Expect(os.Setenv("ENABLED_CONTROLLERS", " BrokerCluster , Broker ")).To(Succeed())
+		enabled := ResolveEnabledControllers()
+		Expect(enabled["BrokerCluster"]).To(BeTrue())
+		Expect(enabled["Broker"]).To(BeTrue())
+		Expect(enabled["BrokerApp"]).To(BeFalse())
+	})
+
+	It("ignores unrecognized controller names", func() {
+		Expect(os.Setenv("ENABLED_CONTROLLERS", "BrokerCluster,NonExistent")).To(Succeed())
+		enabled := ResolveEnabledControllers()
+		Expect(enabled["BrokerCluster"]).To(BeTrue())
+		Expect(enabled["NonExistent"]).To(BeFalse())
+	})
+
+	It("ignores empty entries from trailing commas", func() {
+		Expect(os.Setenv("ENABLED_CONTROLLERS", "BrokerCluster,Broker,")).To(Succeed())
+		enabled := ResolveEnabledControllers()
+		Expect(enabled["BrokerCluster"]).To(BeTrue())
+		Expect(enabled["Broker"]).To(BeTrue())
+		Expect(enabled["BrokerApp"]).To(BeFalse())
+	})
+
+	It("enables a single controller", func() {
+		Expect(os.Setenv("ENABLED_CONTROLLERS", "BrokerCluster")).To(Succeed())
+		enabled := ResolveEnabledControllers()
+		Expect(enabled["BrokerCluster"]).To(BeTrue())
+		Expect(enabled["ActiveMQArtemis"]).To(BeFalse())
+		Expect(enabled["Broker"]).To(BeFalse())
+		Expect(enabled["BrokerApp"]).To(BeFalse())
+	})
+})
+
 // errorClient is a fake client that returns errors for Get operations
 type errorClient struct {
 	client.Client

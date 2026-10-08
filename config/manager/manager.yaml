@@ -63,6 +63,13 @@ spec:
               fieldPath: metadata.namespace
         - name: ENABLE_WEBHOOKS
           value: "false"
+        # ENABLED_CONTROLLERS: comma-separated list of controllers to register.
+        # When unset, all controllers are enabled (default).
+        # Valid names: ActiveMQArtemis, ActiveMQArtemisAddress, ActiveMQArtemisSecurity,
+        #   ActiveMQArtemisScaledown, BrokerCluster, Broker, BrokerApp, BrokerService
+        # Example: to disable deprecated controllers after migration:
+        #- name: ENABLED_CONTROLLERS
+        #  value: "BrokerCluster,Broker,BrokerApp,BrokerService"
         image: controller:latest
         # imagePullPolicy: Always
         name: manager
