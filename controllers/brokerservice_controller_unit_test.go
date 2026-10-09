@@ -188,7 +188,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		})
 		cl := builder.Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		reqS1 := ctrl.Request{NamespacedName: types.NamespacedName{Name: s1Name, Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), reqS1)
@@ -254,7 +254,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		})
 		cl := builder.Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		reqS1 := ctrl.Request{NamespacedName: types.NamespacedName{Name: s1Name, Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), reqS1)
@@ -298,7 +298,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		})
 		cl := builder.Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		reqS1 := ctrl.Request{NamespacedName: types.NamespacedName{Name: s1Name, Namespace: ns}}
 		result, err := r.Reconcile(context.TODO(), reqS1)
@@ -326,7 +326,7 @@ var _ = Describe("brokerservice controller unit", func() {
 
 		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(WithCerts(s1, app)...).WithStatusSubresource(s1, app).Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		reqS1 := ctrl.Request{NamespacedName: types.NamespacedName{Name: s1Name, Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), reqS1)
@@ -360,7 +360,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		})
 		cl := builder.Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), req)
@@ -467,7 +467,7 @@ var _ = Describe("brokerservice controller unit", func() {
 				return nil
 			}).Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 		_, err := r.Reconcile(context.TODO(), req)
@@ -554,7 +554,7 @@ var _ = Describe("brokerservice controller unit", func() {
 				return nil
 			}).Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 		_, err := r.Reconcile(context.TODO(), req)
@@ -657,7 +657,7 @@ var _ = Describe("brokerservice controller unit", func() {
 			}).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 		_, err := r.Reconcile(context.TODO(), req)
@@ -768,7 +768,7 @@ var _ = Describe("brokerservice controller unit", func() {
 				return nil
 			}).Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 		_, err := r.Reconcile(context.TODO(), req)
@@ -829,7 +829,7 @@ var _ = Describe("brokerservice controller unit", func() {
 				return nil
 			}).Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 		_, err := r.Reconcile(context.TODO(), req)
@@ -869,7 +869,7 @@ var _ = Describe("brokerservice controller unit", func() {
 				WithStatusSubresource(svc)).
 				Build()
 
-			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 			_, err := r.Reconcile(context.TODO(), req)
@@ -904,7 +904,7 @@ var _ = Describe("brokerservice controller unit", func() {
 				WithStatusSubresource(svc)).
 				Build()
 
-			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: invalidName, Namespace: ns}}
 			_, err := r.Reconcile(context.TODO(), req)
@@ -946,7 +946,7 @@ var _ = Describe("brokerservice controller unit", func() {
 				WithStatusSubresource(svc)).
 				Build()
 
-			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svc.Name, Namespace: ns}}
 			_, err := r.Reconcile(context.TODO(), req)
@@ -992,7 +992,7 @@ var _ = Describe("brokerservice controller unit", func() {
 			WithStatusSubresource(svc)).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), req)
@@ -1045,7 +1045,7 @@ var _ = Describe("brokerservice controller unit", func() {
 			WithStatusSubresource(svc)).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), req)
@@ -1102,7 +1102,7 @@ var _ = Describe("brokerservice controller unit", func() {
 			WithInterceptorFuncs(interceptorFuncs)).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), req)
@@ -1144,7 +1144,7 @@ var _ = Describe("brokerservice controller unit", func() {
 			WithStatusSubresource(svc, &v1beta2.Broker{})).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 		_, err := r.Reconcile(context.TODO(), req)
@@ -1373,7 +1373,7 @@ var _ = Describe("brokerservice controller unit", func() {
 				return nil
 			}).Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 		_, err := r.Reconcile(context.TODO(), req)
@@ -1458,7 +1458,7 @@ var _ = Describe("brokerservice controller unit", func() {
 				return nil
 			}).Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 		_, err := r.Reconcile(context.TODO(), req)
@@ -1543,7 +1543,7 @@ var _ = Describe("brokerservice controller unit", func() {
 				return nil
 			}).Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 		_, err := r.Reconcile(context.TODO(), req)

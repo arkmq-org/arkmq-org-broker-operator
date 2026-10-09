@@ -25,6 +25,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
@@ -861,6 +862,14 @@ func GenerateTrustStoreFromKeyStore(ksBytes []byte, password string) ([]byte, er
 	}
 
 	return pfxBytes, nil
+}
+
+func ExtractCertPEMFromKeystore(ksBytes []byte, password string) ([]byte, error) {
+	_, cert, _, err := pkcs12.DecodeChain(ksBytes, password)
+	if err != nil {
+		return nil, err
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), nil
 }
 
 func CreateTlsSecret(secretName string, ns string, ksPassword string, nsNames []string) (*corev1.Secret, error) {

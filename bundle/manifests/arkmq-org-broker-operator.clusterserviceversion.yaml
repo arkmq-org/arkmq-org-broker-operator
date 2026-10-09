@@ -6882,6 +6882,17 @@ spec:
     mediatype: image/png
   install:
     spec:
+      clusterPermissions:
+      - rules:
+        - apiGroups:
+          - config.openshift.io
+          resources:
+          - apiservers
+          verbs:
+          - get
+          - list
+          - watch
+        serviceAccountName: arkmq-org-broker-controller-manager
       deployments:
       - label:
           control-plane: controller-manager

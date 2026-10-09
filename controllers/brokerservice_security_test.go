@@ -89,7 +89,7 @@ var _ = Describe("brokerservice security", func() {
 			}).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: svcNs}}
 		_, err := r.Reconcile(context.TODO(), req)
@@ -211,7 +211,7 @@ var _ = Describe("brokerservice security", func() {
 			}).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: svcNs}}
 		_, err := r.Reconcile(context.TODO(), req)
@@ -314,7 +314,7 @@ var _ = Describe("brokerservice security", func() {
 			}).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: svcNs}}
 		_, err := r.Reconcile(context.TODO(), req)
@@ -449,7 +449,7 @@ var _ = Describe("brokerservice security", func() {
 			}).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: svcNs}}
 		_, err := r.Reconcile(context.TODO(), req)
@@ -590,7 +590,7 @@ var _ = Describe("brokerservice security", func() {
 			}).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: svcNs}}
 		_, err := r.Reconcile(context.TODO(), req)

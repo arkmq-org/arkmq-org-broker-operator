@@ -61,7 +61,7 @@ var _ = Describe("activemqartemis controller unit", func() {
 
 			namer := MakeNamers(cr)
 
-			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 			ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 			valid, retry := ri.validate(cr, k8sClient, *namer)
@@ -88,7 +88,7 @@ var _ = Describe("activemqartemis controller unit", func() {
 
 			namer := MakeNamers(cr)
 
-			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 			ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 			valid, retry := ri.validate(cr, k8sClient, *namer)
@@ -115,7 +115,7 @@ var _ = Describe("activemqartemis controller unit", func() {
 
 			namer := MakeNamers(cr)
 
-			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 			ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 			valid, retry := ri.validate(cr, k8sClient, *namer)
@@ -142,7 +142,7 @@ var _ = Describe("activemqartemis controller unit", func() {
 
 			namer := MakeNamers(cr)
 
-			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 			ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 			valid, retry := ri.validate(cr, k8sClient, *namer)
@@ -172,7 +172,7 @@ var _ = Describe("activemqartemis controller unit", func() {
 				},
 			}
 
-			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 			ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 			checkOk := func(brokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError {
@@ -207,7 +207,7 @@ var _ = Describe("activemqartemis controller unit", func() {
 				Spec:       v1beta2.BrokerClusterSpec{},
 			}
 
-			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 			ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 			checkOk := func(brokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError {

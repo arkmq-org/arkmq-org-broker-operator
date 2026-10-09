@@ -558,7 +558,7 @@ func createControllerManager(watchNamespace string) {
 	}
 
 	if enabledControllers["BrokerCluster"] {
-		brokerV1beta2Reconciler := NewBrokerClusterReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable)
+		brokerV1beta2Reconciler := NewBrokerClusterReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable, nil)
 
 		if err = brokerV1beta2Reconciler.SetupWithManager(k8Manager); err != nil {
 			ctrl.Log.Error(err, "unable to create controller", "controller", "BrokerClusterReconciler")
@@ -619,6 +619,7 @@ func createControllerManager(watchNamespace string) {
 			k8Manager.GetScheme(),
 			k8Manager.GetConfig(),
 			ctrl.Log,
+			nil,
 		)
 
 		err = serviceReconciler.SetupWithManager(k8Manager)
@@ -1091,6 +1092,8 @@ func BeforeEachSpec() {
 		}
 		return
 	}
+
+	common.ResetOperatorCertCache()
 
 	specCount++
 

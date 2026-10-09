@@ -351,7 +351,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 		fakeClient := fake.NewClientBuilder().Build()
 
@@ -398,7 +398,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 		fakeClient := fake.NewClientBuilder().WithObjects(bpSecret).Build()
 
@@ -429,7 +429,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 		fakeClient := fake.NewClientBuilder().Build()
 
@@ -465,7 +465,7 @@ var _ = Describe("brokercluster reconciler", func() {
 					}},
 			},
 		}
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateIncludesLabelsServiceAndSecret"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateIncludesLabelsServiceAndSecret"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		namer := MakeNamers(cr)
@@ -537,7 +537,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateIncludesLabelsServiceAndSecret"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateIncludesLabelsServiceAndSecret"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		namer := MakeNamers(cr)
@@ -586,7 +586,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateDuplicateKeyReplacesOk"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("TestProcess_TemplateDuplicateKeyReplacesOk"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		namer := MakeNamers(cr)
@@ -615,7 +615,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			Spec:       v1beta2.BrokerClusterSpec{},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_Respect_existing_JAVA_OPTS_properties_def"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_Respect_existing_JAVA_OPTS_properties_def"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		namer := MakeNamers(cr)
@@ -661,7 +661,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			Spec:       v1beta2.BrokerClusterSpec{},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesAbsentWhenNotSet"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesAbsentWhenNotSet"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		newSS, err := reconciler.ProcessStatefulSet(cr, *MakeNamers(cr), nil)
@@ -695,7 +695,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesUserValueAppearsInEnvAndTokenInJdkOpts"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesUserValueAppearsInEnvAndTokenInJdkOpts"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		newSS, err := reconciler.ProcessStatefulSet(cr, *MakeNamers(cr), nil)
@@ -741,7 +741,7 @@ var _ = Describe("brokercluster reconciler", func() {
 				},
 			}
 
-			outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesValueFromPassedThrough"), isOpenshift, false)
+			outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesValueFromPassedThrough"), isOpenshift, false, nil)
 			reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 			newSS, err := reconciler.ProcessStatefulSet(cr, *MakeNamers(cr), nil)
@@ -789,7 +789,7 @@ var _ = Describe("brokercluster reconciler", func() {
 				},
 			}
 
-			outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesValueFromPassedThrough"), isOpenshift, false)
+			outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("Test_ExtraBrokerPropertiesValueFromPassedThrough"), isOpenshift, false, nil)
 			reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 			newSS, err := reconciler.ProcessStatefulSet(cr, *MakeNamers(cr), nil)
@@ -853,7 +853,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		namer := MakeNamers(cr)
@@ -939,7 +939,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		namer := MakeNamers(cr)
@@ -998,7 +998,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		namer := MakeNamers(cr)
@@ -1050,7 +1050,7 @@ var _ = Describe("brokercluster reconciler", func() {
 				},
 			}
 
-			outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+			outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false, nil)
 			reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 			namer := MakeNamers(cr)
@@ -1108,7 +1108,7 @@ var _ = Describe("brokercluster reconciler", func() {
 				},
 			}
 
-			outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+			outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false, nil)
 			reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 			namer := MakeNamers(cr)
@@ -1159,7 +1159,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		namer := MakeNamers(cr)
@@ -1204,7 +1204,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			},
 		}
 
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log.WithName("test"), isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, k8sClient)
@@ -1230,7 +1230,7 @@ var _ = Describe("brokercluster reconciler", func() {
 				},
 			},
 		}
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, k8sClient)
@@ -1266,7 +1266,7 @@ var _ = Describe("brokercluster reconciler", func() {
 				},
 			},
 		}
-		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+		outer := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 		reconciler := NewBrokerClusterReconcilerImpl(cr, outer)
 
 		newSpec, err := reconciler.PodTemplateSpecForCR(cr, common.Namers{}, &appsv1.StatefulSet{}, k8sClient)
@@ -1747,7 +1747,7 @@ var _ = Describe("brokercluster reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-secret"},
 			}
 
-			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 			ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 			result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
@@ -1775,7 +1775,7 @@ var _ = Describe("brokercluster reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-secret"},
 			}
 
-			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 			ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 			result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
@@ -1803,7 +1803,7 @@ var _ = Describe("brokercluster reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-secret"},
 			}
 
-			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 			ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 			result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
@@ -1833,7 +1833,7 @@ var _ = Describe("brokercluster reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-secret"},
 			}
 
-			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 			ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 			result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
@@ -1863,7 +1863,7 @@ var _ = Describe("brokercluster reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-secret"},
 			}
 
-			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+			r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 			ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 			result := ri.ensureOwnerReferenceAPIVersion(cr, existing, candidate)
@@ -1894,7 +1894,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			Data:       map[string][]byte{"key": []byte("value")},
 		}
 
-		r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+		r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 		ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 		result := ri.CompareSecret(deployed, requested)
@@ -1923,7 +1923,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "test-config", Namespace: "test-ns"},
 		}
 
-		r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+		r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 		ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 		result := ri.CompareConfigMap(deployed, requested)
@@ -1958,7 +1958,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			Spec: appsv1.StatefulSetSpec{Replicas: pointer.To(int32(1))},
 		}
 
-		r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false)
+		r := NewBrokerClusterReconciler(&NillCluster{}, ctrl.Log, isOpenshift, false, nil)
 		ri := NewBrokerClusterReconcilerImpl(cr, r)
 
 		result := ri.CompareMetaAndSpec(deployed, requested)
