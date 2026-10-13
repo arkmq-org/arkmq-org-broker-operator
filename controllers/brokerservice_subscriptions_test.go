@@ -32,7 +32,9 @@ func testEmptySubscriptionsArrayMulticastOnly(useShared bool) {
 	}
 	app := builder.Build()
 
-	err := reconciler.processCapabilities(secret, app)
+	tracker, err := reconciler.buildAddressTracker(app)
+	Expect(err).NotTo(HaveOccurred())
+	err = reconciler.processCapabilities(secret, app, tracker)
 	Expect(err).NotTo(HaveOccurred())
 
 	caps := parseCapabilities(secret, "multicast-app")
@@ -62,7 +64,9 @@ func testSingleQueueAnycastRouting(useShared bool) {
 	}
 	app := builder.Build()
 
-	err := reconciler.processCapabilities(secret, app)
+	tracker, err := reconciler.buildAddressTracker(app)
+	Expect(err).NotTo(HaveOccurred())
+	err = reconciler.processCapabilities(secret, app, tracker)
 	Expect(err).NotTo(HaveOccurred())
 
 	caps := parseCapabilities(secret, "anycast-app")
@@ -93,7 +97,9 @@ func testMultipleSubsAllCreated(useShared bool) {
 	}
 	app := builder.Build()
 
-	err := reconciler.processCapabilities(secret, app)
+	tracker, err := reconciler.buildAddressTracker(app)
+	Expect(err).NotTo(HaveOccurred())
+	err = reconciler.processCapabilities(secret, app, tracker)
 	Expect(err).NotTo(HaveOccurred())
 
 	caps := parseCapabilities(secret, "multi-queue-app")
@@ -128,7 +134,9 @@ func testSubsWithCapabilitiesSubsAndRBAC(useShared bool) {
 		WithConsumerOf(NewAddressRef("commands").Build()).
 		Build()
 
-	err := reconciler.processCapabilities(secret, app)
+	tracker, err := reconciler.buildAddressTracker(app)
+	Expect(err).NotTo(HaveOccurred())
+	err = reconciler.processCapabilities(secret, app, tracker)
 	Expect(err).NotTo(HaveOccurred())
 
 	caps := parseCapabilities(secret, "queue-with-caps")
@@ -143,10 +151,10 @@ func testSubsWithCapabilitiesSubsAndRBAC(useShared bool) {
 
 	commandsRoles := caps.SecurityRoles["commands"]
 	Expect(commandsRoles).NotTo(BeNil(), "expected securityRoles for 'commands'")
-	p := commandsRoles["test-queue-with-caps-producer"]
+	p := commandsRoles[producerRole(AppIdentity(app))]
 	Expect(p).NotTo(BeNil(), "expected producer RBAC role")
 	Expect(p.Send).To(BeTrue(), "expected producer RBAC role with send=true")
-	c := commandsRoles["test-queue-with-caps-consumer"]
+	c := commandsRoles[consumerRole(AppIdentity(app))]
 	Expect(c).NotTo(BeNil(), "expected consumer RBAC role")
 	Expect(c.Consume).To(BeTrue(), "expected consumer RBAC role with consume=true")
 }
@@ -163,7 +171,9 @@ func testNoQueuesFieldInferredFromCapabilities(useShared bool) {
 	}
 	app := builder.WithConsumerOf(NewAddressRef("legacy").Build()).Build()
 
-	err := reconciler.processCapabilities(secret, app)
+	tracker, err := reconciler.buildAddressTracker(app)
+	Expect(err).NotTo(HaveOccurred())
+	err = reconciler.processCapabilities(secret, app, tracker)
 	Expect(err).NotTo(HaveOccurred())
 
 	caps := parseCapabilities(secret, "inferred-queues")
@@ -193,7 +203,9 @@ func testMixedMulticastAndAnycast(useShared bool) {
 	}
 	app := builder.Build()
 
-	err := reconciler.processCapabilities(secret, app)
+	tracker, err := reconciler.buildAddressTracker(app)
+	Expect(err).NotTo(HaveOccurred())
+	err = reconciler.processCapabilities(secret, app, tracker)
 	Expect(err).NotTo(HaveOccurred())
 
 	caps := parseCapabilities(secret, "mixed-routing")
@@ -219,7 +231,9 @@ func testSubsWithSubscriberCapability(useShared bool) {
 	}
 	app := builder.WithConsumerOf(NewAddressRef("notifications").WithSubscriptions("push").Build()).Build()
 
-	err := reconciler.processCapabilities(secret, app)
+	tracker, err := reconciler.buildAddressTracker(app)
+	Expect(err).NotTo(HaveOccurred())
+	err = reconciler.processCapabilities(secret, app, tracker)
 	Expect(err).NotTo(HaveOccurred())
 
 	caps := parseCapabilities(secret, "subscriber-with-queues")

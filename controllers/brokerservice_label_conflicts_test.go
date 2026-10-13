@@ -25,9 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,10 +36,7 @@ import (
 var _ = Describe("brokerservice label conflicts", func() {
 
 	It("does not use reserved label keys", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "test-broker"
@@ -104,10 +99,7 @@ var _ = Describe("brokerservice label conflicts", func() {
 	})
 
 	It("uses proper domain prefixes on all labels", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "test-broker"

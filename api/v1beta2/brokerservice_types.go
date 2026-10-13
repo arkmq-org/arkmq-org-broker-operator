@@ -55,19 +55,22 @@ type BrokerServiceSpec struct {
 	AppSelectorExpression string `json:"appSelectorExpression,omitempty"`
 }
 
-// RejectedApp represents a BrokerApp that was rejected during provisioning validation
-type RejectedApp struct {
-	// Name of the rejected app
-	Name string `json:"name"`
-	// Namespace of the rejected app
-	Namespace string `json:"namespace"`
-	// Reason why the app was rejected
-	Reason string `json:"reason"`
+type PendingEmptyAddressStatus struct {
+	// App is the identity of the BrokerApp that owns the addresses pending empty
+	App string `json:"app"`
+	// Messages maps each fully qualified queue name (address::queue) to its
+	// pending message count. Entries are removed once the count reaches zero.
+	Messages map[string]int64 `json:"messages,omitempty"`
 }
 
 type BrokerServiceStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	// ObservedGeneration is the most recent generation observed for this BrokerService.
+	// It corresponds to the BrokerService's generation, which is updated on mutation by the API Server.
+	//+optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// Current state of the resource
 	// Conditions represent the latest available observations of an object's state
@@ -81,10 +84,12 @@ type BrokerServiceStatus struct {
 	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Provisioned Applications"
 	ProvisionedApps []string `json:"provisionedApps,omitempty"`
 
-	// List of BrokerApps that were rejected during provisioning validation
+	// PendingEmpty lists apps with addresses pending empty before removal.
+	// Entries appear when addresses are removed from an app's spec or when an
+	// app is being deleted, and remain until all messages have been consumed.
 	//+optional
-	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Rejected Applications"
-	RejectedApps []RejectedApp `json:"rejectedApps,omitempty"`
+	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Pending Empty"
+	PendingEmpty []PendingEmptyAddressStatus `json:"pendingEmpty,omitempty"`
 }
 
 //+kubebuilder:object:root=true
@@ -116,3 +121,17 @@ type BrokerServiceList struct {
 func init() {
 	SchemeBuilder.Register(&BrokerService{}, &BrokerServiceList{})
 }
+
+const (
+	AppsProvisionedConditionType           = "AppsProvisioned"
+	AppsProvisionedConditionSyncedReason   = "Synced"
+	AppsProvisionedConditionWaitingReason  = "WaitingForBroker"
+	AppsProvisionedConditionNotReadyReason = "BrokerNotReady"
+
+	ReadyConditionAddressesPendingEmpty      = "AddressesPendingEmpty"
+	DeployedConditionPortPoolExhaustedReason = "PortPoolExhausted"
+
+	// AddressesPendingEmptyFinalizer is applied to both BrokerApp and BrokerService
+	// resources to ensure pending messages are consumed before resources are removed.
+	AddressesPendingEmptyFinalizer = "broker.arkmq.org/addresses-pending-empty"
+)

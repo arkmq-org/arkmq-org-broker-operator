@@ -17,7 +17,9 @@ var _ = Describe("addressref subscriptions", func() {
 			WithConsumerOf(NewAddressRef("commands").Build()).
 			Build()
 
-		err := reconciler.processCapabilities(secret, app)
+		tracker, err := reconciler.buildAddressTracker(app)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app, tracker)
 		Expect(err).NotTo(HaveOccurred())
 
 		caps := parseCapabilities(secret, "anycast-app")
@@ -42,7 +44,9 @@ var _ = Describe("addressref subscriptions", func() {
 			WithConsumerOf(NewAddressRef("events").WithSubscriptions("sub1", "sub2").Build()).
 			Build()
 
-		err := reconciler.processCapabilities(secret, app)
+		tracker, err := reconciler.buildAddressTracker(app)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app, tracker)
 		Expect(err).NotTo(HaveOccurred())
 
 		caps := parseCapabilities(secret, "multicast-app")
@@ -73,7 +77,9 @@ var _ = Describe("addressref subscriptions", func() {
 			WithProducerOf(NewAddressRef("notifications").WithSubscriptions().Build()).
 			Build()
 
-		err := reconciler.processCapabilities(secret, app)
+		tracker, err := reconciler.buildAddressTracker(app)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app, tracker)
 		Expect(err).NotTo(HaveOccurred())
 
 		caps := parseCapabilities(secret, "producer-app")
@@ -89,7 +95,6 @@ var _ = Describe("addressref subscriptions", func() {
 
 	It("routing type conflict", Label(unitLabel), func() {
 		reconciler := BrokerServiceInstanceReconcilerForTest()
-		secret := CreateSecret("test-secret", "test")
 
 		app := NewBrokerApp("conflict-app", "test").
 			WithConsumerOf(
@@ -98,7 +103,7 @@ var _ = Describe("addressref subscriptions", func() {
 			).
 			Build()
 
-		err := reconciler.processCapabilities(secret, app)
+		_, err := reconciler.buildAddressTracker(app)
 		Expect(err).To(HaveOccurred(), "expected error for routing type conflict")
 		Expect(err.Error()).To(ContainSubstring("conflict"))
 	})
@@ -111,7 +116,9 @@ var _ = Describe("addressref subscriptions", func() {
 			WithSharedAddresses(NewAddressType("events").WithSubscriptions("sub1").Build()).
 			WithProducerOf(v1beta2.AddressRef{Address: "events", PubSub: &[]bool{true}[0]}).Build()
 
-		err := reconciler.processCapabilities(secret, app)
+		tracker, err := reconciler.buildAddressTracker(app)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app, tracker)
 		Expect(err).NotTo(HaveOccurred())
 
 		caps := parseCapabilities(secret, "producer-app")

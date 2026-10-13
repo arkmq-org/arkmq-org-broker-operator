@@ -36,10 +36,7 @@ import (
 var _ = Describe("brokerservice deployed gating", func() {
 
 	It("service deployed remains false when broker not ready", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-broker-service"
@@ -75,10 +72,7 @@ var _ = Describe("brokerservice deployed gating", func() {
 	})
 
 	It("service deployed becomes true after port discovery", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-broker-service"

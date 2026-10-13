@@ -1045,22 +1045,51 @@ func uninstallCRDs() {
 	}
 
 	for _, crdName := range crdNames {
+		fmt.Printf("\nuninstallCRDs: processing %s\n", crdName)
 		Eventually(func(g Gomega) {
 			err := k8sClient.Get(context.TODO(), types.NamespacedName{Name: crdName}, &crd)
 			g.Expect(err == nil || errors.IsNotFound(err)).To(BeTrue())
 
 			if !errors.IsNotFound(err) {
-				// delete CRD
+				logPendingCRInstances(crdName)
+
+				fmt.Printf("uninstallCRDs: deleting %s\n", crdName)
 				err := k8sClient.Delete(context.TODO(), &crd)
 				g.Expect(err).NotTo(HaveOccurred())
 
-				// check CRD is not found
 				Eventually(func(g Gomega) {
 					err := k8sClient.Get(context.TODO(), types.NamespacedName{Name: crdName}, &crd)
+					if !errors.IsNotFound(err) {
+						logPendingCRInstances(crdName)
+					}
 					g.Expect(errors.IsNotFound(err)).To(BeTrue())
-				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+				}, timeout, interval).Should(Succeed())
+			} else {
+				fmt.Printf("uninstallCRDs: %s already removed\n", crdName)
 			}
 		}, timeout, interval).Should(Succeed())
+	}
+}
+
+func logPendingCRInstances(crdName string) {
+	ctx := context.TODO()
+	switch crdName {
+	case "brokerservices.broker.arkmq.org":
+		list := &brokerv1beta2.BrokerServiceList{}
+		if err := k8sClient.List(ctx, list); err == nil {
+			for _, item := range list.Items {
+				fmt.Printf("uninstallCRDs: pending BrokerService %s/%s finalizers=%v deletionTimestamp=%v\n",
+					item.Namespace, item.Name, item.Finalizers, item.DeletionTimestamp)
+			}
+		}
+	case "brokerapps.broker.arkmq.org":
+		list := &brokerv1beta2.BrokerAppList{}
+		if err := k8sClient.List(ctx, list); err == nil {
+			for _, item := range list.Items {
+				fmt.Printf("uninstallCRDs: pending BrokerApp %s/%s finalizers=%v deletionTimestamp=%v\n",
+					item.Namespace, item.Name, item.Finalizers, item.DeletionTimestamp)
+			}
+		}
 	}
 }
 

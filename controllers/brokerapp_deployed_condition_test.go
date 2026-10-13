@@ -84,7 +84,7 @@ var _ = Describe("brokerapp deployed condition", func() {
 					{
 						Type:   v1beta2.DeployedConditionType,
 						Status: metav1.ConditionTrue,
-						Reason: v1beta2.DeployedConditionProvisionedReason,
+						Reason: v1beta2.DeployedConditionBoundReason,
 					},
 					{
 						Type:   v1beta2.ValidConditionType,
@@ -133,7 +133,7 @@ var _ = Describe("brokerapp deployed condition", func() {
 		Expect(deployedCond).NotTo(BeNil())
 		Expect(deployedCond.Status).To(Equal(metav1.ConditionTrue),
 			"Deployed should remain True - validation failed but broker wasn't updated, old config still active")
-		Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionProvisionedReason))
+		Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionBoundReason))
 		Expect(deployedCond.ObservedGeneration < app.Generation).To(BeTrue(),
 			"Deployed observedGeneration should be less than current generation - it reflects old spec (may be 0 if condition predates observedGeneration)")
 
@@ -267,7 +267,7 @@ var _ = Describe("brokerapp deployed condition", func() {
 					{
 						Type:   v1beta2.DeployedConditionType,
 						Status: metav1.ConditionFalse,
-						Reason: v1beta2.DeployedConditionProvisioningPendingReason,
+						Reason: v1beta2.DeployedConditionBindingReason,
 					},
 					{
 						Type:   v1beta2.ValidConditionType,
