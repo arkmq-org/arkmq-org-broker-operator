@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -177,6 +178,11 @@ var _ = Describe("broker-service status conditions", func() {
 
 			By("cleanup")
 			Expect(k8sClient.Delete(ctx, createdCrd)).Should(Succeed())
+
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, serviceKey, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+
 			UninstallCert(sharedOperandCertName, defaultNamespace)
 			UninstallCert(prometheusCertName, defaultNamespace)
 		})
@@ -327,6 +333,11 @@ var _ = Describe("broker-service status conditions", func() {
 			By("cleanup")
 			Expect(k8sClient.Delete(ctx, createdApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdCrd)).Should(Succeed())
+
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, serviceKey, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+
 			UninstallCert(appCertName, defaultNamespace)
 			UninstallCert(sharedOperandCertName, defaultNamespace)
 			UninstallCert(prometheusCertName, defaultNamespace)
@@ -335,7 +346,7 @@ var _ = Describe("broker-service status conditions", func() {
 
 	Context("configuration updates", func() {
 
-		It("should handle app capability updates", func() {
+		It("should handle app capability updates", Label("verySlow"), func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -509,6 +520,11 @@ var _ = Describe("broker-service status conditions", func() {
 			By("cleanup")
 			Expect(k8sClient.Delete(ctx, createdApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdCrd)).Should(Succeed())
+
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, serviceKey, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+
 			UninstallCert(appCertName, defaultNamespace)
 			UninstallCert(sharedOperandCertName, defaultNamespace)
 			UninstallCert(prometheusCertName, defaultNamespace)

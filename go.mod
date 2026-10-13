@@ -3,7 +3,7 @@ module github.com/arkmq-org/arkmq-org-broker-operator/v2
 go 1.26.4
 
 require (
-	github.com/Azure/go-amqp v0.17.4
+	github.com/Azure/go-amqp v1.7.0
 	github.com/RHsyseng/operator-utils v1.4.10
 	github.com/cert-manager/cert-manager v1.12.14
 	github.com/cert-manager/trust-manager v0.7.0

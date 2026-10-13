@@ -206,3 +206,56 @@ func init() {
 
 func (r *Broker) Hub() {
 }
+
+const (
+	DeployedConditionType                   = "Deployed"
+	DeployedConditionReadyReason            = "AllPodsReady"
+	DeployedConditionNotReadyReason         = "PodsNotReady"
+	DeployedConditionZeroSizeReason         = "ZeroSizeDeployment"
+	DeployedConditionValidationFailedReason = "ValidationFailed"
+	DeployedConditionCrudKindErrorReason    = "ResourceError"
+
+	ValidConditionType                   = "Valid"
+	ValidConditionSuccessReason          = "ValidationSucceded"
+	ValidConditionFailureReason          = "ValidationFailed"
+	ValidConditionUnknownReason          = "NonFatalValidationFailure"
+	ValidConditionMissingResourcesReason = "MissingDependentResources"
+	ValidConditionInvalidVersionReason   = "SpecVersionInvalid"
+	ValidConditionInvalidResourceName    = "InvalidResourceName"
+	ValidConditionSpecSelectorError      = "SpecSelectorError"
+
+	ValidConditionPDBNonNilSelectorReason            = "PodDisruptionBudgetNonNilSelector"
+	ValidConditionFailedReservedLabelReason          = "ReservedLabelReference"
+	ValidConditionFailedExtraMountReason             = "InvalidExtraMount"
+	ValidConditionFailedDuplicateAcceptorPort        = "DuplicateAcceptorPort"
+	ValidConditionFailedInvalidExposeMode            = "InvalidExposeMode"
+	ValidConditionFailedInvalidIngressSettings       = "InvalidIngressSettings"
+	ValidConditionInvalidCertSecretReason            = "InvalidCertSecret"
+	ValidConditionFailedDuplicateBrokerPropertiesKey = "DuplicateBrokerPropertiesKey"
+	ValidConditionInvalidInternalVarUsage            = "InvalidInternalVarUsage"
+
+	ReadyConditionType      = "Ready"
+	ReadyConditionReason    = "ResourceReady"
+	NotReadyConditionReason = "WaitingForAllConditions"
+
+	ConfigAppliedConditionType     = "BrokerPropertiesApplied"
+	JaasConfigAppliedConditionType = "JaasPropertiesApplied"
+
+	ConfigAppliedConditionSynchedReason                   = "Applied"
+	ConfigAppliedConditionSynchedWithErrorReason          = "AppliedWithError"
+	ConfigAppliedConditionUnknownReason                   = "UnableToRetrieveStatus"
+	ConfigAppliedConditionOutOfSyncReason                 = "OutOfSync"
+	ConfigAppliedConditionNoJolokiaClientsAvailableReason = "NoJolokiaClientsAvailable"
+
+	BrokerVersionAlignedConditionType           = "BrokerVersionAligned"
+	BrokerVersionAlignedConditionMatchReason    = "VersionMatch"
+	BrokerVersionAlignedConditionMismatchReason = "VersionMismatch"
+
+	ScaleDownPendingConditionType                       = "ScalingDown"
+	ScaleDownPendingConditionPendingConfigAppliedReason = "PendingConfigApplied"
+	ScaleDownPendingConditionPendingEmptyReason         = "PendingEmpty" // no messages
+	ScaleDownPendingConditionPendingDeleteReason        = "PendingDelete"
+
+	ReconcileBlockedType   = "ReconcileBlocked"
+	ReconcileBlockedReason = "AnnotationPresent"
+)

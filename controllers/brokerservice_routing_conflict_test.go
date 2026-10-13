@@ -17,7 +17,9 @@ func testMulticastRoutingForSubscriptions() {
 		WithConsumerOf(NewAddressRef("events").WithSubscriptions("sub1").Build()).
 		Build()
 
-	err := reconciler.processCapabilities(secret, app)
+	tracker, err := reconciler.buildAddressTracker(app)
+	Expect(err).NotTo(HaveOccurred())
+	err = reconciler.processCapabilities(secret, app, tracker)
 	Expect(err).NotTo(HaveOccurred())
 
 	caps := parseCapabilities(secret, "multicast-app")
@@ -37,7 +39,9 @@ func testAnycastRoutingForConsumerOf() {
 		WithConsumerOf(NewAddressRef("commands").Build()).
 		Build()
 
-	err := reconciler.processCapabilities(secret, app)
+	tracker, err := reconciler.buildAddressTracker(app)
+	Expect(err).NotTo(HaveOccurred())
+	err = reconciler.processCapabilities(secret, app, tracker)
 	Expect(err).NotTo(HaveOccurred())
 
 	caps := parseCapabilities(secret, "anycast-app")
@@ -50,7 +54,6 @@ func testAnycastRoutingForConsumerOf() {
 
 func testConflictingRoutingTypesSameApp() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
-	secret := CreateSecret("test-secret", "test")
 
 	app := NewBrokerApp("conflict-app", "test").
 		WithAddresses(NewAddressType("mixed").Build()).
@@ -59,8 +62,8 @@ func testConflictingRoutingTypesSameApp() {
 			NewAddressRef("mixed").WithSubscriptions("queue1").Build(), // MULTICAST
 		).Build()
 
-	err := reconciler.processCapabilities(secret, app)
-	Expect(err).To(HaveOccurred(), "processCapabilities should have failed with routing type conflict")
+	_, err := reconciler.buildAddressTracker(app)
+	Expect(err).To(HaveOccurred(), "buildAddressTracker should have failed with routing type conflict")
 
 	expectedKeywords := []string{"mixed", "pubSub", "conflict"}
 	errMsg := err.Error()
@@ -98,10 +101,14 @@ var _ = Describe("brokerservice routing conflict", func() {
 			WithConsumerOf(NewAddressRef("shared-events").WithAppRef("test", "producer-app").Build()).
 			Build()
 
-		err := reconciler.processCapabilities(secret, app1)
+		tracker1, err := reconciler.buildAddressTracker(app1)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app1, tracker1)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = reconciler.processCapabilities(secret, app2)
+		tracker2, err := reconciler.buildAddressTracker(app2)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app2, tracker2)
 		Expect(err).NotTo(HaveOccurred())
 
 		caps1 := parseCapabilities(secret, "producer-app")
@@ -137,9 +144,13 @@ var _ = Describe("brokerservice routing conflict", func() {
 			WithConsumerOf(NewAddressRef("topic").WithAppRef("test", "sub-app1").WithSubscriptions("sub2").Build()).
 			Build()
 
-		err := reconciler.processCapabilities(secret, app1)
+		tracker1, err := reconciler.buildAddressTracker(app1)
 		Expect(err).NotTo(HaveOccurred())
-		err = reconciler.processCapabilities(secret, app2)
+		err = reconciler.processCapabilities(secret, app1, tracker1)
+		Expect(err).NotTo(HaveOccurred())
+		tracker2, err := reconciler.buildAddressTracker(app2)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app2, tracker2)
 		Expect(err).NotTo(HaveOccurred())
 
 		caps1 := parseCapabilities(secret, "sub-app1")
@@ -174,9 +185,13 @@ var _ = Describe("brokerservice routing conflict", func() {
 			WithConsumerOf(NewAddressRef("queue").WithAppRef("test", "consumer-app1").Build()).
 			Build()
 
-		err := reconciler.processCapabilities(secret, app1)
+		tracker1, err := reconciler.buildAddressTracker(app1)
 		Expect(err).NotTo(HaveOccurred())
-		err = reconciler.processCapabilities(secret, app2)
+		err = reconciler.processCapabilities(secret, app1, tracker1)
+		Expect(err).NotTo(HaveOccurred())
+		tracker2, err := reconciler.buildAddressTracker(app2)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app2, tracker2)
 		Expect(err).NotTo(HaveOccurred())
 
 		caps1 := parseCapabilities(secret, "consumer-app1")

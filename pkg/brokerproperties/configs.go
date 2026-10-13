@@ -149,7 +149,9 @@ type rbacConfig struct {
 func RBACConfigData() ([]byte, error) {
 	return json.Marshal(rbacConfig{
 		SecurityRoles: map[string]map[string]map[string]bool{
-			"mops.broker.getStatus":                    {"status": {"view": true}},
+			"mops.broker.getStatus": {"status": {"view": true}},
+			// for drain checks
+			"mops.mbeanserver.queryNames":              {"metrics": {"view": true}},
 			"mops.mbeanserver.queryMBeans":             {"metrics": {"view": true}},
 			"mops.broker":                              {"metrics": {"view": true}},
 			"mops.broker.getTotalMessageCount":         {"metrics": {"view": true}},

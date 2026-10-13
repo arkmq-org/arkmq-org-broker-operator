@@ -38,10 +38,8 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -97,9 +95,7 @@ func newServiceReconcilerForApps(apps []v1beta2.BrokerApp) *BrokerServiceInstanc
 }
 
 func newServiceReconcilerWithCerts(certs ...appCert) *BrokerServiceInstanceReconciler {
-	scheme := runtime.NewScheme()
-	_ = v1beta2.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
+	scheme := NewServiceUnitTestScheme()
 
 	builder := fake.NewClientBuilder().WithScheme(scheme)
 	for _, c := range certs {
@@ -133,13 +129,10 @@ func ownerApp(namespace, name string, capabilities ...v1beta2.AppCapabilityType)
 	}
 }
 
-var _ = Describe("brokerservice controller unit", func() {
+var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 
 	It("reconcile with app move", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		s1Name := "service1"
@@ -224,10 +217,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("error propagation", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		s1Name := "service1"
 		ns := "default"
@@ -275,10 +265,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("status update failure", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		s1Name := "service1"
 		ns := "default"
@@ -309,9 +296,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("requires index", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		s1Name := "service1"
@@ -336,11 +321,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("deployed condition transition", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-broker-service"
@@ -421,10 +402,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("status applied apps", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-service"
@@ -458,7 +436,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(WithCerts(namespace, oc, svc, app)...).
-			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithStatusSubresource(svc, &v1beta2.Broker{}, &v1beta2.BrokerApp{}).
 			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 				app := rawObj.(*v1beta2.BrokerApp)
 				if app.Status.Service != nil {
@@ -483,7 +461,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		err = cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, secret)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(secret.ResourceVersion).NotTo(BeEmpty())
-		Expect(secret.Annotations[common.ProvisionedAppsAnnotation]).To(Equal(fmt.Sprintf("%s/%s@0", ns, appName)))
+		Expect(secret.Annotations[common.ProvisionedAppsAnnotation]).To(Equal(AppIdentityWithGeneration(app)))
 
 		brokerCR := &v1beta2.Broker{}
 		err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
@@ -503,14 +481,11 @@ var _ = Describe("brokerservice controller unit", func() {
 
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(updatedSvc.Status.ProvisionedApps).To(Equal([]string{fmt.Sprintf("%s/%s@0", ns, appName)}))
+		Expect(updatedSvc.Status.ProvisionedApps).To(Equal([]string{AppIdentityWithGeneration(app)}))
 	})
 
 	It("status applied apps incremental", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-service"
@@ -545,7 +520,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(WithCerts(namespace, oc, svc, app1)...).
-			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithStatusSubresource(svc, &v1beta2.Broker{}, &v1beta2.BrokerApp{}).
 			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 				app := rawObj.(*v1beta2.BrokerApp)
 				if app.Status.Service != nil {
@@ -584,7 +559,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		updatedSvc := &v1beta2.BrokerService{}
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(updatedSvc.Status.ProvisionedApps).To(Equal([]string{fmt.Sprintf("%s/%s@0", ns, app1Name)}))
+		Expect(updatedSvc.Status.ProvisionedApps).To(Equal([]string{AppIdentityWithGeneration(app1)}))
 
 		app2 := &v1beta2.BrokerApp{
 			ObjectMeta: metav1.ObjectMeta{Name: app2Name, Namespace: ns},
@@ -609,7 +584,7 @@ var _ = Describe("brokerservice controller unit", func() {
 
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(updatedSvc.Status.ProvisionedApps).To(Equal([]string{fmt.Sprintf("%s/%s@0", ns, app1Name)}))
+		Expect(updatedSvc.Status.ProvisionedApps).To(Equal([]string{AppIdentityWithGeneration(app1)}))
 
 		err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
 		Expect(err).NotTo(HaveOccurred())
@@ -624,17 +599,14 @@ var _ = Describe("brokerservice controller unit", func() {
 
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 		Expect(err).NotTo(HaveOccurred())
-		expectedApps := []string{fmt.Sprintf("%s/%s@0", ns, app1Name), fmt.Sprintf("%s/%s@0", ns, app2Name)}
+		expectedApps := []string{AppIdentityWithGeneration(app1), AppIdentityWithGeneration(app2)}
 		sort.Strings(expectedApps)
 		sort.Strings(updatedSvc.Status.ProvisionedApps)
 		Expect(updatedSvc.Status.ProvisionedApps).To(Equal(expectedApps))
 	})
 
 	It("apps provisioned condition", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-service"
@@ -647,7 +619,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(WithCerts(svc)...).
-			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithStatusSubresource(svc, &v1beta2.Broker{}, &v1beta2.BrokerApp{}).
 			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 				app := rawObj.(*v1beta2.BrokerApp)
 				if app.Status.Service != nil {
@@ -710,10 +682,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("prometheus override secret", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-service"
@@ -759,7 +728,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(WithCerts(namespace, oc, svc, app)...).
-			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithStatusSubresource(svc, &v1beta2.Broker{}, &v1beta2.BrokerApp{}).
 			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 				app := rawObj.(*v1beta2.BrokerApp)
 				if app.Status.Service != nil {
@@ -793,10 +762,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("prometheus override no apps", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-service"
@@ -820,7 +786,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(WithCerts(namespace, oc, svc)...).
-			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithStatusSubresource(svc, &v1beta2.Broker{}, &v1beta2.BrokerApp{}).
 			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 				app := rawObj.(*v1beta2.BrokerApp)
 				if app.Status.Service != nil {
@@ -850,10 +816,7 @@ var _ = Describe("brokerservice controller unit", func() {
 
 	Context("valid condition", func() {
 		It("sets Valid=True for valid spec", Label(unitLabel), func() {
-			scheme := runtime.NewScheme()
-			_ = v1beta2.AddToScheme(scheme)
-			_ = networkingv1.AddToScheme(scheme)
-			_ = corev1.AddToScheme(scheme)
+			scheme := NewServiceUnitTestScheme()
 
 			ns := "default"
 			svcName := "my-broker-service"
@@ -886,10 +849,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		})
 
 		It("sets Valid=False for invalid resource name", Label(unitLabel), func() {
-			scheme := runtime.NewScheme()
-			_ = v1beta2.AddToScheme(scheme)
-			_ = networkingv1.AddToScheme(scheme)
-			_ = corev1.AddToScheme(scheme)
+			scheme := NewServiceUnitTestScheme()
 
 			ns := "default"
 			invalidName := "broker/service"
@@ -923,15 +883,59 @@ var _ = Describe("brokerservice controller unit", func() {
 			deployedCondition := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.DeployedConditionType)
 			Expect(deployedCondition).NotTo(BeNil())
 			Expect(deployedCondition.Status).To(Equal(metav1.ConditionFalse))
-			Expect(deployedCondition.Reason).To(Equal(v1beta2.ValidConditionInvalidResourceName))
-			Expect(deployedCondition.Message).NotTo(BeEmpty())
+			Expect(deployedCondition.Reason).To(Equal(v1beta2.DeployedConditionValidationFailedReason))
+			Expect(deployedCondition.ObservedGeneration).To(Equal(int64(0)))
+		})
+
+		It("preserves Deployed=True on validation failure", Label(unitLabel), func() {
+			scheme := NewServiceUnitTestScheme()
+
+			ns := "default"
+			invalidName := "broker/service"
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: invalidName, Namespace: ns},
+				Status: v1beta2.BrokerServiceStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:               v1beta2.DeployedConditionType,
+							Status:             metav1.ConditionTrue,
+							Reason:             v1beta2.ReadyConditionReason,
+							Message:            "All pods ready",
+							ObservedGeneration: 1,
+						},
+					},
+				},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(svc)...).
+				WithStatusSubresource(svc)).
+				Build()
+
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: invalidName, Namespace: ns}}
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedSvc := &v1beta2.BrokerService{}
+			err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
+			Expect(err).NotTo(HaveOccurred())
+
+			validCondition := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCondition).NotTo(BeNil())
+			Expect(validCondition.Status).To(Equal(metav1.ConditionFalse))
+
+			deployedCondition := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.DeployedConditionType)
+			Expect(deployedCondition).NotTo(BeNil())
+			Expect(deployedCondition.Status).To(Equal(metav1.ConditionTrue), "should preserve Deployed=True from before validation failure")
+			Expect(deployedCondition.Reason).To(Equal(v1beta2.ReadyConditionReason), "should preserve the original reason")
+			Expect(deployedCondition.ObservedGeneration).To(Equal(int64(1)), "should preserve the old ObservedGeneration")
 		})
 
 		It("Valid condition persists across reconciles", Label(unitLabel), func() {
-			scheme := runtime.NewScheme()
-			_ = v1beta2.AddToScheme(scheme)
-			_ = networkingv1.AddToScheme(scheme)
-			_ = corev1.AddToScheme(scheme)
+			scheme := NewServiceUnitTestScheme()
 
 			ns := "default"
 			svcName := "my-broker-service-persist"
@@ -973,10 +977,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("idempotent status after creation", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "test-service"
@@ -1026,10 +1027,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("condition independence", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "test-service"
@@ -1073,10 +1071,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("valid persists through runtime errors", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "test-service"
@@ -1124,11 +1119,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("condition transitions on recovery", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "test-service"
@@ -1207,7 +1198,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("grants queryMBeans to app metrics role", Label(unitLabel), func() {
-		reconciler := &BrokerServiceInstanceReconciler{}
+		reconciler := BrokerServiceInstanceReconcilerForTest()
 
 		app := &v1beta2.BrokerApp{
 			ObjectMeta: metav1.ObjectMeta{Name: "my-app", Namespace: "ns1"},
@@ -1220,19 +1211,22 @@ var _ = Describe("brokerservice controller unit", func() {
 		}
 
 		secret := &corev1.Secret{}
-		Expect(reconciler.processCapabilities(secret, app)).NotTo(HaveOccurred())
+		tracker, trackerErr := reconciler.buildAddressTracker(app)
+		Expect(trackerErr).NotTo(HaveOccurred())
+		Expect(reconciler.processCapabilities(secret, app, tracker)).NotTo(HaveOccurred())
 
 		var cfg brokerproperties.CapabilitiesJSON
 		Expect(json.Unmarshal(secret.Data[AppIdentityPrefixed(app, "capabilities.json")], &cfg)).NotTo(HaveOccurred())
 
-		Expect(cfg.SecurityRoles["mops.mbeanserver.queryMBeans"]["ns1-my-app-metrics"].View).To(BeTrue(),
+		appMetricsRole := metricsRole(AppIdentity(app))
+		Expect(cfg.SecurityRoles["mops.mbeanserver.queryMBeans"][appMetricsRole].View).To(BeTrue(),
 			"app metrics role needs the queryMBeans gate to enumerate its own mbeans")
 
-		Expect(cfg.SecurityRoles["mops.queue.my-address"]["ns1-my-app-metrics"].View).To(BeTrue())
+		Expect(cfg.SecurityRoles["mops.queue.my-address"][appMetricsRole].View).To(BeTrue())
 	})
 
 	It("omits queryMBeans without queues", Label(unitLabel), func() {
-		reconciler := &BrokerServiceInstanceReconciler{}
+		reconciler := BrokerServiceInstanceReconcilerForTest()
 
 		app := &v1beta2.BrokerApp{
 			ObjectMeta: metav1.ObjectMeta{Name: "quiet-app", Namespace: "ns1"},
@@ -1240,7 +1234,9 @@ var _ = Describe("brokerservice controller unit", func() {
 		}
 
 		secret := &corev1.Secret{}
-		Expect(reconciler.processCapabilities(secret, app)).NotTo(HaveOccurred())
+		tracker, trackerErr := reconciler.buildAddressTracker(app)
+		Expect(trackerErr).NotTo(HaveOccurred())
+		Expect(reconciler.processCapabilities(secret, app, tracker)).NotTo(HaveOccurred())
 
 		var cfg brokerproperties.CapabilitiesJSON
 		Expect(json.Unmarshal(secret.Data[AppIdentityPrefixed(app, "capabilities.json")], &cfg)).NotTo(HaveOccurred())
@@ -1267,7 +1263,9 @@ var _ = Describe("brokerservice controller unit", func() {
 		for _, e := range forward {
 			identities = append(identities, e.Identity)
 		}
-		Expect(identities).To(Equal([]string{"ns1-app-alpha", "ns1-app-beta", "ns2-app-alpha"}))
+		Expect(identities).To(Equal([]string{
+			AppIdentity(&apps[2]), AppIdentity(&apps[1]), AppIdentity(&apps[0]),
+		}))
 	})
 
 	It("app identity entries use the cert common name", Label(unitLabel), func() {
@@ -1278,7 +1276,8 @@ var _ = Describe("brokerservice controller unit", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(entries).To(HaveLen(1))
-		Expect(entries[0].Identity).To(Equal("ns1-app-alpha"))
+		app := newBrokerApp("ns1", "app-alpha")
+		Expect(entries[0].Identity).To(Equal(AppIdentity(&app)))
 		Expect(entries[0].CNPattern).To(Equal(common.EscapeForRegex("app-alpha.ns1.svc")),
 			"pattern must come from the cert CN, not the app name")
 	})
@@ -1303,9 +1302,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("app identity entries fail on unreadable app cert", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1322,10 +1319,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("no requeues when broker ready but external configs empty", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-service"
@@ -1364,7 +1358,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(WithCerts(namespace, oc, svc, app)...).
-			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithStatusSubresource(svc, &v1beta2.Broker{}, &v1beta2.BrokerApp{}).
 			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 				a := rawObj.(*v1beta2.BrokerApp)
 				if a.Status.Service != nil {
@@ -1407,10 +1401,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("no requeues when external config version stale", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-service"
@@ -1449,7 +1440,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(WithCerts(namespace, oc, svc, app)...).
-			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithStatusSubresource(svc, &v1beta2.Broker{}, &v1beta2.BrokerApp{}).
 			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 				a := rawObj.(*v1beta2.BrokerApp)
 				if a.Status.Service != nil {
@@ -1492,10 +1483,7 @@ var _ = Describe("brokerservice controller unit", func() {
 	})
 
 	It("no requeue when external configs synced", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-service"
@@ -1534,7 +1522,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(WithCerts(namespace, oc, svc, app)...).
-			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithStatusSubresource(svc, &v1beta2.Broker{}, &v1beta2.BrokerApp{}).
 			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
 				a := rawObj.(*v1beta2.BrokerApp)
 				if a.Status.Service != nil {

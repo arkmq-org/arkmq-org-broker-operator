@@ -825,9 +825,9 @@ var _ = Describe("RBACConfigData", func() {
 		}
 	})
 
-	It("contains exactly 6 security role entries", func() {
+	It("contains exactly 7 security role entries", func() {
 		r := parse()
-		Expect(r.SecurityRoles).To(HaveLen(6))
+		Expect(r.SecurityRoles).To(HaveLen(7))
 	})
 })
 

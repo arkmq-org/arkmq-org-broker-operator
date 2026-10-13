@@ -388,6 +388,19 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 
 			By("cleaning up service")
 			Expect(k8sClient.Delete(ctx, &crd)).Should(Succeed())
+			// let drain complete before cert cleanup
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{})).ToNot(BeNil())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("cleaning up certs")
+			UninstallCert(prodApp.Name+common.AppCertSecretSuffix, prodNamespace)
+			UninstallCert(devApp.Name+common.AppCertSecretSuffix, devNamespace)
+			UninstallCert(qaApp.Name+common.AppCertSecretSuffix, qaNamespace)
+			for _, ns := range []string{prodNamespace, devNamespace, qaNamespace} {
+				UninstallCert("app-cert", ns)
+			}
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
 		It("should support team-based multi-tenancy with namespace labels", func() {
@@ -595,6 +608,18 @@ var _ = Describe("broker-service namespace-based CEL selection", func() {
 			Expect(k8sClient.Delete(ctx, &paymentsApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ordersApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &crd)).Should(Succeed())
+			// let drain complete before cert cleanup
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{})).ToNot(BeNil())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("cleaning up certs")
+			UninstallCert(paymentsApp.Name+common.AppCertSecretSuffix, paymentsNamespace)
+			UninstallCert(ordersApp.Name+common.AppCertSecretSuffix, ordersNamespace)
+			for _, ns := range []string{paymentsNamespace, ordersNamespace} {
+				UninstallCert("app-cert", ns)
+			}
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 	})
 })

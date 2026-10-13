@@ -70,6 +70,21 @@ func (m *MockIJolokia) EXPECT() *MockIJolokiaMockRecorder {
 	return m.recorder
 }
 
+// ReadMap mocks base method.
+func (m *MockIJolokia) ReadMap(path string) (map[string]interface{}, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReadMap", path)
+	ret0, _ := ret[0].(map[string]interface{})
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReadMap indicates an expected call of ReadMap.
+func (mr *MockIJolokiaMockRecorder) ReadMap(path interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadMap", reflect.TypeOf((*MockIJolokia)(nil).ReadMap), path)
+}
+
 // Exec mocks base method.
 func (m *MockIJolokia) Exec(path, postJsonString string) (*ResponseData, error) {
 	m.ctrl.T.Helper()

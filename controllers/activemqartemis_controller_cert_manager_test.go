@@ -16,6 +16,7 @@ limitations under the License.
 package controllers
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -438,11 +439,15 @@ var _ = Describe("artemis controller with cert manager test", Label("controller-
 				By("check acceptor is reachable")
 				Eventually(func(g Gomega) {
 					url := "amqps://" + clusterIngressHost + ":443"
-					connTLSConfig := amqp.ConnTLSConfig(&tls.Config{ServerName: ingressHost, RootCAs: roots})
-					client, err := amqp.Dial(url, amqp.ConnSASLPlain("dummy-user", "dummy-pass"), amqp.ConnTLS(true), connTLSConfig)
+					conn, err := amqp.Dial(context.Background(), url, &amqp.ConnOptions{
+						SASLType:  amqp.SASLTypePlain("dummy-user", "dummy-pass"),
+						TLSConfig: &tls.Config{ServerName: ingressHost, RootCAs: roots},
+					})
 					g.Expect(err).Should(BeNil())
-					g.Expect(client).ShouldNot(BeNil())
-					defer client.Close()
+					g.Expect(conn).ShouldNot(BeNil())
+					defer func() {
+						_ = conn.Close()
+					}()
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 			}
 

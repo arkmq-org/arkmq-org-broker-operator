@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -220,4 +221,101 @@ func (artemis *Artemis) GetTotalMessageCount() (string, error) {
 		return "", fmt.Errorf("unable to retrieve TotalMessageCount %v", resp.Error)
 	}
 	return resp.Value, nil
+}
+
+// QueueMessageCount holds the message count for a single queue.
+type QueueMessageCount struct {
+	Address     string
+	Queue       string
+	RoutingType string
+	Count       int64
+}
+
+// GetAllQueueMessageCounts reads MessageCount for all queues in a single Jolokia
+// pattern read, returning one entry per queue. Callers can filter the result by
+// address name instead of issuing per-queue requests.
+func (artemis *Artemis) GetAllQueueMessageCounts() ([]QueueMessageCount, error) {
+	path := "org.apache.activemq.artemis:broker=\"" + artemis.name + "\"" +
+		",component=addresses,address=*" +
+		",subcomponent=queues,routing-type=*" +
+		",queue=*/MessageCount"
+	raw, err := artemis.jolokia.ReadMap(path)
+	if err != nil {
+		return nil, fmt.Errorf("pattern read for queue MessageCount: %w", err)
+	}
+
+	var result []QueueMessageCount
+	for mbeanKey, val := range raw {
+		addr, queue, rt := parseMBeanKey(mbeanKey)
+		if addr == "" {
+			continue
+		}
+		var countVal interface{}
+		if attrs, ok := val.(map[string]interface{}); ok {
+			countVal = attrs["MessageCount"]
+		} else {
+			countVal = val
+		}
+		var count int64
+		switch v := countVal.(type) {
+		case float64:
+			count = int64(v)
+		case string:
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				count = n
+			}
+		}
+		result = append(result, QueueMessageCount{
+			Address:     addr,
+			Queue:       queue,
+			RoutingType: rt,
+			Count:       count,
+		})
+	}
+	return result, nil
+}
+
+// parseMBeanKey extracts address, queue, and routing-type from a Jolokia MBean
+// object name like:
+// "org.apache.activemq.artemis:address=\"orders\",broker=\"brokerservice-drain1420a\",component=addresses,queue=\"drain-client.orders\",routing-type=\"multicast\",subcomponent=queues"
+func parseMBeanKey(key string) (address, queue, routingType string) {
+	for _, part := range splitMBeanProperties(strings.TrimPrefix(key, "org.apache.activemq.artemis:")) {
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		val := strings.Trim(kv[1], "\"")
+		switch kv[0] {
+		case "address":
+			address = val
+		case "queue":
+			queue = val
+		case "routing-type":
+			routingType = val
+		}
+	}
+	return
+}
+
+// splitMBeanProperties splits a JMX ObjectName property list on commas,
+// respecting quoted values that may contain commas.
+func splitMBeanProperties(s string) []string {
+	var parts []string
+	start := 0
+	inQuote := false
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '"':
+			inQuote = !inQuote
+		case ',':
+			if !inQuote {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	if start < len(s) {
+		parts = append(parts, s[start:])
+	}
+	return parts
 }

@@ -189,7 +189,7 @@ var _ = Describe("brokerapp controller unit", func() {
 		deployedCond = meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
 		Expect(deployedCond).NotTo(BeNil())
 		Expect(deployedCond.Status).To(Equal(v1.ConditionFalse))
-		Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionProvisioningPendingReason))
+		Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionBindingReason))
 	})
 
 	It("status update failure", Label(unitLabel), func() {
@@ -290,7 +290,7 @@ var _ = Describe("brokerapp controller unit", func() {
 		deployedCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
 		Expect(deployedCond).NotTo(BeNil())
 		Expect(deployedCond.Status).To(Equal(v1.ConditionFalse))
-		Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionProvisioningPendingReason))
+		Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionBindingReason))
 
 		updatedSvc := &v1beta2.BrokerService{}
 		err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, updatedSvc)
@@ -310,7 +310,7 @@ var _ = Describe("brokerapp controller unit", func() {
 		deployedCond = meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
 		Expect(deployedCond).NotTo(BeNil())
 		Expect(deployedCond.Status).To(Equal(v1.ConditionTrue))
-		Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionProvisionedReason))
+		Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionBoundReason))
 	})
 
 	It("idempotent status", Label(unitLabel), func() {
@@ -513,10 +513,12 @@ var _ = Describe("brokerapp controller unit", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = r.Reconcile(context.TODO(), req)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(HaveOccurred())
 
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
 		Expect(err).NotTo(HaveOccurred())
+
+		Expect(updatedApp.Status.Service).To(BeNil(), "binding should be cleared for app without owned content")
 
 		validCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.ValidConditionType)
 		Expect(validCondition).NotTo(BeNil())
@@ -525,7 +527,7 @@ var _ = Describe("brokerapp controller unit", func() {
 		deployedCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
 		Expect(deployedCondition).NotTo(BeNil())
 		Expect(deployedCondition.Status).To(Equal(v1.ConditionFalse))
-		Expect(deployedCondition.Reason).To(Equal(v1beta2.DeployedConditionMatchedServiceNotFoundReason))
+		Expect(deployedCondition.Reason).To(Equal(v1beta2.DeployedConditionNoMatchingServiceReason))
 	})
 
 	Context("routing type conflict validation", func() {
