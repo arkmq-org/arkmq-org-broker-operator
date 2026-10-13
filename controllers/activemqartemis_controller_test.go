@@ -2854,11 +2854,15 @@ var _ = Describe("artemis controller", func() {
 				By("check acceptor is reachable")
 				Eventually(func(g Gomega) {
 					url := "amqps://" + clusterIngressHost + ":443"
-					connTLSConfig := amqp.ConnTLSConfig(&tls.Config{ServerName: host, InsecureSkipVerify: true})
-					client, err := amqp.Dial(url, amqp.ConnSASLPlain("dummy-user", "dummy-pass"), amqp.ConnTLS(true), connTLSConfig)
+					conn, err := amqp.Dial(context.Background(), url, &amqp.ConnOptions{
+						SASLType:  amqp.SASLTypePlain("dummy-user", "dummy-pass"),
+						TLSConfig: &tls.Config{ServerName: host, InsecureSkipVerify: true},
+					})
 					g.Expect(err).Should(BeNil())
-					g.Expect(client).ShouldNot(BeNil())
-					defer client.Close()
+					g.Expect(conn).ShouldNot(BeNil())
+					defer func() {
+						_ = conn.Close()
+					}()
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 			}
 
@@ -3225,20 +3229,23 @@ var _ = Describe("artemis controller", func() {
 		produceMessage := func(serverName string, clientId string, linkAddress string, messageId int, g Gomega) {
 
 			url := "amqps://" + clusterIngressHost + ":443"
-			connTLSConfig := amqp.ConnTLSConfig(&tls.Config{ServerName: serverName, InsecureSkipVerify: true})
-			client, err := amqp.Dial(url, amqp.ConnContainerID(clientId), amqp.ConnSASLPlain("dummy-user", "dummy-pass"), amqp.ConnTLS(true), connTLSConfig)
+			conn, err := amqp.Dial(context.Background(), url, &amqp.ConnOptions{
+				ContainerID: clientId,
+				SASLType:    amqp.SASLTypePlain("dummy-user", "dummy-pass"),
+				TLSConfig:   &tls.Config{ServerName: serverName, InsecureSkipVerify: true},
+			})
 			g.Expect(err).Should(BeNil())
-			g.Expect(client).ShouldNot(BeNil())
-			defer client.Close()
+			g.Expect(conn).ShouldNot(BeNil())
+			defer func() {
+				_ = conn.Close()
+			}()
 
-			session, err := client.NewSession()
+			session, err := conn.NewSession(context.Background(), nil)
 
 			g.Expect(err).Should(BeNil())
 			g.Expect(session).ShouldNot(BeNil())
 
-			sender, err := session.NewSender(
-				amqp.LinkTargetAddress(linkAddress),
-			)
+			sender, err := session.NewSender(context.Background(), linkAddress, nil)
 			g.Expect(err).Should(BeNil())
 			ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 
@@ -3250,29 +3257,33 @@ var _ = Describe("artemis controller", func() {
 			msg.ApplicationProperties["MessageID"] = messageId
 			msg.ApplicationProperties["ClientID"] = clientId
 
-			err = sender.Send(ctx, msg)
+			err = sender.Send(ctx, msg, nil)
 			g.Expect(err).Should(BeNil())
 		}
 
 		consumeMatchingMessage := func(serverName string, linkAddress string, receivedTracker map[string]*list.List, g Gomega) {
 
 			url := "amqps://" + clusterIngressHost + ":443"
-			connTLSConfig := amqp.ConnTLSConfig(&tls.Config{ServerName: serverName, InsecureSkipVerify: true})
-			client, err := amqp.Dial(url, amqp.ConnContainerID("$.artemis.internal.router.client.dummy"), amqp.ConnSASLPlain("dummy-user", "dummy-pass"), amqp.ConnTLS(true), connTLSConfig)
+			conn, err := amqp.Dial(context.Background(), url, &amqp.ConnOptions{
+				ContainerID: "$.artemis.internal.router.client.dummy",
+				SASLType:    amqp.SASLTypePlain("dummy-user", "dummy-pass"),
+				TLSConfig:   &tls.Config{ServerName: serverName, InsecureSkipVerify: true},
+			})
 			g.Expect(err).Should(BeNil())
-			g.Expect(client).ShouldNot(BeNil())
+			g.Expect(conn).ShouldNot(BeNil())
 
-			defer client.Close()
+			defer func() {
+				_ = conn.Close()
+			}()
 
-			session, err := client.NewSession()
+			session, err := conn.NewSession(context.Background(), nil)
 			g.Expect(err).Should(BeNil())
 			g.Expect(session).ShouldNot(BeNil())
 
-			receiver, err := session.NewReceiver(
-				amqp.LinkSourceAddress(linkAddress),
-				amqp.LinkSourceCapabilities("queue"),
-				amqp.LinkCredit(50),
-			)
+			receiver, err := session.NewReceiver(context.Background(), linkAddress, &amqp.ReceiverOptions{
+				Capabilities: []string{"queue"},
+				Credit:       50,
+			})
 			g.Expect(err).Should(BeNil())
 			g.Expect(receiver).ShouldNot(BeNil())
 
@@ -3282,7 +3293,7 @@ var _ = Describe("artemis controller", func() {
 
 			// Receive messages till error or nil
 			for {
-				msg, err := receiver.Receive(ctx)
+				msg, err := receiver.Receive(ctx, nil)
 
 				if err != nil || msg == nil {
 					break

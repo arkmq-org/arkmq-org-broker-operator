@@ -114,7 +114,7 @@ var _ = Describe("app selector", func() {
 		deployedCondition := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
 		Expect(deployedCondition).NotTo(BeNil())
 		Expect(deployedCondition.Status).To(Equal(v1.ConditionFalse))
-		Expect(deployedCondition.Reason).To(Equal(v1beta2.DeployedConditionProvisioningPendingReason))
+		Expect(deployedCondition.Reason).To(Equal(v1beta2.DeployedConditionBindingReason))
 	})
 
 	It("denies app from non-allowed namespace", Label(unitLabel), func() {

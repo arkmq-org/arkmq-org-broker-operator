@@ -270,7 +270,8 @@ func (r *BrokerReconciler) UpdateBrokerCRStatus(desired *v1beta2.Broker, client 
 }
 
 func EqualBrokerCRStatus(s1, s2 *v1beta2.BrokerStatus) bool {
-	if !reflect.DeepEqual(s1.Version, s2.Version) ||
+	if s1.ObservedGeneration != s2.ObservedGeneration ||
+		!reflect.DeepEqual(s1.Version, s2.Version) ||
 		len(s2.ExternalConfigs) != len(s1.ExternalConfigs) ||
 		brokerExternalConfigsModified(s2.ExternalConfigs, s1.ExternalConfigs) ||
 		!reflect.DeepEqual(s1.PodStatus, s2.PodStatus) ||
@@ -740,7 +741,7 @@ func (reconciler *BrokerReconcilerImpl) CompareMetaAndSpec(deployed, requested r
 		equality.Semantic.DeepEqual(specOf(deployed), specOf(requested)) &&
 		reconciler.ensureOwnerReferenceAPIVersion(reconciler.customResource, deployed, requested)
 	if !isEqual {
-		reconciler.log.V(2).Info("unequal", "deployed", &deployed, "requested", &requested)
+		reconciler.log.V(0).Info("unequal", "deployed", &deployed, "requested", &requested)
 	}
 	return isEqual
 }

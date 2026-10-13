@@ -30,7 +30,6 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -50,11 +49,7 @@ func intstrFromInt(i int) intstr.IntOrString {
 var _ = Describe("brokerservice pod labels", func() {
 
 	It("applies standard kubernetes labels", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-broker"
@@ -106,11 +101,7 @@ var _ = Describe("brokerservice pod labels", func() {
 	})
 
 	It("network policy matches broker service label", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-broker"
@@ -223,11 +214,7 @@ var _ = Describe("brokerservice pod labels", func() {
 	})
 
 	It("network policy matches component label", Label(unitLabel), func() {
-		scheme := runtime.NewScheme()
-		_ = v1beta2.AddToScheme(scheme)
-		_ = corev1.AddToScheme(scheme)
-		_ = networkingv1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
+		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
 		svcName := "my-broker"
