@@ -1,0 +1,26 @@
+{{- if .Values.configuration.broker }}
+{{- range $k, $v := .Values.configuration.broker}}
+{{- if not (and $v.properties $v.config)}}
+{{- fail ".Values.configuration.broker[] item must contain config or properties" }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "broker.configurationSecretName" (list $ $v.name)}}
+  namespace: {{ include "broker.namespace" $ }}
+  labels:
+  {{- include "broker.labels" $ | nindent 4 }}
+  {{- with $.Values.configuration.annotations }}
+  annotations:
+    {{ toYaml . | nindent 4 }}
+  {{- end }}
+stringData:
+{{- if $v.config }}
+  {{ printf "configuration-%s-%d.json" $v.name $k | quote }}: {{ if kindIs "string" $v.config}}{{ $v.config | quote }}{{ else if kindIs "map" $v.config}}{{ toJson $v.config | quote }}{{ else }}{{ fail "config must be a string or dict"}}{{ end }}
+{{- end }}
+{{- if $v.properties }}
+  {{ printf "configuration-%s-%d.properties" $v.name $k | quote }}: {{ if kindIs "string" $v.config}}{{ $v.properties | quote }}{{ else if kindIs "slice" $v.properties }}{{ join "\n" $v.properties | quote }}{{ else }}{{ fail "properties must be a string or array"}}{{ end }}
+{{- end }}
+---
+{{- end }}
+{{- end }}
