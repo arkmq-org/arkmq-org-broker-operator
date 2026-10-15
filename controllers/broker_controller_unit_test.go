@@ -717,16 +717,22 @@ var _ = Describe("broker controller unit", func() {
 		})
 
 		It("broker container has log4j2 configurationFile with default and operator URIs", Label(unitLabel), func() {
-			var jdkOpts string
-			for _, env := range pts.Spec.Containers[0].Env {
-				if env.Name == jdkJavaOptionsEnvVarName {
-					jdkOpts = env.Value
-					break
-				}
-			}
+			command := pts.Spec.Containers[0].Command[2]
 			sidecarSecretPath := path.Join(common.SecretPathBase, "my-broker"+sidecarSecretSuffix)
 			operatorURI := path.Join(sidecarSecretPath, LoggingConfigKey)
-			Expect(jdkOpts).To(ContainSubstring(log4j2ConfigurationFileFlag + operatorURI))
+			Expect(command).To(ContainSubstring(log4j2ConfigurationFileFlag + operatorURI))
+		})
+
+		It("broker container does not set JDK_JAVA_OPTIONS env var", Label(unitLabel), func() {
+			for _, env := range pts.Spec.Containers[0].Env {
+				Expect(env.Name).NotTo(Equal(jdkJavaOptionsEnvVarName),
+					"operator flags must be on the command line, not in JDK_JAVA_OPTIONS")
+			}
+		})
+
+		It("broker container command includes broker properties", Label(unitLabel), func() {
+			command := pts.Spec.Containers[0].Command[2]
+			Expect(command).To(ContainSubstring("-Dbroker.properties="))
 		})
 	})
 
@@ -783,7 +789,7 @@ var _ = Describe("broker controller unit", func() {
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
 		ri := NewBrokerReconcilerImpl(cr, r)
 		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
-		Expect(strings.Contains(result, "$(EXTRA_BROKER_PROPERTIES)")).To(BeFalse(),
+		Expect(strings.Contains(result, "EXTRA_BROKER_PROPERTIES")).To(BeFalse(),
 			"brokerPropertiesConfigSystemPropValue must not contain the token when EXTRA_BROKER_PROPERTIES is unset")
 	})
 
@@ -818,8 +824,8 @@ var _ = Describe("broker controller unit", func() {
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
 		ri := NewBrokerReconcilerImpl(cr, r)
 		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
-		Expect(strings.HasSuffix(result, ",$(EXTRA_BROKER_PROPERTIES)")).To(BeTrue(),
-			"brokerPropertiesConfigSystemPropValue must end with ,$(EXTRA_BROKER_PROPERTIES) when user has set it")
+		Expect(strings.HasSuffix(result, ",${EXTRA_BROKER_PROPERTIES}")).To(BeTrue(),
+			"brokerPropertiesConfigSystemPropValue must end with ,${EXTRA_BROKER_PROPERTIES} when user has set it")
 	})
 
 	It("broker properties loaded from the resource directory", Label(unitLabel), func() {
@@ -922,8 +928,8 @@ var _ = Describe("broker controller unit", func() {
 				r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
 				ri := NewBrokerReconcilerImpl(cr, r)
 				result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
-				Expect(strings.HasSuffix(result, ",$(EXTRA_BROKER_PROPERTIES)")).To(BeTrue(),
-					"brokerPropertiesConfigSystemPropValue must end with ,$(EXTRA_BROKER_PROPERTIES)")
+				Expect(strings.HasSuffix(result, ",${EXTRA_BROKER_PROPERTIES}")).To(BeTrue(),
+					"brokerPropertiesConfigSystemPropValue must end with ,${EXTRA_BROKER_PROPERTIES}")
 			})
 		}
 	})

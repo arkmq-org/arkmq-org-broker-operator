@@ -1096,21 +1096,10 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 	// JAAS Config
 	if jaasConfigPath, found := brokerproperties.GetJaasConfigExtraMountPath(customResource.Spec.ExtraMounts); found {
-		debugArgs := corev1.EnvVar{
-			Name:  getJaasConfigEnvVarNameForBroker(),
-			Value: fmt.Sprintf("-Djava.security.auth.login.config=%v", jaasConfigPath),
-		}
-		environments.CreateOrAppend(podSpec.Containers, &debugArgs)
+		additionalSystemProps = append(additionalSystemProps, fmt.Sprintf("-Djava.security.auth.login.config=%v", jaasConfigPath))
 	}
 
-	// Configure the Log4j with the sidecar's required configuration
-	// Users can override with JAVA_ARGS_APPEND
-	environments.CreateOrAppend(
-		podSpec.Containers,
-		&corev1.EnvVar{
-			Name:  jdkJavaOptionsEnvVarName,
-			Value: log4j2ConfigurationFileFlag + path.Join(sidecarSecretPath, LoggingConfigKey),
-		})
+	additionalSystemProps = append(additionalSystemProps, log4j2ConfigurationFileFlag+path.Join(sidecarSecretPath, LoggingConfigKey))
 
 	// add TopologySpreadConstraints config
 	podSpec.TopologySpreadConstraints = customResource.Spec.TopologySpreadConstraints
@@ -1127,12 +1116,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		mountPoint = cfgMapPathBase
 	}
 	brokerPropsValue := reconciler.brokerPropertiesConfigSystemPropValue(mountPoint, brokerPropertiesResourceName)
-
-	jdkJavaOpts := corev1.EnvVar{
-		Name:  jdkJavaOptionsEnvVarName,
-		Value: brokerPropsValue,
-	}
-	environments.CreateOrAppend(podSpec.Containers, &jdkJavaOpts)
+	additionalSystemProps = append(additionalSystemProps, brokerPropsValue)
 
 	reconciler.configPodSecurity(podSpec, &customResource.Spec.PodSecurity)
 	reconciler.configurePodSecurityContext(podSpec, customResource.Spec.PodSecurityContext)
@@ -1186,10 +1170,6 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	return pts, nil
 }
 
-func getJaasConfigEnvVarNameForBroker() string {
-	return jdkJavaOptionsEnvVarName
-}
-
 func (reconciler *BrokerReconcilerImpl) brokerPropertiesConfigSystemPropValue(mountPoint, resourceName string) string {
 	result := fmt.Sprintf("-Dbroker.properties=%s%s/", mountPoint, resourceName)
 
@@ -1199,7 +1179,9 @@ func (reconciler *BrokerReconcilerImpl) brokerPropertiesConfigSystemPropValue(mo
 		}
 	}
 
-	result = environments.AppendExtraBrokerPropertiesToken(result, reconciler.customResource.Spec.Env)
+	if environments.HasExtraBrokerProperties(reconciler.customResource.Spec.Env) {
+		result += ",${EXTRA_BROKER_PROPERTIES}"
+	}
 
 	return result
 }
@@ -2048,9 +2030,8 @@ func validateReservedLabelsForBroker(customResource *v1beta2.Broker) *metav1.Con
 func validateEnvVarsForBroker(customResource *v1beta2.Broker) (*metav1.Condition, bool) {
 
 	internalVarNames := map[string]string{
-		debugArgsEnvVarName:      debugArgsEnvVarName,
-		javaOptsEnvVarName:       javaOptsEnvVarName,
-		javaArgsAppendEnvVarName: javaArgsAppendEnvVarName,
+		debugArgsEnvVarName: debugArgsEnvVarName,
+		javaOptsEnvVarName:  javaOptsEnvVarName,
 	}
 
 	invalidVars := []string{}
