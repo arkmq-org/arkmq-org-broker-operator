@@ -1047,10 +1047,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 			container.LivenessProbe = reconciler.configureLivenessProbe(container, customResource.Spec.LivenessProbe)
 		}
 	}
-	extraVolumes, extraVolumeMounts, err := reconciler.createExtraConfigmapsAndSecretsVolumeMounts(configMapsToMount, secretsToMount, brokerPropertiesResourceName, brokerPropertiesMapData, client)
-	if err != nil {
-		return nil, fmt.Errorf("failed to createExtraConfigmapsAndSecretsVolumeMounts, %w", err)
-	}
+	extraVolumes, extraVolumeMounts := reconciler.createExtraConfigmapsAndSecretsVolumeMounts(configMapsToMount, secretsToMount)
 
 	reqLogger.V(2).Info("Extra volumes", "volumes", extraVolumes)
 	reqLogger.V(2).Info("Extra mounts", "mounts", extraVolumeMounts)
@@ -1129,7 +1126,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	if !isSecret {
 		mountPoint = cfgMapPathBase
 	}
-	brokerPropsValue := reconciler.brokerPropertiesConfigSystemPropValue(mountPoint, brokerPropertiesResourceName, brokerPropertiesMapData)
+	brokerPropsValue := reconciler.brokerPropertiesConfigSystemPropValue(mountPoint, brokerPropertiesResourceName)
 
 	jdkJavaOpts := corev1.EnvVar{
 		Name:  jdkJavaOptionsEnvVarName,
@@ -1142,11 +1139,9 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 	pts.Spec = *podSpec
 
-	reEvalJdkOpts := generateReEvalOrdinaEnvReplacement(customResource.Spec.Env)
-
 	pts.Spec.Containers[0].Command = []string{
 		"/bin/bash", "-c",
-		fmt.Sprintf("export STATEFUL_SET_ORDINAL=${HOSTNAME##*-}; %s exec java %s $JAVA_ARGS_APPEND org.apache.activemq.artemis.core.server.embedded.Main", reEvalJdkOpts, strings.Join(additionalSystemProps, " ")),
+		fmt.Sprintf("exec java %s $JAVA_ARGS_APPEND org.apache.activemq.artemis.core.server.embedded.Main", strings.Join(additionalSystemProps, " ")),
 	}
 
 	// Reuse the existing sidecar container from the deployed state (if present)
@@ -1191,27 +1186,19 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	return pts, nil
 }
 
-// support ${STATEFUL_SET_ORDINAL} replacement in JDK options from CR env if necessary
-
 func getJaasConfigEnvVarNameForBroker() string {
 	return jdkJavaOptionsEnvVarName
 }
 
-func (reconciler *BrokerReconcilerImpl) brokerPropertiesConfigSystemPropValue(mountPoint, resourceName string, brokerPropertiesData map[string][]byte) string {
-	var result string
-	if len(brokerPropertiesData) == 1 {
-		result = fmt.Sprintf("-Dbroker.properties=%s%s/%s", mountPoint, resourceName, BrokerPropertiesName)
-	} else {
-		result = fmt.Sprintf("-Dbroker.properties=%s%s/,%s%s/%s${STATEFUL_SET_ORDINAL}/", mountPoint, resourceName, mountPoint, resourceName, OrdinalPrefix)
-	}
+func (reconciler *BrokerReconcilerImpl) brokerPropertiesConfigSystemPropValue(mountPoint, resourceName string) string {
+	result := fmt.Sprintf("-Dbroker.properties=%s%s/", mountPoint, resourceName)
 
 	for _, extraSecretName := range reconciler.customResource.Spec.ExtraMounts.Secrets {
 		if strings.HasSuffix(extraSecretName, common.BrokerPropsSuffix) {
-			result = fmt.Sprintf("%s,%s%s/,%s%s/%s${STATEFUL_SET_ORDINAL}/", result, common.SecretPathBase, extraSecretName, common.SecretPathBase, extraSecretName, OrdinalPrefix)
+			result = fmt.Sprintf("%s,%s%s/", result, common.SecretPathBase, extraSecretName)
 		}
 	}
 
-	// append $(EXTRA_BROKER_PROPERTIES) only when the var is defined in spec.Env
 	result = environments.AppendExtraBrokerPropertiesToken(result, reconciler.customResource.Spec.Env)
 
 	return result
@@ -1482,7 +1469,7 @@ func (reconciler *BrokerReconcilerImpl) configPodSecurity(podSpec *corev1.PodSpe
 	}
 }
 
-func (reconciler *BrokerReconcilerImpl) createExtraConfigmapsAndSecretsVolumeMounts(configMaps []string, secrets []string, brokePropertiesResourceName string, brokerPropsData map[string][]byte, client rtclient.Client) ([]corev1.Volume, []corev1.VolumeMount, error) {
+func (reconciler *BrokerReconcilerImpl) createExtraConfigmapsAndSecretsVolumeMounts(configMaps []string, secrets []string) ([]corev1.Volume, []corev1.VolumeMount) {
 
 	var extraVolumes []corev1.Volume
 	var extraVolumeMounts []corev1.VolumeMount
@@ -1495,7 +1482,6 @@ func (reconciler *BrokerReconcilerImpl) createExtraConfigmapsAndSecretsVolumeMou
 			}
 			cfgmapPath := cfgMapPathBase + cfgmap
 			reconciler.log.V(2).Info("Resolved configMap path", "path", cfgmapPath)
-			//now we have a config map. First create a volume
 			cfgmapVol := volumes.MakeVolumeForConfigMap(cfgmap)
 			cfgmapVolumeMount := volumes.MakeVolumeMountForCfg(cfgmapVol.Name, cfgmapPath, true)
 			extraVolumes = append(extraVolumes, cfgmapVol)
@@ -1510,52 +1496,14 @@ func (reconciler *BrokerReconcilerImpl) createExtraConfigmapsAndSecretsVolumeMou
 				continue
 			}
 			secretPath := common.SecretPathBase + secret
-			//now we have a secret. First create a volume
 			secretVol := volumes.MakeVolumeForSecret(secret)
-
-			if secret == brokePropertiesResourceName && brokerproperties.HasOrdinalPropertiesInData(brokerPropsData) {
-				// place ordinal data in subpath in order
-				for _, key := range brokerproperties.SortedKeysByteValue(brokerPropsData) {
-					matches := brokerproperties.ParseBrokerPropertyWithOrdinal(key)
-					if len(matches) > 0 {
-						subPath := matches[1]
-						secretVol.Secret.Items = append(secretVol.Secret.Items, corev1.KeyToPath{Key: key, Path: fmt.Sprintf("%s/%s", subPath, key)})
-					} else {
-						secretVol.Secret.Items = append(secretVol.Secret.Items, corev1.KeyToPath{Key: key, Path: key})
-					}
-				}
-			}
-
-			if strings.HasSuffix(secret, common.BrokerPropsSuffix) {
-				bpSecret := &corev1.Secret{}
-				bpSecretKey := types.NamespacedName{
-					Name:      secret,
-					Namespace: reconciler.customResource.Namespace,
-				}
-				if err := resources.Retrieve(bpSecretKey, client, bpSecret); err != nil {
-					return nil, nil, err
-				}
-
-				if len(bpSecret.Data) > 0 && brokerproperties.HasOrdinalPropertiesInData(bpSecret.Data) {
-					for _, key := range brokerproperties.SortedKeysByteValue(bpSecret.Data) {
-						matches := brokerproperties.ParseBrokerPropertyWithOrdinal(key)
-						if len(matches) > 0 {
-							subPath := matches[1]
-							secretVol.Secret.Items = append(secretVol.Secret.Items, corev1.KeyToPath{Key: key, Path: fmt.Sprintf("%s/%s", subPath, key)})
-						} else {
-							secretVol.Secret.Items = append(secretVol.Secret.Items, corev1.KeyToPath{Key: key, Path: key})
-						}
-					}
-				}
-
-			}
 			secretVolumeMount := volumes.MakeVolumeMountForCfg(secretVol.Name, secretPath, true)
 			extraVolumes = append(extraVolumes, secretVol)
 			extraVolumeMounts = append(extraVolumeMounts, secretVolumeMount)
 		}
 	}
 
-	return extraVolumes, extraVolumeMounts, nil
+	return extraVolumes, extraVolumeMounts
 }
 
 func (reconciler *BrokerReconcilerImpl) StatefulSetForCR(customResource *v1beta2.Broker, namer common.Namers, currentStateFullSet *appsv1.StatefulSet, client rtclient.Client) (*appsv1.StatefulSet, error) {
@@ -1878,9 +1826,7 @@ func (reconciler *BrokerReconcilerImpl) checkProjectionStatus(cr *v1beta2.Broker
 			current, present = extractStatus(brokerStatus, name)
 
 			if !present {
-				// with ordinal prefix or extras in the map this can be the case
-				matches := brokerproperties.ParseBrokerPropertyWithOrdinal(name)
-				if name != JaasConfigKey && !strings.HasPrefix(name, UncheckedPrefix) && len(matches) == 0 {
+				if name != JaasConfigKey && !strings.HasPrefix(name, UncheckedPrefix) {
 					missingKeys = append(missingKeys, name)
 				}
 				continue

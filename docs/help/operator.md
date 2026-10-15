@@ -875,6 +875,7 @@ Note: the array of strings ends up in a java properties file, where the followin
 
 The CR Status contains a Condition reflecting the application of the brokerProperties volume mount projection.
 For advanced use cases, with a broker version >= 2.27.1, it is possible to use a `broker-N.` prefix to provide configuration to a specific instance(0-N) of your deployment plan.
+The `Broker` CR is single instance and does not support the `broker-N.` prefix, neither in brokerProperties nor in "-bp" extra mounts.
 
 For example, to provide explicit config for the amount of memory messages will consume in a broker, overriding the defaults from container and JVM heap limits, you could use:
 

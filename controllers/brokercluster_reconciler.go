@@ -2499,21 +2499,6 @@ func isExistingDeploymentWithJavaOpts(current *corev1.PodTemplateSpec) bool {
 	return current != nil && environments.Retrieve(current.Spec.InitContainers, javaOptsEnvVarName) != nil
 }
 
-// support ${STATEFUL_SET_ORDINAL} replacement in JDK options from CR env if necessary
-func generateReEvalOrdinaEnvReplacement(envVars []corev1.EnvVar) (cmd string) {
-	cmd = ""
-	for _, envVar := range envVars {
-		if supportsOrdinalReplacement(envVar) {
-			cmd += fmt.Sprintf("export %s=${%s//\\$\\{STATEFUL_SET_ORDINAL\\}/${HOSTNAME##*-}}; ", envVar.Name, envVar.Name)
-		}
-	}
-	return cmd
-}
-
-func supportsOrdinalReplacement(envVar corev1.EnvVar) bool {
-	return (envVar.Name == jdkJavaOptionsEnvVarName || envVar.Name == javaArgsAppendEnvVarName) && strings.Contains(envVar.Value, "${STATEFUL_SET_ORDINAL}")
-}
-
 func getJaasConfigEnvVarName(customResource *v1beta2.BrokerCluster) string {
 	return debugArgsEnvVarName
 }

@@ -782,8 +782,7 @@ var _ = Describe("broker controller unit", func() {
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
 		ri := NewBrokerReconcilerImpl(cr, r)
-		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource",
-			map[string][]byte{"broker.properties": []byte("")})
+		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 		Expect(strings.Contains(result, "$(EXTRA_BROKER_PROPERTIES)")).To(BeFalse(),
 			"brokerPropertiesConfigSystemPropValue must not contain the token when EXTRA_BROKER_PROPERTIES is unset")
 	})
@@ -818,10 +817,38 @@ var _ = Describe("broker controller unit", func() {
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
 		ri := NewBrokerReconcilerImpl(cr, r)
-		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource",
-			map[string][]byte{"broker.properties": []byte("")})
+		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 		Expect(strings.HasSuffix(result, ",$(EXTRA_BROKER_PROPERTIES)")).To(BeTrue(),
 			"brokerPropertiesConfigSystemPropValue must end with ,$(EXTRA_BROKER_PROPERTIES) when user has set it")
+	})
+
+	It("broker properties loaded from the resource directory", Label(unitLabel), func() {
+		cr := &v1beta2.Broker{
+			ObjectMeta: v1.ObjectMeta{Name: "broker"},
+		}
+
+		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+		ri := NewBrokerReconcilerImpl(cr, r)
+		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
+		Expect(result).To(Equal("-Dbroker.properties=/config/my-resource/"),
+			"the directory must be loaded so the restricted *.json entries next to broker.properties apply")
+	})
+
+	It("broker properties extra -bp secret loaded as a directory", Label(unitLabel), func() {
+		cr := &v1beta2.Broker{
+			ObjectMeta: v1.ObjectMeta{Name: "broker"},
+			Spec: v1beta2.BrokerSpec{
+				ExtraMounts: v1beta2.ExtraMountsType{
+					Secrets: []string{"other", "my" + common.BrokerPropsSuffix},
+				},
+			},
+		}
+
+		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+		ri := NewBrokerReconcilerImpl(cr, r)
+		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
+		Expect(result).To(Equal("-Dbroker.properties=/config/my-resource/," + common.SecretPathBase + "my" + common.BrokerPropsSuffix + "/"))
+		Expect(result).NotTo(ContainSubstring("STATEFUL_SET_ORDINAL"))
 	})
 
 	Context("extra broker properties valueFrom passed through", func() {
@@ -894,8 +921,7 @@ var _ = Describe("broker controller unit", func() {
 
 				r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
 				ri := NewBrokerReconcilerImpl(cr, r)
-				result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource",
-					map[string][]byte{"broker.properties": []byte("")})
+				result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 				Expect(strings.HasSuffix(result, ",$(EXTRA_BROKER_PROPERTIES)")).To(BeTrue(),
 					"brokerPropertiesConfigSystemPropValue must end with ,$(EXTRA_BROKER_PROPERTIES)")
 			})
