@@ -292,10 +292,8 @@ var _ = Describe("minimal", func() {
 				}
 			})
 
-			// how the jdk command line can be configured or modified
 			crd.Spec.Env = []corev1.EnvVar{
 				{Name: "JDK_JAVA_OPTIONS", Value: "-Djavax.net.debug=ssl -Djava.security.debug=logincontext"},
-				//{Name: "JAVA_ARGS_APPEND", Value: "-DordinalProp=${STATEFUL_SET_ORDINAL}"},
 			}
 			crd.Spec.BrokerProperties = []string{
 				"messageCounterSamplePeriod=500",
