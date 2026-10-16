@@ -24,6 +24,7 @@ import (
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"path"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -277,8 +278,12 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 		reconciler.appPropertiesSecretName(),
 	}
 
-	appPorts, err := reconciler.processAppSecrets()
+	appPorts, validApps, err := reconciler.processAppSecrets()
 	if err != nil {
+		return err
+	}
+
+	if desired.Spec.ResourceTemplates, err = reconciler.appendControlPlaneTemplate(desired, validApps); err != nil {
 		return err
 	}
 
@@ -291,7 +296,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 	return nil
 }
 
-func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts []int32, err error) {
+func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts []int32, validApps []broker.BrokerApp, err error) {
 	// avoid restart for app onboarding with existing mount points
 	// TODO potentially N app-secrets to overcome 1Mb size limit
 	resourceName := types.NamespacedName{
@@ -312,14 +317,14 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts
 	apps := &broker.BrokerAppList{}
 	key := reconciler.instance.Namespace + ":" + reconciler.instance.Name
 	if err = reconciler.Client.List(context.TODO(), apps, client.MatchingFields{common.AppServiceBindingField: key}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// reset data
 	desired.Data = make(map[string][]byte)
 	appIdentities := make([]string, 0, len(apps.Items))
 	rejectedApps := make([]broker.RejectedApp, 0)
-	validApps := make([]broker.BrokerApp, 0, len(apps.Items))
+	validApps = make([]broker.BrokerApp, 0, len(apps.Items))
 
 	for _, app := range apps.Items {
 		valid, rejectionReason := reconciler.validateAppForProvisioning(&app, key)
@@ -364,12 +369,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts
 
 	reconciler.TrackDesired(desired)
 
-	// Update prometheus config in control-plane-override secret with queue-level metrics
-	if err == nil {
-		err = reconciler.processControlPlaneOverrideSecret(validApps)
-	}
-
-	return appPorts, err
+	return appPorts, validApps, err
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) appPropertiesSecretName() string {
@@ -1163,77 +1163,69 @@ func DashPrefixValue(prefix, value string) string {
 	return fmt.Sprintf("%s-%s", prefix, value)
 }
 
-func (reconciler *BrokerServiceInstanceReconciler) controlPlaneOverrideSecretName() string {
-	return reconciler.instance.Name + "-control-plane-override"
-}
-
-func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSecret(validApps []broker.BrokerApp) error {
-	appQueues := queueOwners(validApps, reconciler.log)
-
-	// Get or create the control-plane-override secret
-	resourceName := types.NamespacedName{
-		Namespace: reconciler.instance.Namespace,
-		Name:      reconciler.controlPlaneOverrideSecretName(),
-	}
-
-	var desired *corev1.Secret
-	obj := reconciler.CloneOfDeployed(reflect.TypeOf(corev1.Secret{}), resourceName.Name)
-	if obj != nil {
-		desired = obj.(*corev1.Secret)
-	} else {
-		desired = secrets.NewSecret(resourceName, nil, nil)
-	}
-
-	if desired.Data == nil {
-		desired.Data = make(map[string][]byte)
-	}
+// appendControlPlaneTemplate patches the control-plane files of the broker's
+// properties secret with queue-level metrics and the app identities.
+func (reconciler *BrokerServiceInstanceReconciler) appendControlPlaneTemplate(desired *broker.Broker, validApps []broker.BrokerApp) ([]broker.ResourceTemplate, error) {
+	data := make(map[string][]byte)
 
 	// Generate prometheus exporter yaml with queue-level metrics
-	prometheusConfig, err := reconciler.generatePrometheusConfig(appQueues)
+	prometheusConfig, err := reconciler.generatePrometheusConfig(queueOwners(validApps, reconciler.log))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	desired.Data[PrometheusConfigFileName] = prometheusConfig
+	data[PrometheusConfigFileName] = prometheusConfig
 
-	// Give each app an identity on the metrics endpoint. applyControlPlaneOverridesForBroker
-	// replaces whole keys, so these are rendered complete, control-plane entries included.
+	// Give each app an identity on the metrics endpoint. The patch replaces
+	// whole keys, so these are rendered complete, control-plane entries included.
 	appEntries, err := reconciler.appIdentityEntries(validApps)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	cns, err := common.ResolveControlPlaneCNs(reconciler.Client,
 		common.GenerateBroker(reconciler.instance.Name, reconciler.instance.Namespace))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	certUsers, err := templates.Render(templates.AppCertUsers, templates.AppCertUsersConfig{
+	if data[common.GetCertUsersKey(common.HttpAuthenticatorRealm)], err = templates.Render(templates.AppCertUsers, templates.AppCertUsersConfig{
 		CertUsersConfig: templates.CertUsersConfig(cns),
 		Apps:            appEntries,
-	})
-	if err != nil {
-		return err
+	}); err != nil {
+		return nil, err
 	}
-	desired.Data[common.GetCertUsersKey(common.HttpAuthenticatorRealm)] = certUsers
 
-	certRoles, err := templates.Render(templates.AppCertRoles, templates.AppCertRolesConfig{
+	if data[common.GetCertRolesKey(common.HttpAuthenticatorRealm)], err = templates.Render(templates.AppCertRoles, templates.AppCertRolesConfig{
 		Apps: appEntries,
-	})
-	if err != nil {
-		return err
+	}); err != nil {
+		return nil, err
 	}
-	desired.Data[common.GetCertRolesKey(common.HttpAuthenticatorRealm)] = certRoles
 
-	for k, v := range desired.Data {
-		reconciler.log.V(1).Info("Override", "Key", k, "Value", string(v))
+	patchBytes, err := json.Marshal(map[string]interface{}{"data": data})
+	if err != nil {
+		return nil, err
 	}
-	reconciler.TrackDesired(desired)
-	return nil
+
+	secretKind := "Secret"
+	propsName := "^" + regexp.QuoteMeta(getPropertiesResourceNsNameForBroker(desired).Name) + "$"
+
+	// replace any existing control-plane template rather than appending duplicates
+	filtered := make([]broker.ResourceTemplate, 0, len(desired.Spec.ResourceTemplates))
+	for _, rt := range desired.Spec.ResourceTemplates {
+		if rt.Selector != nil && rt.Selector.Name != nil && *rt.Selector.Name == propsName {
+			continue
+		}
+		filtered = append(filtered, rt)
+	}
+
+	return append(filtered, broker.ResourceTemplate{
+		Selector: &broker.ResourceSelector{Kind: &secretKind, Name: &propsName},
+		Patch:    runtime.RawExtension{Raw: patchBytes},
+	}), nil
 }
 
 // appIdentityEntries maps the provisioned apps to their control-plane
-// identities, sorted so the rendered override is stable.
+// identities, sorted so the rendered patch is stable.
 func (reconciler *BrokerServiceInstanceReconciler) appIdentityEntries(validApps []broker.BrokerApp) ([]templates.AppIdentityEntry, error) {
 	entries := make([]templates.AppIdentityEntry, 0, len(validApps))
 	for i := range validApps {

@@ -24,6 +24,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -709,7 +710,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		Expect(cond.Reason).To(Equal(v1beta2.AppsProvisionedConditionSyncedReason))
 	})
 
-	It("prometheus override secret", Label(unitLabel), func() {
+	It("prometheus control-plane template", Label(unitLabel), func() {
 		scheme := runtime.NewScheme()
 		_ = v1beta2.AddToScheme(scheme)
 		_ = networkingv1.AddToScheme(scheme)
@@ -774,12 +775,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		_, err := r.Reconcile(context.TODO(), req)
 		Expect(err).NotTo(HaveOccurred())
 
-		overrideSecretName := svcName + "-control-plane-override"
-		overrideSecret := &corev1.Secret{}
-		err = cl.Get(context.TODO(), types.NamespacedName{Name: overrideSecretName, Namespace: ns}, overrideSecret)
-		Expect(err).NotTo(HaveOccurred(), "control-plane-override secret should exist")
-
-		prometheusYaml, ok := overrideSecret.Data[PrometheusConfigFileName]
+		prometheusYaml, ok := controlPlanePatch(cl, svcName, ns)[PrometheusConfigFileName]
 		Expect(ok).To(BeTrue(), "should have prometheus key")
 		Expect(prometheusYaml).NotTo(BeEmpty())
 
@@ -792,7 +788,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		Expect(prometheusConfig).To(ContainSubstring("DeliveringCount"))
 	})
 
-	It("prometheus override no apps", Label(unitLabel), func() {
+	It("prometheus control-plane template no apps", Label(unitLabel), func() {
 		scheme := runtime.NewScheme()
 		_ = v1beta2.AddToScheme(scheme)
 		_ = networkingv1.AddToScheme(scheme)
@@ -835,12 +831,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		_, err := r.Reconcile(context.TODO(), req)
 		Expect(err).NotTo(HaveOccurred())
 
-		overrideSecretName := svcName + "-control-plane-override"
-		overrideSecret := &corev1.Secret{}
-		err = cl.Get(context.TODO(), types.NamespacedName{Name: overrideSecretName, Namespace: ns}, overrideSecret)
-		Expect(err).NotTo(HaveOccurred(), "control-plane-override secret should exist even without apps")
-
-		prometheusYaml, ok := overrideSecret.Data[PrometheusConfigFileName]
+		prometheusYaml, ok := controlPlanePatch(cl, svcName, ns)[PrometheusConfigFileName]
 		Expect(ok).To(BeTrue(), "should have prometheus key")
 		Expect(prometheusYaml).NotTo(BeEmpty())
 
@@ -1623,3 +1614,22 @@ var _ = Describe("brokerservice controller unit", func() {
 		Expect(queueOwners([]v1beta2.BrokerApp{second, first}, logr.Discard())["SHARED"].OwnerApp).To(Equal("first"))
 	})
 })
+
+// controlPlanePatch decodes the data a service patches into its broker's properties secret
+func controlPlanePatch(cl client.Client, name, ns string) map[string][]byte {
+	b := &v1beta2.Broker{}
+	Expect(cl.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: ns}, b)).To(Succeed())
+
+	propsName := "^" + regexp.QuoteMeta(name+"-props") + "$"
+	for _, rt := range b.Spec.ResourceTemplates {
+		if rt.Selector != nil && rt.Selector.Name != nil && *rt.Selector.Name == propsName {
+			patch := struct {
+				Data map[string][]byte `json:"data"`
+			}{}
+			Expect(json.Unmarshal(rt.Patch.Raw, &patch)).To(Succeed())
+			return patch.Data
+		}
+	}
+	Fail("broker " + name + " has no control-plane template")
+	return nil
+}

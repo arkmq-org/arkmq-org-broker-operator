@@ -746,16 +746,15 @@ var _ = Describe("broker-service-poc", func() {
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("verifying control-plane-override secret exists with prometheus config")
-			overrideSecretName := serviceName + "-control-plane-override"
-			overrideSecretKey := types.NamespacedName{Name: overrideSecretName, Namespace: defaultNamespace}
-			overrideSecret := &corev1.Secret{}
+			By("verifying the broker properties secret carries the service prometheus config")
+			propsSecretKey := types.NamespacedName{Name: serviceName + "-props", Namespace: defaultNamespace}
+			propsSecret := &corev1.Secret{}
 
 			Eventually(func(g Gomega) {
-				g.Expect(k8sClient.Get(ctx, overrideSecretKey, overrideSecret)).Should(Succeed())
+				g.Expect(k8sClient.Get(ctx, propsSecretKey, propsSecret)).Should(Succeed())
 
 				// Verify the secret contains the prometheus exporter config
-				prometheusYaml, ok := overrideSecret.Data[PrometheusConfigFileName]
+				prometheusYaml, ok := propsSecret.Data[PrometheusConfigFileName]
 				g.Expect(ok).Should(BeTrue(), "should have prometheus key")
 
 				prometheusConfig := string(prometheusYaml)
@@ -773,7 +772,7 @@ var _ = Describe("broker-service-poc", func() {
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("verifying broker picks up the override and applies it")
+			By("verifying broker applies it")
 			brokerKey := types.NamespacedName{Name: crd.Name, Namespace: crd.Namespace}
 			brokerCrd := &broker.Broker{}
 

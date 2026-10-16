@@ -1206,38 +1206,6 @@ The `spec.restricted` field was a dev preview feature. The impact of this deprec
 4. Verify the new Broker CR reaches `Ready=True`.
 5. Delete the old restricted BrokerCluster CR.
 
-### Control Plane Configuration Override
-
-The Broker CR supports control plane configuration overrides via a Kubernetes Secret. This is useful for customizing operator-generated broker properties such as Prometheus metrics configuration or Jolokia settings.
-
-The operator looks for a secret named `control-plane-override` (or `[cr-name]-control-plane-override` for CR-specific configuration). If found, the contents of this secret are applied as broker properties, overriding any auto-generated configuration.
-
-**Secret Naming Convention:**
-- The operator first checks for a CR-specific secret: `[cr-name]-control-plane-override`
-- If not found, it falls back to the shared secret: `control-plane-override`
-
-**Example:** Override certificate-based authentication configuration:
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: control-plane-override
-  namespace: your-namespace
-stringData:
-  _cert-users: |
-    # Certificate DN to user mapping
-    hawtio=/CN = hawtio-online\.hawtio\.svc.*/
-    operator=/.\*arkmq-org-broker-operator.\*/
-    probe=/.*arkmq-org-broker-operand.*/
-    new-user=/.*new-user.*/
-  _cert-roles: |
-    # Role assignments for certificate-authenticated users
-    status=operator,probe
-    metrics=operator,new-user
-    hawtio=hawtio
-```
-
 ## operator PKI
 In order for the operator to be able to use mtls to connect to the Broker CR operand it needs a client certificate and a trust bundle listing the trusted CAs. The user needs to provide these two secrets in the operator namespace; cert manager can be used to create and populate both.
 The default operator cert secret name is `arkmq-org-broker-manager-cert` and the default operator trust bundle secret name is `arkmq-org-broker-manager-ca`.
