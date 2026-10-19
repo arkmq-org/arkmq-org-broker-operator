@@ -26,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	brokerv1beta1 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta1"
 	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/environments"
@@ -40,14 +39,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 )
@@ -76,36 +72,6 @@ func mustTestKeyPairCNGinkgo(commonName string) (certPEM, keyPEM []byte) {
 }
 
 var _ = Describe("broker controller unit", func() {
-
-	It("returns error on not found secret", Label(unitLabel), func() {
-		cr := &v1beta2.Broker{
-			ObjectMeta: v1.ObjectMeta{Name: "a"},
-			Spec:       v1beta2.BrokerSpec{},
-		}
-
-		namer := MakeNamersForBroker(cr)
-
-		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
-
-		var times = 0
-		interceptorFuncs := interceptor.Funcs{
-			Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-				times++
-				return apierrors.NewNotFound(schema.GroupResource{}, key.Name)
-			},
-		}
-
-		common.SetOperatorNameSpace("test")
-		DeferCleanup(common.UnsetOperatorNameSpace)
-
-		cl := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
-
-		processErr := ri.Process(cr, *namer, cl, nil)
-
-		Expect(processErr).NotTo(BeNil())
-		Expect(processErr.Error()).To(ContainSubstring("not found"))
-	})
 
 	Context("repeated reconcile does not update stateful set", func() {
 		var deployed, requested *appsv1.StatefulSet
@@ -205,80 +171,6 @@ var _ = Describe("broker controller unit", func() {
 					"server-side applied defaults (TerminationMessagePath, TerminationMessagePolicy, "+
 					"ImagePullPolicy), which causes a false diff and unnecessary StatefulSet update")
 		})
-	})
-
-	It("validates restricted needs secret", Label(unitLabel), func() {
-		cr := &v1beta2.Broker{
-			ObjectMeta: v1.ObjectMeta{Name: "a"},
-			Spec:       v1beta2.BrokerSpec{},
-		}
-
-		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
-
-		fakeSecrets := map[string]client.Object{}
-		interceptorFuncs := interceptor.Funcs{
-			Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-				if o, found := fakeSecrets[key.Name]; found {
-					obj.SetName(o.GetName())
-					return nil
-				}
-				return apierrors.NewNotFound(schema.GroupResource{}, key.Name)
-			},
-		}
-
-		common.SetOperatorNameSpace("test")
-		DeferCleanup(common.UnsetOperatorNameSpace)
-
-		cl := fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
-
-		valid, retry := ri.validate(cr, cl)
-
-		Expect(valid).To(BeFalse())
-		Expect(retry).To(BeTrue())
-
-		Expect(meta.IsStatusConditionFalse(cr.Status.Conditions, brokerv1beta1.ValidConditionType)).To(BeTrue())
-
-		condition := meta.FindStatusCondition(cr.Status.Conditions, brokerv1beta1.ValidConditionType)
-		Expect(condition.Reason).To(Equal(brokerv1beta1.ValidConditionMissingResourcesReason))
-		Expect(condition.Message).To(ContainSubstring("failed to get secret"))
-		Expect(condition.Message).To(ContainSubstring(common.DefaultOperatorCertSecretName))
-
-		fakeSecrets[common.DefaultOperatorCertSecretName] = &corev1.Secret{
-			ObjectMeta: v1.ObjectMeta{Name: common.DefaultOperatorCertSecretName},
-		}
-
-		valid, retry = ri.validate(cr, cl)
-
-		Expect(valid).To(BeFalse())
-		Expect(retry).To(BeTrue())
-		Expect(meta.IsStatusConditionFalse(cr.Status.Conditions, brokerv1beta1.ValidConditionType)).To(BeTrue())
-		condition = meta.FindStatusCondition(cr.Status.Conditions, brokerv1beta1.ValidConditionType)
-		Expect(condition.Reason).To(Equal(brokerv1beta1.ValidConditionMissingResourcesReason))
-		Expect(condition.Message).To(ContainSubstring("failed to get secret"))
-		Expect(condition.Message).To(ContainSubstring(common.DefaultOperatorCASecretName))
-
-		fakeSecrets[common.DefaultOperatorCASecretName] = &corev1.Secret{
-			ObjectMeta: v1.ObjectMeta{Name: common.DefaultOperatorCASecretName},
-		}
-		valid, retry = ri.validate(cr, cl)
-
-		Expect(valid).To(BeFalse())
-		Expect(retry).To(BeTrue())
-		Expect(meta.IsStatusConditionFalse(cr.Status.Conditions, brokerv1beta1.ValidConditionType)).To(BeTrue())
-		condition = meta.FindStatusCondition(cr.Status.Conditions, brokerv1beta1.ValidConditionType)
-		Expect(condition.Reason).To(Equal(brokerv1beta1.ValidConditionMissingResourcesReason))
-		Expect(condition.Message).To(ContainSubstring("failed to get secret"))
-		Expect(condition.Message).To(ContainSubstring(common.DefaultOperandCertSecretName))
-
-		fakeSecrets[common.DefaultOperandCertSecretName] = &corev1.Secret{
-			ObjectMeta: v1.ObjectMeta{Name: common.DefaultOperandCertSecretName},
-		}
-		valid, retry = ri.validate(cr, cl)
-
-		Expect(valid).To(BeTrue())
-		Expect(retry).To(BeFalse())
-		Expect(meta.IsStatusConditionTrue(cr.Status.Conditions, brokerv1beta1.ValidConditionType)).To(BeTrue())
 	})
 
 	It("makes namers for broker using recommended Kubernetes labels", Label(unitLabel), func() {
@@ -733,6 +625,17 @@ var _ = Describe("broker controller unit", func() {
 		It("broker container command includes broker properties", Label(unitLabel), func() {
 			command := pts.Spec.Containers[0].Command[2]
 			Expect(command).To(ContainSubstring("-Dbroker.properties="))
+		})
+
+		It("broker container runs no control-plane agent of its own", Label(unitLabel), func() {
+			command := pts.Spec.Containers[0].Command[2]
+			Expect(command).NotTo(ContainSubstring("-javaagent:"))
+			Expect(command).NotTo(ContainSubstring("-Djava.security.properties="))
+			Expect(command).To(ContainSubstring("$JAVA_ARGS_APPEND"))
+		})
+
+		It("broker container has no liveness probe unless the spec sets one", Label(unitLabel), func() {
+			Expect(pts.Spec.Containers[0].LivenessProbe).To(BeNil())
 		})
 	})
 

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"maps"
 	"path"
-	"slices"
 	"sort"
 
 	"github.com/RHsyseng/operator-utils/pkg/resource/compare"
@@ -901,7 +900,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 	configMapsToMount := customResource.Spec.ExtraMounts.ConfigMaps
 	secretsToMount := customResource.Spec.ExtraMounts.Secrets
-	brokerPropertiesResourceName, isSecret, brokerPropertiesMapData, serr := reconciler.addResourceForBrokerProperties(customResource, namer)
+	brokerPropertiesResourceName, isSecret, _, serr := reconciler.addResourceForBrokerProperties(customResource, namer)
 	if serr != nil {
 		return nil, serr
 	}
@@ -911,141 +910,19 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		configMapsToMount = append(configMapsToMount, brokerPropertiesResourceName)
 	}
 
-	additionalSystemProps := []string{}
-	{
-		var err error
-		mountPathRoot := path.Join(common.SecretPathBase, getPropertiesResourceNsNameForBroker(customResource).Name)
-		if brokerPropertiesMapData["_security.config"], err = templates.Render(templates.Security, templates.SecurityConfig{
-			MountPathRoot: mountPathRoot,
-		}); err != nil {
-			return nil, err
-		}
-
-		additionalSystemProps = append(additionalSystemProps, fmt.Sprintf("-Djava.security.properties=%s/_security.config", mountPathRoot))
-
-		if brokerPropertiesMapData[brokerproperties.JaasConfigKey], err = templates.Render(templates.Login, templates.LoginConfig{
-			Realm:         common.HttpAuthenticatorRealm,
-			MountPathRoot: mountPathRoot,
-			CertUsersKey:  common.GetCertUsersKey(common.HttpAuthenticatorRealm),
-			CertRolesKey:  common.GetCertRolesKey(common.HttpAuthenticatorRealm),
-		}); err != nil {
-			return nil, err
-		}
-
-		// still needed below for the mount and the cert paths
-		operandCertSecretName := common.GetOperandCertSecretName(customResource, client)
-
-		var caCertSecret *corev1.Secret
-		if caCertSecret, err = common.GetOperatorCASecret(client); err != nil {
-			return nil, fmt.Errorf("failed to get operator ca secret, %w", err)
-		}
-
-		caSecretKey, err := common.GetOperatorCASecretKey(client, caCertSecret)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get operator ca secret key, %w", err)
-		}
-
-		// TODO - make configuable
-		// support <crNname->control-plane-auth-secret, maybe a suffix for the http_server_authenticator realm login.config
-
-		// shared with the BrokerService controller, which renders this same file
-		// complete into its control-plane override
-		cns, err := common.ResolveControlPlaneCNs(client, customResource)
-		if err != nil {
-			return nil, err
-		}
-
-		if brokerPropertiesMapData[common.GetCertUsersKey(common.HttpAuthenticatorRealm)], err = templates.Render(templates.CertUsers, templates.CertUsersConfig(cns)); err != nil {
-			return nil, err
-		}
-		brokerPropertiesMapData[common.GetCertRolesKey(common.HttpAuthenticatorRealm)] = templates.RenderCertRoles()
-
-		brokerName := environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name)
-		if brokerPropertiesMapData["aa_restricted.json"], err = brokerproperties.RestrictedConfigData(brokerName); err != nil {
-			return nil, err
-		}
-		if brokerPropertiesMapData["aa_rbac.json"], err = brokerproperties.RBACConfigData(); err != nil {
-			return nil, err
-		}
-
-		secretsToMount = append(secretsToMount, operandCertSecretName)
-		caSecret := common.GetOperatorCASecretName()
-		secretsToMount = append(secretsToMount, caSecret)
-
-		certSecretPath := path.Join(common.SecretPathBase, operandCertSecretName)
-		caCertPath := path.Join(common.SecretPathBase, caSecret, caSecretKey)
-
-		if brokerPropertiesMapData["_jolokia.config"], err = templates.Render(templates.Jolokia, templates.JolokiaConfig{
-			CACertPath:     caCertPath,
-			ServerCertPath: path.Join(certSecretPath, "tls.crt"),
-			ServerKeyPath:  path.Join(certSecretPath, "tls.key"),
-		}); err != nil {
-			return nil, err
-		}
-		if brokerPropertiesMapData["_cert.pemcfg"], err = templates.Render(templates.PemCfg, templates.PemCfgConfig{
-			Alias:       "alias",
-			CertKeyPath: path.Join(certSecretPath, "tls.key"),
-			CertCrtPath: path.Join(certSecretPath, "tls.crt"),
-		}); err != nil {
-			return nil, err
-		}
-		if brokerPropertiesMapData[PrometheusConfigFileName], err = templates.Render(templates.BrokerPrometheus, templates.BrokerPrometheusConfig{
-			PemCfgPath:       path.Join(mountPathRoot, "_cert.pemcfg"),
-			CATrustStorePath: caCertPath,
-			BrokerName:       environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name),
-		}); err != nil {
-			return nil, err
-		}
-
-		// Apply control plane overrides if they exist
-		if err := reconciler.applyControlPlaneOverridesForBroker(customResource, client, brokerPropertiesMapData); err != nil {
-			return nil, err
-		}
-
-		// adapt jolokia and prometheus authentication
-		additionalSystemProps = append(additionalSystemProps, "-DhttpServerAuthenticator.requestSubjectAttribute=org.jolokia.jaasSubject")
-
-		// install mbean server guard
-		additionalSystemProps = append(additionalSystemProps, "-Dlog4j2.disableJmx=true -Djavax.management.builder.initial=org.apache.activemq.artemis.core.server.management.ArtemisRbacMBeanServerBuilder")
-
-		// install jolokia agent
-		additionalSystemProps = append(additionalSystemProps, fmt.Sprintf("-javaagent:/opt/agents/jolokia.jar=host=$HOSTNAME,config=%s/_jolokia.config", mountPathRoot))
-
-		// install prometheus agent
-		additionalSystemProps = append(additionalSystemProps, fmt.Sprintf("-javaagent:/opt/agents/prometheus.jar=$HOSTNAME:8888:%s/%s", mountPathRoot, PrometheusConfigFileName))
-
+	additionalSystemProps := []string{
 		// non boot jar isolation classpath
-		additionalSystemProps = append(additionalSystemProps, "-classpath /opt/amq/lib/*:/opt/amq/lib/extra/*")
-
+		"-classpath /opt/amq/lib/*:/opt/amq/lib/extra/*",
 		// temp volume
-		additionalSystemProps = append(additionalSystemProps, "-Djava.io.tmpdir=/app/tmp")
-
+		"-Djava.io.tmpdir=/app/tmp",
 		// jvm options
-		additionalSystemProps = append(additionalSystemProps, "-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:AutoBoxCacheMax=20000 -XX:+PrintClassHistogram -XX:+UseG1GC -XX:+UseStringDeduplication -Djava.net.preferIPv4Stack=true")
+		"-XX:InitialRAMPercentage=70.0 -XX:MaxRAMPercentage=70.0 -XX:AutoBoxCacheMax=20000 -XX:+PrintClassHistogram -XX:+UseG1GC -XX:+UseStringDeduplication -Djava.net.preferIPv4Stack=true",
+	}
 
-		if customResource.Spec.LivenessProbe == nil {
-			container.LivenessProbe = &corev1.Probe{
-				ProbeHandler: corev1.ProbeHandler{
-					Exec: &corev1.ExecAction{
-						Command: []string{
-							"/bin/bash",
-							"-c",
-							// use curl with mtls as the broker-cert to pull the status to find start state using dns
-							fmt.Sprintf(`export STATEFUL_SET_ORDINAL=${HOSTNAME##*-};curl --cacert %s%s/%s --cert %s%s/tls.crt --key %s%s/tls.key  https://%s:8778/jolokia/read/org.apache.activemq.artemis:broker=%%22%s%%22/Status | grep -w -P "(START|STOPP)(ED|ING)"`, common.SecretPathBase, caSecret, caSecretKey, common.SecretPathBase, operandCertSecretName, common.SecretPathBase, operandCertSecretName, common.OrdinalStringFQDNS(customResource.Name, customResource.Namespace, "$STATEFUL_SET_ORDINAL"), environments.ResolveBrokerNameFromEnvs(customResource.Spec.Env, customResource.Name)),
-						},
-					},
-				},
-				InitialDelaySeconds:           1,
-				TimeoutSeconds:                5,
-				PeriodSeconds:                 5,
-				SuccessThreshold:              1,
-				FailureThreshold:              2,
-				TerminationGracePeriodSeconds: &terminationGracePeriodSeconds,
-			}
-		} else {
-			// use the value from the CR
-			container.LivenessProbe = reconciler.configureLivenessProbe(container, customResource.Spec.LivenessProbe)
-		}
+	if customResource.Spec.LivenessProbe != nil {
+		container.LivenessProbe = reconciler.configureLivenessProbe(container, customResource.Spec.LivenessProbe)
+	} else {
+		container.LivenessProbe = nil
 	}
 	extraVolumes, extraVolumeMounts := reconciler.createExtraConfigmapsAndSecretsVolumeMounts(configMapsToMount, secretsToMount)
 
@@ -1269,47 +1146,6 @@ func (reconciler *BrokerReconcilerImpl) configureReadinessProbe(container *corev
 	}
 
 	return readinessProbe
-}
-
-// applyControlPlaneOverrides applies control plane configuration overrides from secrets.
-// It first checks for CR-specific override secret ([cr-name]-control-plane-override),
-// then falls back to shared override secret (control-plane-override).
-// Each key in the override secret completely replaces the corresponding key in brokerPropertiesMapData.
-func (reconciler *BrokerReconcilerImpl) applyControlPlaneOverridesForBroker(customResource *v1beta2.Broker, client rtclient.Client, brokerPropertiesMapData map[string][]byte) error {
-	ctx := context.Background()
-
-	// Try CR-specific override secret first
-	crSpecificSecretName := customResource.Name + "-control-plane-override"
-	overrideSecret := &corev1.Secret{}
-	secretKey := types.NamespacedName{
-		Name:      crSpecificSecretName,
-		Namespace: customResource.Namespace,
-	}
-
-	err := client.Get(ctx, secretKey, overrideSecret)
-	if err != nil {
-		if k8serrors.IsNotFound(err) {
-			// Try shared override secret as fallback
-			secretKey.Name = "control-plane-override"
-			err = client.Get(ctx, secretKey, overrideSecret)
-			if err != nil {
-				if k8serrors.IsNotFound(err) {
-					// No override secret found, this is OK
-					return nil
-				}
-				return err
-			}
-		} else {
-			return err
-		}
-	}
-
-	reconciler.log.V(1).Info("applying overrides from secret", "name", overrideSecret.Name, "keys", slices.Collect(maps.Keys(overrideSecret.Data)))
-
-	// Apply overrides - complete replacement per key
-	maps.Copy(brokerPropertiesMapData, overrideSecret.Data)
-
-	return nil
 }
 
 func getPropertiesResourceNsNameForBroker(artemis *v1beta2.Broker) types.NamespacedName {
@@ -1973,12 +1809,6 @@ func (reconciler *BrokerReconcilerImpl) validate(customResource *v1beta2.Broker,
 		}
 	}
 
-	if validationCondition.Status != metav1.ConditionFalse {
-		condition, retry = reconciler.validateRequiredSecrets(client)
-		if condition != nil {
-			validationCondition = *condition
-		}
-	}
 	brokerstatus.SetStatusConditionWithGeneration(customResource, validationCondition)
 
 	return validationCondition.Status != metav1.ConditionFalse, retry
@@ -2051,36 +1881,6 @@ func validateEnvVarsForBroker(customResource *v1beta2.Broker) (*metav1.Condition
 			Reason:  v1beta2.ValidConditionInvalidInternalVarUsage,
 			Message: fmt.Sprintf("Don't use valueFrom on env vars that the operator can mutate: %v. Instead use a different var and refernece it in its value field.", invalidVars),
 		}, false
-	}
-	return nil, false
-}
-
-func (reconciler *BrokerReconcilerImpl) validateRequiredSecrets(client rtclient.Client) (*metav1.Condition, bool) {
-	retry := true
-	if _, err := common.GetOperatorClientCertSecret(client); err != nil {
-		return &metav1.Condition{
-			Type:    v1beta2.ValidConditionType,
-			Status:  metav1.ConditionFalse,
-			Reason:  v1beta2.ValidConditionMissingResourcesReason,
-			Message: fmt.Sprintf("operator failed to locate necessary operator client certificate secret, %v", err),
-		}, retry
-	}
-	if _, err := common.GetOperatorCASecret(client); err != nil {
-		return &metav1.Condition{
-			Type:    v1beta2.ValidConditionType,
-			Status:  metav1.ConditionFalse,
-			Reason:  v1beta2.ValidConditionMissingResourcesReason,
-			Message: fmt.Sprintf("operator failed to locate necessary operator ca secret, %v", err),
-		}, retry
-	}
-	operandCertSecretName := common.GetOperandCertSecretName(reconciler.customResource, client)
-	if _, err := common.GetNamespacedSecret(client, operandCertSecretName, reconciler.customResource.Namespace); err != nil {
-		return &metav1.Condition{
-			Type:    v1beta2.ValidConditionType,
-			Status:  metav1.ConditionFalse,
-			Reason:  v1beta2.ValidConditionMissingResourcesReason,
-			Message: fmt.Sprintf("operator failed to locate necessary operand cert secret, %v", err),
-		}, retry
 	}
 	return nil, false
 }

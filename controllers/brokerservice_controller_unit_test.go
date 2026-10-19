@@ -709,7 +709,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		Expect(cond.Reason).To(Equal(v1beta2.AppsProvisionedConditionSyncedReason))
 	})
 
-	It("prometheus override secret", Label(unitLabel), func() {
+	It("prometheus control-plane secret", Label(unitLabel), func() {
 		scheme := runtime.NewScheme()
 		_ = v1beta2.AddToScheme(scheme)
 		_ = networkingv1.AddToScheme(scheme)
@@ -774,12 +774,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		_, err := r.Reconcile(context.TODO(), req)
 		Expect(err).NotTo(HaveOccurred())
 
-		overrideSecretName := svcName + "-control-plane-override"
-		overrideSecret := &corev1.Secret{}
-		err = cl.Get(context.TODO(), types.NamespacedName{Name: overrideSecretName, Namespace: ns}, overrideSecret)
-		Expect(err).NotTo(HaveOccurred(), "control-plane-override secret should exist")
-
-		prometheusYaml, ok := overrideSecret.Data[PrometheusConfigFileName]
+		prometheusYaml, ok := controlPlaneData(cl, svcName, ns)[PrometheusConfigFileName]
 		Expect(ok).To(BeTrue(), "should have prometheus key")
 		Expect(prometheusYaml).NotTo(BeEmpty())
 
@@ -792,7 +787,7 @@ var _ = Describe("brokerservice controller unit", func() {
 		Expect(prometheusConfig).To(ContainSubstring("DeliveringCount"))
 	})
 
-	It("prometheus override no apps", Label(unitLabel), func() {
+	It("prometheus control-plane secret no apps", Label(unitLabel), func() {
 		scheme := runtime.NewScheme()
 		_ = v1beta2.AddToScheme(scheme)
 		_ = networkingv1.AddToScheme(scheme)
@@ -835,17 +830,79 @@ var _ = Describe("brokerservice controller unit", func() {
 		_, err := r.Reconcile(context.TODO(), req)
 		Expect(err).NotTo(HaveOccurred())
 
-		overrideSecretName := svcName + "-control-plane-override"
-		overrideSecret := &corev1.Secret{}
-		err = cl.Get(context.TODO(), types.NamespacedName{Name: overrideSecretName, Namespace: ns}, overrideSecret)
-		Expect(err).NotTo(HaveOccurred(), "control-plane-override secret should exist even without apps")
-
-		prometheusYaml, ok := overrideSecret.Data[PrometheusConfigFileName]
+		prometheusYaml, ok := controlPlaneData(cl, svcName, ns)[PrometheusConfigFileName]
 		Expect(ok).To(BeTrue(), "should have prometheus key")
 		Expect(prometheusYaml).NotTo(BeEmpty())
 
 		prometheusConfig := string(prometheusYaml)
 		Expect(prometheusConfig).To(ContainSubstring("component=addresses,address=*,subcomponent=queues"))
+	})
+
+	It("broker runs the control plane it is given", Label(unitLabel), func() {
+		scheme := runtime.NewScheme()
+		_ = v1beta2.AddToScheme(scheme)
+		_ = networkingv1.AddToScheme(scheme)
+		_ = corev1.AddToScheme(scheme)
+
+		ns := "default"
+		svcName := "my-service"
+
+		common.SetOperatorCASecretName("op_ca")
+		DeferCleanup(common.UnsetOperatorCASecretName)
+
+		common.SetOperatorNameSpace(ns)
+		DeferCleanup(common.UnsetOperatorNameSpace)
+
+		namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+		oc := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "op_ca", Namespace: ns},
+			Data:       map[string][]byte{"ca.pem": []byte("bla")},
+		}
+		svc := &v1beta2.BrokerService{
+			ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
+			Spec: v1beta2.BrokerServiceSpec{
+				Image: StringToPtr("placeholder"),
+				Env:   []corev1.EnvVar{{Name: "JAVA_ARGS_APPEND", Value: "-Duser.flag=true"}},
+			},
+		}
+
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(namespace, oc, svc)...).
+			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
+				app := rawObj.(*v1beta2.BrokerApp)
+				if app.Status.Service != nil {
+					return []string{app.Status.Service.Key()}
+				}
+				return nil
+			}).Build()
+
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+
+		_, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		data := controlPlaneData(cl, svcName, ns)
+		for _, key := range []string{"_security.config", "login.config", "_jolokia.config", "_cert.pemcfg", PrometheusConfigFileName, "aa_restricted.json", "aa_rbac.json"} {
+			Expect(data).To(HaveKey(key))
+		}
+
+		brokerCr := &v1beta2.Broker{}
+		Expect(cl.Get(context.TODO(), req.NamespacedName, brokerCr)).To(Succeed())
+
+		Expect(brokerCr.Spec.ExtraMounts.Secrets).To(ContainElements(svcName+"-control-plane-bp", common.GetOperandCertSecretName(brokerCr, cl), "op_ca"))
+		Expect(brokerCr.Spec.LivenessProbe).NotTo(BeNil())
+		Expect(brokerCr.Spec.LivenessProbe.Exec.Command[2]).To(ContainSubstring("/jolokia/read/"))
+
+		env := brokerCr.Spec.Env
+		Expect(env[0].Name).To(Equal("POD_NAME"), "kubernetes only expands $(POD_NAME) when it is declared first")
+		javaArgs := env[len(env)-1]
+		Expect(javaArgs.Name).To(Equal("JAVA_ARGS_APPEND"))
+		Expect(javaArgs.Value).To(ContainSubstring("-javaagent:/opt/agents/jolokia.jar=host=$(POD_NAME),config=/amq/extra/secrets/" + svcName + "-control-plane-bp/_jolokia.config"))
+		Expect(javaArgs.Value).To(ContainSubstring("-javaagent:/opt/agents/prometheus.jar=$(POD_NAME):8888:"))
+		Expect(javaArgs.Value).To(HaveSuffix(" -Duser.flag=true"), "the user's own flags come last")
 	})
 
 	Context("valid condition", func() {
@@ -1623,3 +1680,10 @@ var _ = Describe("brokerservice controller unit", func() {
 		Expect(queueOwners([]v1beta2.BrokerApp{second, first}, logr.Discard())["SHARED"].OwnerApp).To(Equal("first"))
 	})
 })
+
+// controlPlaneData returns the control-plane config a service renders for its broker
+func controlPlaneData(cl client.Client, name, ns string) map[string][]byte {
+	secret := &corev1.Secret{}
+	Expect(cl.Get(context.TODO(), types.NamespacedName{Name: name + "-control-plane-bp", Namespace: ns}, secret)).To(Succeed())
+	return secret.Data
+}

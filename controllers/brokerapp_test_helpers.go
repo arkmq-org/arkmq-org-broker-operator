@@ -387,6 +387,17 @@ func WithCerts(objects ...client.Object) []client.Object {
 		}
 	}
 
+	// the trust bundle the operator ca secret holds, under a .pem key
+	addCA := func(namespace string) {
+		name := common.GetOperatorCASecretName()
+		if key := namespace + "/" + name; !existing[key] {
+			ca := NewCertSecret(name, namespace, "ca")
+			ca.Data = map[string][]byte{"ca.pem": ca.Data["tls.crt"]}
+			objects = append(objects, ca)
+			existing[key] = true
+		}
+	}
+
 	for _, obj := range objects {
 		switch res := obj.(type) {
 		case *v1beta2.BrokerApp:
@@ -400,8 +411,10 @@ func WithCerts(objects ...client.Object) []client.Object {
 			}
 			if operatorNs, err := common.GetOperatorNamespaceFromEnv(); err == nil {
 				add(common.GetOperatorCertSecretName(), operatorNs, "operator")
+				addCA(operatorNs)
 			}
 			add(common.GetOperatorCertSecretName(), res.Namespace, "operator")
+			addCA(res.Namespace)
 			add(res.Name+"-"+common.DefaultOperandCertSecretName, res.Namespace, res.Name)
 		}
 	}

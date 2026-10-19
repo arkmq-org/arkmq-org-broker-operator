@@ -169,38 +169,6 @@ var _ = Describe("PemCfgData", func() {
 	})
 })
 
-var _ = Describe("BrokerPrometheusConfigData", func() {
-	It("includes the SSL keyStore pointing to the pemcfg path", func() {
-		data := mustRender(BrokerPrometheus, BrokerPrometheusConfig{PemCfgPath: "/path/_cert.pemcfg", CATrustStorePath: "/ca/trust", BrokerName: "my-broker"})
-		Expect(data).To(ContainSubstring("filename: /path/_cert.pemcfg"))
-		Expect(data).To(ContainSubstring("type: PEMCFG"))
-	})
-
-	It("includes the trustStore pointing to the CA path", func() {
-		data := mustRender(BrokerPrometheus, BrokerPrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/amq/secrets/ca/ca.crt", BrokerName: "my-broker"})
-		Expect(data).To(ContainSubstring("filename: /amq/secrets/ca/ca.crt"))
-		Expect(data).To(ContainSubstring("type: PEMCA"))
-	})
-
-	It("includes the broker name in includeObjectNames", func() {
-		data := mustRender(BrokerPrometheus, BrokerPrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/ca", BrokerName: "my-broker"})
-		Expect(data).To(ContainSubstring(`broker="my-broker"`))
-	})
-
-	It("includes rules for TotalMessageCount, TotalMessagesAdded, and TotalMessagesAcknowledged", func() {
-		data := mustRender(BrokerPrometheus, BrokerPrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/ca", BrokerName: "my-broker"})
-		Expect(data).To(ContainSubstring("artemis_total_pending_message_count"))
-		Expect(data).To(ContainSubstring("artemis_total_consumed_message_count"))
-		Expect(data).To(ContainSubstring("artemis_total_produced_message_count"))
-	})
-
-	It("enables lowercase output names", func() {
-		data := mustRender(BrokerPrometheus, BrokerPrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/ca", BrokerName: "my-broker"})
-		Expect(data).To(ContainSubstring("lowercaseOutputName: true"))
-		Expect(data).To(ContainSubstring("lowercaseOutputLabelNames: true"))
-	})
-})
-
 var _ = Describe("ServicePrometheusConfigData", func() {
 	It("includes the SSL keyStore and trustStore", func() {
 		data := mustRenderServicePrometheus(ServicePrometheusConfig{PemCfgPath: "/path/_cert.pemcfg", CATrustStorePath: "/ca/trust", BrokerName: "svc"}, nil)

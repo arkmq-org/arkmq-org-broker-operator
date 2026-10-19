@@ -1,4 +1,4 @@
-{{- /* shared by broker_prometheus and service_prometheus */ -}}
+{{- /* the mTLS endpoint of the prometheus exporter */ -}}
 {{define "ssl_header"}}httpServer:
   authentication:
     plugin:
