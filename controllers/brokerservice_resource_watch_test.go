@@ -122,7 +122,7 @@ var _ = Describe("brokerservice resource watches", Label(unitLabel), func() {
 		_, err := r.Reconcile(context.TODO(), req)
 		Expect(err).NotTo(HaveOccurred())
 
-		overrideName := svcName + "-control-plane-override"
+		overrideName := svcName + "-control-plane" + common.BrokerPropsSuffix
 		secret := &corev1.Secret{}
 		err = cl.Get(context.TODO(), types.NamespacedName{Name: overrideName, Namespace: ns}, secret)
 		Expect(err).NotTo(HaveOccurred(), "control-plane-override secret should exist after first reconcile")
@@ -202,7 +202,7 @@ var _ = Describe("brokerservice resource watches", Label(unitLabel), func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			secret := &corev1.Secret{}
-			err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName + "-control-plane-override", Namespace: ns}, secret)
+			err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName + "-control-plane" + common.BrokerPropsSuffix, Namespace: ns}, secret)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(secret.Labels).To(HaveKeyWithValue(selectors.LabelBrokerService, svcName),
 				"control-plane-override secret must carry the broker service label for watch filtering")
@@ -280,7 +280,7 @@ var _ = Describe("brokerservice resource watches", Label(unitLabel), func() {
 			Expect(appSecret.GetOwnerReferences()).To(BeEmpty())
 
 			overrideSecret := &corev1.Secret{}
-			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: svcName + "-control-plane-override", Namespace: ns}, overrideSecret)).To(Succeed())
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: svcName + "-control-plane" + common.BrokerPropsSuffix, Namespace: ns}, overrideSecret)).To(Succeed())
 			Expect(overrideSecret.GetOwnerReferences()).To(BeEmpty())
 
 			brokerCR := &v1beta2.Broker{}
