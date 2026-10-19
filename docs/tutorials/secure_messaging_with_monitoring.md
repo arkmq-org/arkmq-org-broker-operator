@@ -176,8 +176,8 @@ authentication realms.
 
 **Control plane realm (Jolokia / Prometheus endpoint)**
 
-Configured automatically by the operator for all `Broker` and `BrokerService`
-CRs. The operator reads the actual CN values from the certificate secrets it
+Configured automatically by the operator for `BrokerService` CRs, which render
+it into a control-plane secret mounted by the `Broker` they own. The operator reads the actual CN values from the certificate secrets it
 discovers in the namespace and generates the Jolokia agent config and Prometheus
 exporter config accordingly — you do not need to specify CN values manually.
 In this tutorial:
@@ -187,8 +187,7 @@ In this tutorial:
 You can use different CN values; the operator will extract them from your actual
 certificates. For `BrokerService`, the operator additionally generates per-queue
 Prometheus metrics for every address declared by bound `BrokerApp`s
-automatically via a control-plane-override secret. That secret also gives each
-bound app an identity in this realm, so an app can scrape the metrics of its own
+automatically, in that same secret. It also gives each bound app an identity in this realm, so an app can scrape the metrics of its own
 queues with its app certificate, and sees only those.
 
 **Messaging realm (AMQPS acceptor)**

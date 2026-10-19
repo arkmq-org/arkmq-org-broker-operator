@@ -106,7 +106,7 @@ var _ = Describe("Common Test", func() {
 		It("should return CR-specific secret when it exists", func() {
 			crSpecificSecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      crName + "-control-plane-override",
+					Name:      crName + "-test-secret",
 					Namespace: namespace,
 				},
 				Data: map[string][]byte{
@@ -116,17 +116,17 @@ var _ = Describe("Common Test", func() {
 
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(crSpecificSecret).Build()
 
-			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient, logr.Discard())
+			secret, err := ResolveSecret(crName, namespace, "test-secret", fakeClient, logr.Discard())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(secret).NotTo(BeNil())
-			Expect(secret.Name).To(Equal(crName + "-control-plane-override"))
+			Expect(secret.Name).To(Equal(crName + "-test-secret"))
 			Expect(secret.Data["key"]).To(Equal([]byte("cr-specific-value")))
 		})
 
 		It("should fallback to shared secret when CR-specific doesn't exist", func() {
 			sharedSecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "control-plane-override",
+					Name:      "test-secret",
 					Namespace: namespace,
 				},
 				Data: map[string][]byte{
@@ -136,17 +136,17 @@ var _ = Describe("Common Test", func() {
 
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sharedSecret).Build()
 
-			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient, logr.Discard())
+			secret, err := ResolveSecret(crName, namespace, "test-secret", fakeClient, logr.Discard())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(secret).NotTo(BeNil())
-			Expect(secret.Name).To(Equal("control-plane-override"))
+			Expect(secret.Name).To(Equal("test-secret"))
 			Expect(secret.Data["key"]).To(Equal([]byte("shared-value")))
 		})
 
 		It("should return nil when no secret exists", func() {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient, logr.Discard())
+			secret, err := ResolveSecret(crName, namespace, "test-secret", fakeClient, logr.Discard())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(secret).To(BeNil())
 		})
@@ -154,7 +154,7 @@ var _ = Describe("Common Test", func() {
 		It("should prefer CR-specific over shared when both exist", func() {
 			crSpecificSecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      crName + "-control-plane-override",
+					Name:      crName + "-test-secret",
 					Namespace: namespace,
 				},
 				Data: map[string][]byte{
@@ -164,7 +164,7 @@ var _ = Describe("Common Test", func() {
 
 			sharedSecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "control-plane-override",
+					Name:      "test-secret",
 					Namespace: namespace,
 				},
 				Data: map[string][]byte{
@@ -174,10 +174,10 @@ var _ = Describe("Common Test", func() {
 
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(crSpecificSecret, sharedSecret).Build()
 
-			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient, logr.Discard())
+			secret, err := ResolveSecret(crName, namespace, "test-secret", fakeClient, logr.Discard())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(secret).NotTo(BeNil())
-			Expect(secret.Name).To(Equal(crName + "-control-plane-override"))
+			Expect(secret.Name).To(Equal(crName + "-test-secret"))
 			Expect(secret.Data["key"]).To(Equal([]byte("cr-specific-value")))
 		})
 
@@ -186,7 +186,7 @@ var _ = Describe("Common Test", func() {
 				Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
 			}
 
-			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient, logr.Discard())
+			secret, err := ResolveSecret(crName, namespace, "test-secret", fakeClient, logr.Discard())
 			Expect(err).To(HaveOccurred())
 			Expect(secret).To(BeNil())
 		})
