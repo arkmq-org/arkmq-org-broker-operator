@@ -77,6 +77,11 @@ const (
 	CertUsersKeySuffix              = "cert-users"
 	CertRolesKeySuffix              = "cert-roles"
 
+	// ClusterIssuerEnvVar names the ClusterIssuer the operator issues its
+	// certificates from. Unset, the operator issues none and every secret is the
+	// user's to provide.
+	ClusterIssuerEnvVar = "ARKMQ_ORG_BROKER_MANAGER_CLUSTER_ISSUER"
+
 	// Legacy naming convention (deprecated, for backward compatibility)
 	LegacyOperatorCertSecretName = "activemq-artemis-manager-cert"
 	LegacyOperatorCASecretName   = "activemq-artemis-manager-ca"
@@ -105,6 +110,25 @@ var isOpenshift *bool
 var isGatewayAPIAvailable *bool
 
 var operatorCertSecretName, operatorCASecretName, prometheusCertSecretName *string
+
+var clusterIssuerName *string
+
+// GetClusterIssuerName returns the ClusterIssuer to issue certificates from,
+// empty when the operator issues none.
+func GetClusterIssuerName() string {
+	if clusterIssuerName == nil {
+		clusterIssuerName = fromEnv(ClusterIssuerEnvVar, "")
+	}
+	return *clusterIssuerName
+}
+
+func SetClusterIssuerName(name string) {
+	clusterIssuerName = &name
+}
+
+func UnsetClusterIssuerName() {
+	clusterIssuerName = nil
+}
 
 // we may want to cache and require operator restart on rotation
 //var operatorCert *tls.Certificate
@@ -947,11 +971,7 @@ func GetPrometheusCertSecretName(cr *v1beta2.Broker, client rtclient.Client) str
 // hold a name and namespace rather than a Broker, such as the BrokerService
 // generating scrape wiring.
 func GetPrometheusCertSecretNameFor(name string, namespace string, client rtclient.Client) string {
-	// Determine the base secret name (from env or default)
-	if prometheusCertSecretName == nil {
-		prometheusCertSecretName = fromEnv("BASE_PROMETHEUS_CERT_SECRET_NAME", DefaultPrometheusCertSecretName)
-	}
-	baseSecretName := *prometheusCertSecretName
+	baseSecretName := GetPrometheusCertSecretBaseName()
 
 	secret, _ := ResolveSecret(name, namespace, baseSecretName, client)
 	if secret != nil {
@@ -960,6 +980,15 @@ func GetPrometheusCertSecretNameFor(name string, namespace string, client rtclie
 
 	// Fall back to shared secret (respects env override)
 	return baseSecretName
+}
+
+// GetPrometheusCertSecretBaseName is the prometheus cert secret name before any
+// CR prefix, from env or default.
+func GetPrometheusCertSecretBaseName() string {
+	if prometheusCertSecretName == nil {
+		prometheusCertSecretName = fromEnv("BASE_PROMETHEUS_CERT_SECRET_NAME", DefaultPrometheusCertSecretName)
+	}
+	return *prometheusCertSecretName
 }
 
 // ResolveSecret looks for a secret with CR-specific name first, then falls back to shared name.
@@ -1170,7 +1199,12 @@ func OperatorHasCertAndTrustBundle(client rtclient.Client) bool {
 				ok = true
 			}
 		}
-		operatorHasCertAndTrustBundle = &ok
+		// only a positive answer is final: an issued operator cert appears after
+		// the operator started
+		if ok {
+			operatorHasCertAndTrustBundle = &ok
+		}
+		return ok
 	}
 	return *operatorHasCertAndTrustBundle
 }

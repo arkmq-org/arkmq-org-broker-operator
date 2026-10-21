@@ -162,7 +162,7 @@ test-mk test-mk-v: TEST_ARGS += -test.timeout=120m -ginkgo.label-filter='!do'
 test-mk test-mk-v: TEST_VARS = USE_EXISTING_CLUSTER=true RECONCILE_RESYNC_PERIOD=5s
 
 ## PR-scoped E2E: broker-service and control plane (excludes verySlow)
-test-mk-pr test-mk-pr-v: TEST_ARGS += -test.timeout=50m -ginkgo.label-filter='!do && !verySlow' -ginkgo.focus='broker-service|restricted rbac'
+test-mk-pr test-mk-pr-v: TEST_ARGS += -test.timeout=50m -ginkgo.label-filter='!do && !verySlow' -ginkgo.focus='broker-service|restricted rbac|pki issuer mode'
 test-mk-pr test-mk-pr-v: TEST_VARS = USE_EXISTING_CLUSTER=true RECONCILE_RESYNC_PERIOD=5s
 
 ## Run tests against minikube with deployed operator(do)
