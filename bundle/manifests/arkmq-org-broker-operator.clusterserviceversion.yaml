@@ -7155,7 +7155,6 @@ spec:
           - events
           - persistentvolumeclaims
           - routes
-          - secrets
           - serviceaccounts
           - services
           verbs:
@@ -7177,6 +7176,7 @@ spec:
           - ""
           resources:
           - pods
+          - secrets
           verbs:
           - create
           - delete
@@ -7289,6 +7289,19 @@ spec:
           - get
           - patch
           - update
+        - apiGroups:
+          - cert-manager.io
+          resources:
+          - certificaterequests
+          verbs:
+          - list
+        - apiGroups:
+          - cert-manager.io
+          resources:
+          - certificates
+          verbs:
+          - create
+          - get
         - apiGroups:
           - gateway.networking.k8s.io
           resources:

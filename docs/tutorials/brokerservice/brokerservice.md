@@ -76,7 +76,7 @@ Role and queue configuration come from environment variables.
 | delivery-service-app | `delivery-service` | `delivery` | `ORDERS.SHIPPED` | `ORDERS.DELIVERED` |
 | camel-jms-master-sink *(optional)* | `master-sink` | `sink` | `ORDERS.DELIVERED` | — |
 
-The Kubernetes Deployment name is the full service name (e.g. `order-processor-app`). The BrokerApp identity drops the `-app` suffix (e.g. `order-processor`) so that the operator-derived certificate secret name (`{brokerAppName}-app-cert`) matches the certificate created for the deployment.
+The Kubernetes Deployment name is the full service name (e.g. `order-processor-app`). The BrokerApp identity drops the `-app` suffix (e.g. `order-processor`) so that the certificate secret the Operator issues for it (`{brokerAppName}-app-cert`) carries the deployment's name.
 
 ### Prerequisites
 
@@ -102,22 +102,22 @@ minikube start \
 minikube addons enable ingress --profile brokerservice-monitoring
 ```
 ```shell markdown_runner
-* [brokerservice-monitoring] minikube v1.38.1 on Fedora 44
-* Using the docker driver based on existing profile
-* Starting "brokerservice-monitoring" primary control-plane node in "brokerservice-monitoring" cluster
-* Pulling base image v0.0.50 ...
-* Verifying Kubernetes components...
-  - Using image gcr.io/k8s-minikube/storage-provisioner:v5
-* Enabled addons: default-storageclass, storage-provisioner
-* Done! kubectl is now configured to use "brokerservice-monitoring" cluster and "default" namespace by default
-* ingress is an addon maintained by Kubernetes. For any concerns contact minikube on GitHub.
-You can view the list of minikube maintainers at: https://github.com/kubernetes/minikube/blob/master/OWNERS
-  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.7
-  - Using image registry.k8s.io/ingress-nginx/controller:v1.14.3
-  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.7
-* Verifying ingress addon...
-* The 'ingress' addon is enabled
-! You cannot change the memory size for an existing minikube cluster. Please first delete the cluster.
+* [brokerservice-monitoring] minikube v1.37.0 sur Fedora 44
+  - MINIKUBE_ROOTLESS=true
+* Choix automatique du pilote kvm2. Autres choix: podman, qemu2, ssh
+* Démarrage du nœud "brokerservice-monitoring" primary control-plane dans le cluster "brokerservice-monitoring"
+* Configuration de bridge CNI (Container Networking Interface)...
+* Vérification des composants Kubernetes...
+  - Utilisation de l'image gcr.io/k8s-minikube/storage-provisioner:v5
+* Modules activés: storage-provisioner, default-storageclass
+* Terminé ! kubectl est maintenant configuré pour utiliser "brokerservice-monitoring" cluster et espace de noms "default" par défaut.
+* ingress est un addon maintenu par Kubernetes. Pour toute question, contactez minikube sur GitHub.
+Vous pouvez consulter la liste des mainteneurs de minikube sur : https://github.com/kubernetes/minikube/blob/master/OWNERS
+  - Utilisation de l'image registry.k8s.io/ingress-nginx/controller:v1.13.2
+  - Utilisation de l'image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.2
+  - Utilisation de l'image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.2
+* Vérification du module ingress...
+* Le module 'ingress' est activé
 ```
 
 ### Build the Camel Pipeline Image
@@ -160,79 +160,79 @@ fi
 ```shell markdown_runner
 [1/2] STEP 1/8: FROM registry.access.redhat.com/ubi9/openjdk-21 AS builder
 [1/2] STEP 2/8: USER root
---> c89f634500be
+--> 0054ab9afd6c
 [1/2] STEP 3/8: WORKDIR /build
---> 66241d4bb930
+--> 788f7352e0a9
 [1/2] STEP 4/8: RUN microdnf install -y maven --setopt=install_weak_deps=0 && microdnf clean all
 Downloading metadata...
 Downloading metadata...
 Downloading metadata...
 Nothing to do.
 Complete.
---> 6d08da2ea51f
+--> db814f569be1
 [1/2] STEP 5/8: COPY pom.xml pom.xml
---> 6647bed66d7a
+--> fdb176159be1
 [1/2] STEP 6/8: RUN mvn dependency:resolve-plugins dependency:resolve -q
---> cb9bd38cf145
+--> 345cfd933d84
 [1/2] STEP 7/8: COPY src/ src/
---> b21e4b2e005b
+--> 449c943639a1
 [1/2] STEP 8/8: RUN mvn package -DskipTests -q
---> 258a3ee45a1f
+--> 335ad3375eb3
 [2/2] STEP 1/11: FROM registry.access.redhat.com/ubi9/openjdk-21-runtime
 [2/2] STEP 2/11: ENV LANGUAGE='en_US:en'
---> 06e713251d83
+--> ae38470d56e9
 [2/2] STEP 3/11: COPY --chown=185 --from=builder /build/target/quarkus-app/lib/       /deployments/lib/
---> f302c522e050
+--> 2bcccd9d4c9a
 [2/2] STEP 4/11: COPY --chown=185 --from=builder /build/target/quarkus-app/*.jar       /deployments/
---> d01ec5ab9c3c
+--> 07fcbe197273
 [2/2] STEP 5/11: COPY --chown=185 --from=builder /build/target/quarkus-app/app/        /deployments/app/
---> 70ac21b2361a
+--> f29a99a84f47
 [2/2] STEP 6/11: COPY --chown=185 --from=builder /build/target/quarkus-app/quarkus/    /deployments/quarkus/
---> af54ee6b0756
+--> b49c07e4c435
 [2/2] STEP 7/11: EXPOSE 8080
---> a04a566b01ca
+--> 3a3954bd8479
 [2/2] STEP 8/11: USER 185
---> 321b10d16aaf
+--> c2cef93b8b2f
 [2/2] STEP 9/11: ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=127.0.0.1 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -Xbootclasspath/a:/deployments/lib/main/de.dentrassi.crypto.pem-keystore-3.0.0.jar:/deployments/lib/main/com.hierynomus.asn-one-0.6.0.jar:/deployments/lib/main/org.slf4j.slf4j-api-2.0.18.jar -Djava.security.properties=/app/tls/pem/java.security"
---> 4d560376f072
+--> 6a6c2f11f497
 [2/2] STEP 10/11: ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
---> 7ace9f3b0b74
+--> 8b2c4dead4d4
 [2/2] STEP 11/11: ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
 [2/2] COMMIT camel-jms-app:latest
---> ebd8492d032d
+--> 0ecff75a34bf
 Successfully tagged localhost/camel-jms-app:latest
-ebd8492d032d3e6c4cd41829e55fa4b775ee0769704bcbe804617022bd6961f2
+0ecff75a34bf4cb8f7847b8b32ab6427c30c3d18a1958635dc30b1b145bf58b6
 Trying to pull registry.access.redhat.com/ubi9/openjdk-21:latest...
 Getting image source signatures
 Checking if image destination supports signatures
-Copying blob sha256:207da760819c8247a463fb2268005066114a491e5b3e296fcd0b7a79400b2f1e
-Copying blob sha256:eb6cbddf5f403250ac934b73c78eb43e655a49768a13d13e279ba79d950d145f
-Copying config sha256:a68923bc3ba9d685d18e3c6df60a529aa88b526573df468061c73fb9defc994c
+Copying blob sha256:ccad92b3a9911a39a7e4b4268308639619b6b61bc81fbaac4a4f04fd657219de
+Copying blob sha256:998911403319a2ec6ccead1e196792512027dab1159cf179c4f1eec5148ebc2d
+Copying config sha256:96f35b3fa1e8f216f1e530aac463712a60ce18511aa72bb6e9e59fc8eb6e0633
 Writing manifest to image destination
 Storing signatures
 
-(microdnf:2): librhsm-WARNING **: 11:46:19.570: Found 0 entitlement certificates
+(microdnf:2): librhsm-WARNING **: 14:11:50.481: Found 0 entitlement certificates
 
-(microdnf:2): librhsm-WARNING **: 11:46:19.571: Found 0 entitlement certificates
+(microdnf:2): librhsm-WARNING **: 14:11:50.482: Found 0 entitlement certificates
 
-(microdnf:1): librhsm-WARNING **: 11:46:20.562: Found 0 entitlement certificates
+(microdnf:1): librhsm-WARNING **: 14:11:51.522: Found 0 entitlement certificates
 
-(microdnf:1): librhsm-WARNING **: 11:46:20.563: Found 0 entitlement certificates
+(microdnf:1): librhsm-WARNING **: 14:11:51.523: Found 0 entitlement certificates
 Trying to pull registry.access.redhat.com/ubi9/openjdk-21-runtime:latest...
 Getting image source signatures
 Checking if image destination supports signatures
-Copying blob sha256:6e30b8bbcac0f26e0bed25820e66283110ca62b30a9c55bf6d441c49c6c1d3ca
-Copying blob sha256:207da760819c8247a463fb2268005066114a491e5b3e296fcd0b7a79400b2f1e
-Copying config sha256:42aa29730f7e14815bf8b62c19bf107a45e5b1e08c1e0d32d68c97fd0e0310e8
+Copying blob sha256:8e8c13be14e069448b9d28411f6b8d061fef17ec546e6d70e4c6c5e87b0fbc75
+Copying blob sha256:ccad92b3a9911a39a7e4b4268308639619b6b61bc81fbaac4a4f04fd657219de
+Copying config sha256:45708d78c4f2940bc818a30d6325fc34f07684751db2aa9be67f64d1962606d2
 Writing manifest to image destination
 Storing signatures
-Copying blob sha256:15bd75a4e0d9c6eb2dca6324dca83e1c68d5eadc93d821b6201290e0f244e42b
-Copying blob sha256:b6acd93080909baef2f968dde1481778fa832ac6750964894e209f206c0e76a0
-Copying blob sha256:5ed4b882a59c46831a9645f5fe06efe0c6fa04cad8dccd890b9067b3892af095
-Copying blob sha256:5bd296c84f61e94ee5a7073bb1634ba1aea98a5229a50738eb3253a3e6182166
-Copying blob sha256:a34855efb70bf61a81d8c1e02485ded51be18c8a518455f1e89c9f167b1c0e9a
-Copying blob sha256:b346bc1ef3f6fe2b4293ec9985372b2d00e6bd1804a178cc5c47ec034dec249d
-Copying config sha256:ebd8492d032d3e6c4cd41829e55fa4b775ee0769704bcbe804617022bd6961f2
+Copying blob sha256:8c220325c6d2ad9aecb227cf6b87ac65850c42f4eefbad4f2761a9a20dde511e
+Copying blob sha256:7d86d5a02a18c547fa6bbe83ecb2624b9523d7559c0c0cc0d478733e4bb9fb2f
+Copying blob sha256:07975ea94b889e7a5305488b0e37a22c188408981d45e6cf446f3cf12c5599dc
+Copying blob sha256:db0ffeefb80839b1cf5f14dd3e9679010eab3111e05ce9ffc03549ac1f6012a4
+Copying blob sha256:fc98f9ad449f4e69afe1ab4aaced20dd035d266cabba7fed41d93d164f64e82f
+Copying blob sha256:c41e37caccf520912c5088066393bdcf212ae400e1c0f7856c10b8306af25a09
+Copying config sha256:0ecff75a34bf4cb8f7847b8b32ab6427c30c3d18a1958635dc30b1b145bf58b6
 Writing manifest to image destination
 ```
 
@@ -354,7 +354,7 @@ helm upgrade trust-manager jetstack/trust-manager --install --namespace cert-man
 ```shell markdown_runner
 Release "trust-manager" does not exist. Installing it now.
 NAME: trust-manager
-LAST DEPLOYED: Fri Oct  2 13:47:36 2026
+LAST DEPLOYED: Wed Oct 14 16:13:07 2026
 NAMESPACE: cert-manager
 STATUS: deployed
 REVISION: 1
@@ -376,7 +376,7 @@ with creating your first bundle, check out the documentation on the
 cert-manager website:
 
 https://cert-manager.io/docs/projects/trust-manager/
-I1002 13:47:37.170662 3075946 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:13:07.744412  357409 warnings.go:107] "Warning: unrecognized format \"int64\""
 ```
 
 ### Install kube-prometheus-stack
@@ -413,7 +413,7 @@ helm upgrade -i prometheus prometheus-community/kube-prometheus-stack \
 ```shell markdown_runner
 Release "prometheus" does not exist. Installing it now.
 NAME: prometheus
-LAST DEPLOYED: Fri Oct  2 13:47:50 2026
+LAST DEPLOYED: Wed Oct 14 16:13:20 2026
 NAMESPACE: service-app-project
 STATUS: deployed
 REVISION: 1
@@ -437,25 +437,25 @@ Get your grafana admin user password by running:
 
 
 Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
-I1002 13:47:48.013073 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:47:48.013091 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:47:48.214676 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:47:48.214695 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:47:48.270173 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:47:48.270187 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:47:48.421512 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:47:48.713070 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:47:48.713087 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:47:48.958953 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:47:48.958969 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:47:49.003650 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:47:49.251890 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:47:49.251903 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:47:49.370312 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:47:49.603452 3076565 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:47:49.603470 3076565 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:47:59.351066 3076565 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
-I1002 13:47:59.351067 3076565 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
+I1014 16:13:18.414761  357629 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:13:18.414778  357629 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:13:18.630454  357629 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:13:18.630470  357629 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:13:18.681472  357629 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:13:18.681487  357629 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:13:18.761467  357629 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:13:19.030352  357629 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:13:19.030365  357629 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:13:19.272370  357629 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:13:19.272384  357629 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:13:19.309424  357629 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:13:19.525257  357629 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:13:19.525272  357629 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:13:19.640538  357629 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:13:19.884120  357629 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:13:19.884136  357629 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:13:28.015821  357629 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
+I1014 16:13:28.018790  357629 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
 ```
 
 Wait for all monitoring components:
@@ -509,6 +509,8 @@ deployment.apps/arkmq-org-broker-controller-manager condition met
 ---
 
 ## 3. Configure Certificates
+
+The Operator issues every certificate the pipeline needs, its own included, from a cert-manager `ClusterIssuer` it is given at install time. What you provide is the CA behind that issuer, and its certificate distributed by trust-manager so that every component trusts the others.
 
 ### Create Issuers and Root Certificate
 
@@ -582,7 +584,9 @@ kubectl wait clusterissuer broker-ca-issuer --for=condition=Ready --timeout=300s
 clusterissuer.cert-manager.io/broker-ca-issuer condition met
 ```
 
-### Create Operator Certificate
+### Distribute the CA
+
+trust-manager copies the root certificate into the `arkmq-org-broker-manager-ca` secret of every namespace. The Operator, the broker and the applications all validate their peers against it.
 
 ```bash {"stage":"deploy_certs", "label":"create ca bundle", "runtime":"bash"}
 kubectl apply -f - <<EOF
@@ -612,97 +616,25 @@ kubectl wait bundle arkmq-org-broker-manager-ca -n cert-manager --for=condition=
 bundle.trust.cert-manager.io/arkmq-org-broker-manager-ca condition met
 ```
 
-```bash {"stage":"deploy_certs", "label":"create operator cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: arkmq-org-broker-manager-cert
-  namespace: service-app-project
-spec:
-  secretName: arkmq-org-broker-manager-cert
-  commonName: arkmq-org-broker-operator
-  issuerRef:
-    name: broker-ca-issuer
-    kind: ClusterIssuer
-EOF
-```
-```shell markdown_runner
-certificate.cert-manager.io/arkmq-org-broker-manager-cert created
-```
+### Point the Operator at the ClusterIssuer
 
-```bash {"stage":"deploy_certs", "label":"wait for operator cert", "runtime":"bash"}
-kubectl wait certificate arkmq-org-broker-manager-cert -n service-app-project --for=condition=Ready --timeout=300s
+`ARKMQ_ORG_BROKER_MANAGER_CLUSTER_ISSUER` names the `ClusterIssuer` the Operator issues from. Without it the Operator issues nothing and expects every certificate to exist already.
+
+```bash {"stage":"deploy_certs", "label":"set the cluster issuer", "runtime":"bash"}
+kubectl set env deployment/arkmq-org-broker-controller-manager ARKMQ_ORG_BROKER_MANAGER_CLUSTER_ISSUER=broker-ca-issuer
+kubectl rollout status deployment/arkmq-org-broker-controller-manager --timeout=240s
 ```
 ```shell markdown_runner
-certificate.cert-manager.io/arkmq-org-broker-manager-cert condition met
+deployment.apps/arkmq-org-broker-controller-manager env updated
+Waiting for deployment spec update to be observed...
+Waiting for deployment "arkmq-org-broker-controller-manager" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "arkmq-org-broker-controller-manager" rollout to finish: 0 of 1 updated replicas are available...
+deployment "arkmq-org-broker-controller-manager" successfully rolled out
 ```
 
 ---
 
-### Create Prometheus Client Certificate
-
-Create the Prometheus client certificate. The Operator uses `prometheus-cert` as the default Prometheus client certificate secret name; it uses the certificate's Common Name to grant Prometheus access to the broker metrics endpoint, and references it from the scrape configuration it generates for the `BrokerService`. Issue it before deploying the `BrokerService`: the Operator generates that configuration while reconciling the service.
-
-```bash {"stage":"deploy_certs", "label":"create prometheus cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: prometheus-cert
-  namespace: service-app-project
-spec:
-  secretName: prometheus-cert
-  commonName: prometheus
-  issuerRef:
-    name: broker-ca-issuer
-    kind: ClusterIssuer
-EOF
-```
-```shell markdown_runner
-certificate.cert-manager.io/prometheus-cert created
-```
-
-```bash {"stage":"deploy_certs", "label":"wait for prometheus cert", "runtime":"bash"}
-kubectl wait certificate prometheus-cert -n service-app-project --for=condition=Ready --timeout=300s
-```
-```shell markdown_runner
-certificate.cert-manager.io/prometheus-cert condition met
-```
-
 ## 4. Deploy BrokerService and BrokerApps
-
-### BrokerService Certificate
-
-```bash {"stage":"deploy_service", "label":"create broker cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: messaging-service-broker-cert
-  namespace: service-app-project
-spec:
-  secretName: messaging-service-broker-cert
-  commonName: messaging-service
-  dnsNames:
-  - messaging-service
-  - messaging-service.service-app-project.svc.cluster.local
-  - '*.messaging-service-hdls-svc.service-app-project.svc.cluster.local'
-  issuerRef:
-    name: broker-ca-issuer
-    kind: ClusterIssuer
-EOF
-```
-```shell markdown_runner
-certificate.cert-manager.io/messaging-service-broker-cert created
-```
-
-```bash {"stage":"deploy_service", "label":"wait for broker cert", "runtime":"bash"}
-kubectl wait certificate messaging-service-broker-cert -n service-app-project --for=condition=Ready --timeout=300s
-```
-```shell markdown_runner
-certificate.cert-manager.io/messaging-service-broker-cert condition met
-```
 
 ### Deploy BrokerService
 
@@ -737,6 +669,23 @@ kubectl wait BrokerService messaging-service -n service-app-project --for=condit
 brokerservice.broker.arkmq.org/messaging-service condition met
 ```
 
+### Inspect the Issued Certificates
+
+Before creating the broker, the Operator issued its own client certificate, the broker's, and the one Prometheus presents to scrape it:
+
+```bash {"stage":"deploy_service", "label":"show issued certificates", "runtime":"bash"}
+kubectl get certificate -n service-app-project \
+  -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,OWNER:.metadata.ownerReferences[0].kind'
+```
+```shell markdown_runner
+NAME                                READY   OWNER
+arkmq-org-broker-manager-cert       True    <none>
+messaging-service-broker-cert       True    BrokerService
+messaging-service-prometheus-cert   True    BrokerService
+```
+
+Each common name is a random UUID: the Operator reads it back from the secret to authorise its holder, so no other certificate signed by the same CA can claim that identity by name. The broker and Prometheus certificates belong to the `BrokerService` and are deleted with it. The Operator's own is shared by every service it manages and stays.
+
 ### Deploy BrokerApps
 
 Each `BrokerApp` declares exactly the permissions its pipeline stage needs. The ownership chain is:
@@ -748,37 +697,11 @@ order-generator  →  ORDERS.NEW  →  order-processor  →  ORDERS.PROCESSED  �
 
 Each app only owns the addresses it **produces**. Downstream consumers reference upstream producers using `appName` + `appNamespace`.
 
+The Operator issues each `BrokerApp` its `{brokerAppName}-app-cert` secret, in the app's namespace, before reporting it `Ready`.
+
 #### order-generator (Traffic Generator)
 
 The generator has a single capability: produce into `ORDERS.NEW`.
-
-```bash {"stage":"deploy_app", "label":"create order-generator cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: order-generator-app-cert
-  namespace: service-app-project
-spec:
-  secretName: order-generator-app-cert
-  commonName: order-generator
-  issuerRef:
-    name: broker-ca-issuer
-    kind: ClusterIssuer
-EOF
-```
-```shell markdown_runner
-certificate.cert-manager.io/order-generator-app-cert created
-```
-
-```bash {"stage":"deploy_app", "label":"wait for order-generator cert", "runtime":"bash"}
-kubectl wait certificate order-generator-app-cert -n service-app-project --for=condition=Ready --timeout=300s
-kubectl wait secret order-generator-app-cert -n service-app-project --for=create --timeout=60s
-```
-```shell markdown_runner
-certificate.cert-manager.io/order-generator-app-cert condition met
-secret/order-generator-app-cert condition met
-```
 
 ```bash {"stage":"deploy_app", "label":"deploy order-generator brokerapp", "runtime":"bash"}
 kubectl apply -f - <<EOF
@@ -810,34 +733,6 @@ brokerapp.broker.arkmq.org/order-generator condition met
 ```
 
 #### order-processor-app (Order Processor)
-
-```bash {"stage":"deploy_app", "label":"create order-processor-app cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: order-processor-app-cert
-  namespace: service-app-project
-spec:
-  secretName: order-processor-app-cert
-  commonName: order-processor-app
-  issuerRef:
-    name: broker-ca-issuer
-    kind: ClusterIssuer
-EOF
-```
-```shell markdown_runner
-certificate.cert-manager.io/order-processor-app-cert created
-```
-
-```bash {"stage":"deploy_app", "label":"wait for order-processor-app cert", "runtime":"bash"}
-kubectl wait certificate order-processor-app-cert -n service-app-project --for=condition=Ready --timeout=300s
-kubectl wait secret order-processor-app-cert -n service-app-project --for=create --timeout=60s
-```
-```shell markdown_runner
-certificate.cert-manager.io/order-processor-app-cert condition met
-secret/order-processor-app-cert condition met
-```
 
 ```bash {"stage":"deploy_app", "label":"deploy order-processor-app brokerapp", "runtime":"bash"}
 kubectl apply -f - <<EOF
@@ -874,34 +769,6 @@ brokerapp.broker.arkmq.org/order-processor condition met
 
 #### shipping-service-app (Shipping Service)
 
-```bash {"stage":"deploy_app", "label":"create shipping-service-app cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: shipping-service-app-cert
-  namespace: service-app-project
-spec:
-  secretName: shipping-service-app-cert
-  commonName: shipping-service-app
-  issuerRef:
-    name: broker-ca-issuer
-    kind: ClusterIssuer
-EOF
-```
-```shell markdown_runner
-certificate.cert-manager.io/shipping-service-app-cert created
-```
-
-```bash {"stage":"deploy_app", "label":"wait for shipping-service-app cert", "runtime":"bash"}
-kubectl wait certificate shipping-service-app-cert -n service-app-project --for=condition=Ready --timeout=300s
-kubectl wait secret shipping-service-app-cert -n service-app-project --for=create --timeout=60s
-```
-```shell markdown_runner
-certificate.cert-manager.io/shipping-service-app-cert condition met
-secret/shipping-service-app-cert condition met
-```
-
 ```bash {"stage":"deploy_app", "label":"deploy shipping-service-app brokerapp", "runtime":"bash"}
 kubectl apply -f - <<EOF
 apiVersion: broker.arkmq.org/v1beta2
@@ -936,34 +803,6 @@ brokerapp.broker.arkmq.org/shipping-service condition met
 ```
 
 #### delivery-service-app (Delivery Service)
-
-```bash {"stage":"deploy_app", "label":"create delivery-service-app cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: delivery-service-app-cert
-  namespace: service-app-project
-spec:
-  secretName: delivery-service-app-cert
-  commonName: delivery-service-app
-  issuerRef:
-    name: broker-ca-issuer
-    kind: ClusterIssuer
-EOF
-```
-```shell markdown_runner
-certificate.cert-manager.io/delivery-service-app-cert created
-```
-
-```bash {"stage":"deploy_app", "label":"wait for delivery-service-app cert", "runtime":"bash"}
-kubectl wait certificate delivery-service-app-cert -n service-app-project --for=condition=Ready --timeout=300s
-kubectl wait secret delivery-service-app-cert -n service-app-project --for=create --timeout=60s
-```
-```shell markdown_runner
-certificate.cert-manager.io/delivery-service-app-cert condition met
-secret/delivery-service-app-cert condition met
-```
 
 ```bash {"stage":"deploy_app", "label":"deploy delivery-service-app brokerapp", "runtime":"bash"}
 kubectl apply -f - <<EOF
@@ -1031,10 +870,10 @@ Then confirm the secrets exist:
 kubectl get secret -n service-app-project | grep binding-secret
 ```
 ```shell markdown_runner
-delivery-service-binding-secret                                                       Opaque                                3      20s
-order-generator-binding-secret                                                        Opaque                                3      3m9s
-order-processor-binding-secret                                                        Opaque                                3      110s
-shipping-service-binding-secret                                                       Opaque                                3      90s
+delivery-service-binding-secret                                                       Opaque                                3      18s
+order-generator-binding-secret                                                        Opaque                                3      3m39s
+order-processor-binding-secret                                                        Opaque                                3      2m18s
+shipping-service-binding-secret                                                       Opaque                                3      119s
 ```
 
 You should see `order-generator-binding-secret`, `order-processor-binding-secret`, `shipping-service-binding-secret`, and `delivery-service-binding-secret` before proceeding to deploy the Camel applications.
@@ -1060,7 +899,7 @@ The main configuration variables are:
 
 Each Camel deployment needs two things for mTLS:
 
-- Its own **app certificate** (for example, `order-generator-app-cert`). cert-manager creates this certificate, and the Deployment mounts it at `/app/tls/client/`.
+- Its own **app certificate** (for example, `order-generator-app-cert`). The Operator issued it for the app's `BrokerApp`, and the Deployment mounts it at `/app/tls/client/`.
 - A **PEM keystore configuration** that tells the [dentrassi PEM keystore](https://github.com/ctron/pem-keystore) library where to find the certificate and private key.
 
 The PEM configuration is identical for all four applications because they all use the same filesystem paths:
@@ -1072,7 +911,7 @@ However, each Deployment mounts a different certificate Secret at that path. Thi
 
 ### PEM keystore configuration
 
-Create the shared PEM configuration Secret once. All Deployments reference this single Secret. The config contains only filesystem paths — the actual mTLS identity comes from each application's own cert-manager-issued certificate Secret:
+Create the shared PEM configuration Secret once. All Deployments reference this single Secret. The config contains only filesystem paths — the actual mTLS identity comes from each application's own Operator-issued certificate Secret:
 
 ```bash {"stage":"deploy_camel", "label":"create pemcfg secret", "runtime":"bash"}
 kubectl apply -f - <<EOF
@@ -1476,34 +1315,6 @@ deployment.apps/delivery-service-app condition met
 
 During the normal pipeline demonstration and the bottleneck/scale scenarios, keep this deployment at **0 replicas** so that `ORDERS.DELIVERED` depth remains visible in Grafana.
 
-```bash {"stage":"deploy_camel", "label":"create master-sink cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: master-sink-app-cert
-  namespace: service-app-project
-spec:
-  secretName: master-sink-app-cert
-  commonName: master-sink
-  issuerRef:
-    name: broker-ca-issuer
-    kind: ClusterIssuer
-EOF
-```
-```shell markdown_runner
-certificate.cert-manager.io/master-sink-app-cert created
-```
-
-```bash {"stage":"deploy_camel", "label":"wait for master-sink cert", "runtime":"bash"}
-kubectl wait certificate master-sink-app-cert -n service-app-project --for=condition=Ready --timeout=300s
-kubectl wait secret master-sink-app-cert -n service-app-project --for=create --timeout=60s
-```
-```shell markdown_runner
-certificate.cert-manager.io/master-sink-app-cert condition met
-secret/master-sink-app-cert condition met
-```
-
 ```bash {"stage":"deploy_camel", "label":"deploy master-sink brokerapp", "runtime":"bash"}
 kubectl apply -f - <<EOF
 apiVersion: broker.arkmq.org/v1beta2
@@ -1533,7 +1344,7 @@ kubectl wait brokerapp/master-sink -n service-app-project --for=condition=Ready 
 brokerapp.broker.arkmq.org/master-sink condition met
 ```
 
-The Camel JMS app uses the [dentrassi PEM keystore](https://github.com/ctron/pem-keystore) library to handle mTLS. The `master-sink-app-cert` Secret contains the TLS certificate and private key, which are mounted in the container at `/app/tls/client/`.
+The Camel JMS app uses the [dentrassi PEM keystore](https://github.com/ctron/pem-keystore) library to handle mTLS. The `master-sink-app-cert` Secret, issued by the Operator for the `master-sink` BrokerApp, contains the TLS certificate and private key, which are mounted in the container at `/app/tls/client/`.
 
 ```bash {"stage":"deploy_camel", "label":"wait for master-sink binding secret", "runtime":"bash"}
 kubectl wait secret master-sink-binding-secret -n service-app-project --for=create --timeout=300s
@@ -1639,44 +1450,44 @@ Check that orders are flowing through all stages:
 kubectl logs -n service-app-project deployment/order-generator --tail=5
 ```
 ```shell markdown_runner
-2026-10-02 11:54:06,537 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(435):[amqps://messaging-service.service-app-project.svc.cluster.local:61616]) Connection ID:369ad6fe-2b1c-4fcd-b016-8738f7ad208a:435 connected to server: amqps://messaging-service.service-app-project.svc.cluster.local:61616
-2026-10-02 11:54:06,726 INFO  [order-generator] (Camel (camel-1) thread #1 - timer://order-generator) [generator] → ORDERS.NEW | orderId=ORD-19a8c5
-2026-10-02 11:54:06,743 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(436):[amqps://messaging-service.service-app-project.svc.cluster.local:61616]) Connection ID:5cd4c13b-d176-43f0-88a1-fc742eda3b0e:436 connected to server: amqps://messaging-service.service-app-project.svc.cluster.local:61616
-2026-10-02 11:54:06,927 INFO  [order-generator] (Camel (camel-1) thread #1 - timer://order-generator) [generator] → ORDERS.NEW | orderId=ORD-69ed64
-2026-10-02 11:54:06,942 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(437):[amqps://messaging-service.service-app-project.svc.cluster.local:61616]) Connection ID:2b105cf8-3300-46a2-b110-33daee7e56f5:437 connected to server: amqps://messaging-service.service-app-project.svc.cluster.local:61616
+2026-10-14 14:20:26,888 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(361):[amqps://messaging-service.service-app-project.svc.cluster.local:61616]) Connection ID:9826c563-93b5-473d-a9de-4e6d752126bf:361 connected to server: amqps://messaging-service.service-app-project.svc.cluster.local:61616
+2026-10-14 14:20:27,050 INFO  [order-generator] (Camel (camel-1) thread #1 - timer://order-generator) [generator] → ORDERS.NEW | orderId=ORD-d055a5
+2026-10-14 14:20:27,093 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(362):[amqps://messaging-service.service-app-project.svc.cluster.local:61616]) Connection ID:597cc9f7-9f79-4b62-986a-339ed82df878:362 connected to server: amqps://messaging-service.service-app-project.svc.cluster.local:61616
+2026-10-14 14:20:27,251 INFO  [order-generator] (Camel (camel-1) thread #1 - timer://order-generator) [generator] → ORDERS.NEW | orderId=ORD-c20bc7
+2026-10-14 14:20:27,277 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(363):[amqps://messaging-service.service-app-project.svc.cluster.local:61616]) Connection ID:b243f46d-1df4-4f19-b008-0c54214010d3:363 connected to server: amqps://messaging-service.service-app-project.svc.cluster.local:61616
 ```
 
 ```bash {"stage":"verify", "label":"check processor logs", "runtime":"bash"}
 kubectl logs -n service-app-project deployment/order-processor-app --tail=5
 ```
 ```shell markdown_runner
-2026-10-02 11:54:06,641 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] → ORDERS.PROCESSED | status=PROCESSED
-2026-10-02 11:54:06,755 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] ← ORDERS.NEW | processing...
-2026-10-02 11:54:06,855 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] → ORDERS.PROCESSED | status=PROCESSED
-2026-10-02 11:54:06,946 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] ← ORDERS.NEW | processing...
-2026-10-02 11:54:07,046 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] → ORDERS.PROCESSED | status=PROCESSED
+2026-10-14 14:20:26,994 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] → ORDERS.PROCESSED | status=PROCESSED
+2026-10-14 14:20:27,117 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] ← ORDERS.NEW | processing...
+2026-10-14 14:20:27,217 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] → ORDERS.PROCESSED | status=PROCESSED
+2026-10-14 14:20:27,281 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] ← ORDERS.NEW | processing...
+2026-10-14 14:20:27,382 INFO  [order-processor] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.NEW]) [processor] → ORDERS.PROCESSED | status=PROCESSED
 ```
 
 ```bash {"stage":"verify", "label":"check shipping logs", "runtime":"bash"}
 kubectl logs -n service-app-project deployment/shipping-service-app --tail=5
 ```
 ```shell markdown_runner
-2026-10-02 11:54:06,674 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] → ORDERS.SHIPPED | status=SHIPPED
-2026-10-02 11:54:06,861 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] ← ORDERS.PROCESSED | shipping...
-2026-10-02 11:54:06,886 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] → ORDERS.SHIPPED | status=SHIPPED
-2026-10-02 11:54:07,050 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] ← ORDERS.PROCESSED | shipping...
-2026-10-02 11:54:07,075 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] → ORDERS.SHIPPED | status=SHIPPED
+2026-10-14 14:20:27,027 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] → ORDERS.SHIPPED | status=SHIPPED
+2026-10-14 14:20:27,227 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] ← ORDERS.PROCESSED | shipping...
+2026-10-14 14:20:27,254 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] → ORDERS.SHIPPED | status=SHIPPED
+2026-10-14 14:20:27,386 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] ← ORDERS.PROCESSED | shipping...
+2026-10-14 14:20:27,411 INFO  [order-shipping] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.PROCESSED]) [shipping] → ORDERS.SHIPPED | status=SHIPPED
 ```
 
 ```bash {"stage":"verify", "label":"check delivery logs", "runtime":"bash"}
 kubectl logs -n service-app-project deployment/delivery-service-app --tail=5
 ```
 ```shell markdown_runner
-2026-10-02 11:54:06,703 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] → ORDERS.DELIVERED | status=DELIVERED
-2026-10-02 11:54:06,897 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] ← ORDERS.SHIPPED | delivering...
-2026-10-02 11:54:06,923 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] → ORDERS.DELIVERED | status=DELIVERED
-2026-10-02 11:54:07,079 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] ← ORDERS.SHIPPED | delivering...
-2026-10-02 11:54:07,104 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] → ORDERS.DELIVERED | status=DELIVERED
+2026-10-14 14:20:27,056 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] → ORDERS.DELIVERED | status=DELIVERED
+2026-10-14 14:20:27,264 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] ← ORDERS.SHIPPED | delivering...
+2026-10-14 14:20:27,290 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] → ORDERS.DELIVERED | status=DELIVERED
+2026-10-14 14:20:27,416 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] ← ORDERS.SHIPPED | delivering...
+2026-10-14 14:20:27,441 INFO  [order-delivery] (Camel (camel-1) thread #1 - JmsConsumer[ORDERS.SHIPPED]) [delivery] → ORDERS.DELIVERED | status=DELIVERED
 ```
 
 You should see log lines like:
@@ -1695,12 +1506,12 @@ You should see log lines like:
 
 ## 6. Configure Prometheus Monitoring
 
-> **How broker metrics work:** The ArkMQ Operator automatically configures the Prometheus Java agent for every `BrokerService`, exposing broker metrics on port 8888. This is a `BrokerService`-level concern — individual `BrokerApp` resources do not configure metrics. The Operator also generates the `ServiceMonitor` that points Prometheus at the broker, using the client certificate issued in [section 3](#create-prometheus-client-certificate), so there is nothing to configure here.
+> **How broker metrics work:** The ArkMQ Operator automatically configures the Prometheus Java agent for every `BrokerService`, exposing broker metrics on port 8888. This is a `BrokerService`-level concern — individual `BrokerApp` resources do not configure metrics. The Operator also generates the `ServiceMonitor` that points Prometheus at the broker, using the Prometheus client certificate it issued for the service in [section 4](#inspect-the-issued-certificates), so there is nothing to configure here.
 
 ### Inspect the generated scrape configuration
 
 The Operator generates the scrape configuration itself: a `ServiceMonitor` over
-the service's `metrics` port, presenting `prometheus-cert`, and labelled
+the service's `metrics` port, presenting `messaging-service-prometheus-cert`, and labelled
 `broker.arkmq.org/monitoring: "true"` so a Prometheus can select it without
 naming any particular service.
 
@@ -1711,7 +1522,7 @@ kubectl get servicemonitor -n service-app-project -l broker.arkmq.org/monitoring
 ```shell markdown_runner
 pod/messaging-service-ss-0 condition met
 NAME                        AGE
-messaging-service-metrics   5m9s
+messaging-service-metrics   5m27s
 ```
 
 The apps generate no scrape configuration of their own: the broker labels each
@@ -1786,14 +1597,14 @@ echo "Grafana available at http://${GRAFANA_HOST}"
 ```
 ```shell markdown_runner
 ingress.networking.k8s.io/grafana created
-Grafana available at http://grafana.service-app-project.192.168.50.207.nip.io
+Grafana available at http://grafana.service-app-project.192.168.61.139.nip.io
 ```
 
 ```bash {"stage":"grafana", "label":"get grafana password", "runtime":"bash"}
 kubectl get secret prometheus-grafana -n service-app-project -o jsonpath='{.data.admin-password}' | base64 -d && echo
 ```
 ```shell markdown_runner
-pnlxQvSf7lRwi08RdHwvTBAAyfEyQRKzZw9GNo9V
+NyvHE72oMzrFryDlbGCPwNCaoTHtIE2qHiKQQkmw
 ```
 
 Login at the URL printed above with username `admin` and the password printed above, then open the **"Artemis Broker - Memory & Queue Analysis"** dashboard. Panels will start showing data within one scrape interval (15 s).
@@ -1808,9 +1619,9 @@ kubectl get endpointslice -l kubernetes.io/service-name=messaging-service -n ser
 ```
 ```shell markdown_runner
 NAME                        AGE
-messaging-service-metrics   5m9s
+messaging-service-metrics   5m28s
 NAME                      ADDRESSTYPE   PORTS   ENDPOINTS     AGE
-messaging-service-p7jzv   IPv4          8888    10.244.0.20   5m9s
+messaging-service-kl9mm   IPv4          8888    10.244.0.19   5m28s
 ```
 
 Open the Grafana dashboard — panels should now show live data within one scrape interval (15 s).
@@ -2042,11 +1853,11 @@ To fully tear down the tutorial environment, delete the Minikube cluster. This r
 minikube delete --profile brokerservice-monitoring
 ```
 ```shell markdown_runner
-* Deleting "brokerservice-monitoring" in kvm2 ...
-* Removed all traces of the "brokerservice-monitoring" cluster.
+* Suppression de "brokerservice-monitoring" dans kvm2...
+* Le cluster "brokerservice-monitoring" a été supprimé.
 ```
 
-If you want to clean up only the tutorial resources while keeping the cluster running, delete the namespace and the ClusterIssuers explicitly. ClusterIssuers are not namespace-scoped and survive namespace deletion, so they must be removed separately:
+If you want to clean up only the tutorial resources while keeping the cluster running, delete the namespace: the certificates the Operator issued go with the `BrokerApp`s and the `BrokerService` they were issued for. ClusterIssuers and the trust Bundle are cluster-scoped and survive namespace deletion, so they must be removed separately:
 
 ```bash
 # Remove all namespace-scoped resources
@@ -2054,6 +1865,7 @@ kubectl delete namespace service-app-project
 
 # Remove cluster-scoped resources created by this tutorial
 kubectl delete clusterissuer root-issuer broker-ca-issuer
+kubectl delete bundle arkmq-org-broker-manager-ca
 ```
 
 ---
@@ -2073,16 +1885,25 @@ kubectl port-forward svc/prometheus-kube-prometheus-prometheus \
 
 Open http://localhost:9090/targets and find `messaging-service-metrics`. The error shown on a failing target will identify whether the problem is TLS, DNS, or authentication.
 
-Also verify the `prometheus-cert` secret exists — the Operator requires it to authorise Prometheus:
+Also verify the `messaging-service-prometheus-cert` secret exists — the Operator requires it to authorise Prometheus:
 
 ```bash
-kubectl get secret prometheus-cert -n service-app-project
+kubectl get secret messaging-service-prometheus-cert -n service-app-project
 kubectl get servicemonitor messaging-service-metrics -n service-app-project -o yaml | grep "broker.arkmq.org/monitoring"
 ```
 
 ### Panel shows "No data" but the target is UP
 
 Search for `broker_queue` in the Prometheus UI to see what metric names your Operator version exposes. If they differ from what the recording rules expect, update the `expr` fields in the PrometheusRule and the dashboard JSON to match.
+
+### A BrokerService or BrokerApp is not Ready
+
+When a certificate cannot be issued, the `Deployed` condition says why: `WaitingForCertificate` carries cert-manager's own message, such as a missing or unready `ClusterIssuer`, and `ConflictingCertSecret` names a Certificate the Operator did not create under a name it issues.
+
+```bash
+kubectl get brokerservice,brokerapp -n service-app-project \
+  -o custom-columns='NAME:.metadata.name,REASON:.status.conditions[?(@.type=="Deployed")].reason,MESSAGE:.status.conditions[?(@.type=="Deployed")].message'
+```
 
 ### Pipeline not flowing
 

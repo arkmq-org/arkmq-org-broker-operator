@@ -66,10 +66,10 @@ graph TB
     end
 
     subgraph cert_layer ["Application Certificates"]
-        OperatorCert["⚙️ Operator<br/>CN: arkmq-org-broker-operator"]
-        SvcCert["🔌 BrokerService<br/>CN: messaging-service"]
-        AppCert["📦 BrokerApp<br/>CN: first-app"]
-        PromCert["📊 Prometheus<br/>CN: prometheus"]
+        OperatorCert["⚙️ Operator<br/>issued by the operator"]
+        SvcCert["🔌 BrokerService<br/>issued by the operator"]
+        AppCert["📦 BrokerApp<br/>issued by the operator"]
+        PromCert["📊 Prometheus<br/>issued by the operator"]
         MsgCert["💬 Messaging Client<br/>CN: messaging-client"]
     end
 
@@ -181,11 +181,11 @@ CRs. The operator reads the actual CN values from the certificate secrets it
 discovers in the namespace and generates the Jolokia agent config and Prometheus
 exporter config accordingly — you do not need to specify CN values manually.
 In this tutorial:
-  * `CN=arkmq-org-broker-operator` → operator privileges (management)
-  * `CN=prometheus` → metrics read access (Prometheus scraping)
+  * the operator certificate's CN → operator privileges (management)
+  * the Prometheus certificate's CN → metrics read access (Prometheus scraping)
 
-You can use different CN values; the operator will extract them from your actual
-certificates. For `BrokerService`, the operator additionally generates per-queue
+The operator issues both certificates itself, each with a random UUID as CN, so
+no other certificate signed by the same CA can claim those identities by name. For `BrokerService`, the operator additionally generates per-queue
 Prometheus metrics for every address declared by bound `BrokerApp`s
 automatically via a control-plane-override secret. That secret also gives each
 bound app an identity in this realm, so an app can scrape the metrics of its own
@@ -207,22 +207,22 @@ All of the following secrets must exist before the `Broker` (or the `BrokerServi
 
 #### Operator infrastructure secrets
 
-These are cluster-level secrets consumed by the operator daemon itself. Default names are shown; most can be overridden via environment variables on the operator deployment.
+These are consumed by the operator itself.
 
-| Secret | Default name | CN in this tutorial | Override env var | Purpose |
-|---|---|---|---| --- | 
-| Operator client certificate | `arkmq-org-broker-manager-cert` | `arkmq-org-broker-operator` | `ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME` | Operator certificate for authenticating with the broker |
-| CA trust bundle | `arkmq-org-broker-manager-ca` | — | `ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME` | Root certificate that validates all others (key must be ca.pem) |
-| Prometheus client certificate | `prometheus-cert` | `prometheus` | `BASE_PROMETHEUS_CERT_SECRET_NAME` | Prometheus certificate for authenticating to the metrics endpoint |
+| Secret | Default name | Override env var | Purpose |
+|---|---|---|---|
+| Operator client certificate | `arkmq-org-broker-manager-cert` | `ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME` | Operator certificate for authenticating with the broker; issued by the operator in its own namespace |
+| CA trust bundle | `arkmq-org-broker-manager-ca` | `ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME` | Root certificate that validates all others, distributed by trust-manager (the key must end in `.pem`) |
 
 #### Workload secrets
 
-The `BrokerService`/`BrokerApp` scenario uses the operator to manage the full certificate lifecycle automatically. These secrets are instance-scoped, with names derived from the CR name at runtime, and have no operator env var override. They are created by cert-manager during setup (see [Create the Service Certificate](#create-the-service-certificate) and [Create the Application Certificate](#create-the-application-certificate)). Note that the service certificate DNS names must match the Kubernetes service hostname so that mTLS clients can verify they are connecting to the right endpoint.
+The operator issues these from the `ClusterIssuer` named by `ARKMQ_ORG_BROKER_MANAGER_CLUSTER_ISSUER`, with names derived from the CR name. Each secret is owned by its Certificate, which is owned by the CR, so both go with it. The service certificate's DNS names match the Kubernetes service hostname so that mTLS clients can verify they are connecting to the right endpoint.
 
-| Secret | Name in this tutorial | CN in this tutorial | Purpose |
-|---|---|---|---|
-| Service certificate | `messaging-service-broker-cert` | `messaging-service` | TLS identity of the `BrokerService` broker; mounted by the broker pod for its AMQP acceptor |
-| App certificate | `first-app-app-cert` | `first-app` | mTLS credential presented by the producer/consumer when connecting to the app's dedicated acceptor |
+| Secret | Name in this tutorial | Purpose |
+|---|---|---|
+| Service certificate | `messaging-service-broker-cert` | TLS identity of the `BrokerService` broker; mounted by the broker pod for its AMQP acceptor |
+| Prometheus client certificate | `messaging-service-prometheus-cert` | Presented by Prometheus to scrape the broker's metrics endpoint |
+| App certificate | `first-app-app-cert` | mTLS credential presented by the producer/consumer when connecting to the app's dedicated acceptor |
 
 ## Prerequisites
 
@@ -254,22 +254,20 @@ minikube profile secure-monitoring-tutorial
 minikube addons enable metrics-server --profile secure-monitoring-tutorial
 ```
 ```shell markdown_runner
-* [secure-monitoring-tutorial] minikube v1.38.1 on Fedora 44
-* Automatically selected the docker driver. Other choices: kvm2, qemu2, ssh
-* Using Docker driver with root privileges
-* Starting "secure-monitoring-tutorial" primary control-plane node in "secure-monitoring-tutorial" cluster
-* Pulling base image v0.0.50 ...
-* Configuring bridge CNI (Container Networking Interface) ...
-* Verifying Kubernetes components...
-  - Using image gcr.io/k8s-minikube/storage-provisioner:v5
-* Enabled addons: storage-provisioner, default-storageclass
-* Done! kubectl is now configured to use "secure-monitoring-tutorial" cluster and "default" namespace by default
-* minikube profile was successfully set to secure-monitoring-tutorial
-* metrics-server is an addon maintained by Kubernetes. For any concerns contact minikube on GitHub.
-You can view the list of minikube maintainers at: https://github.com/kubernetes/minikube/blob/master/OWNERS
-  - Using image registry.k8s.io/metrics-server/metrics-server:v0.8.1
-* The 'metrics-server' addon is enabled
-! Starting v1.39.0, minikube will default to "containerd" container runtime. See #21973 for more info.
+* [secure-monitoring-tutorial] minikube v1.37.0 sur Fedora 44
+  - MINIKUBE_ROOTLESS=true
+* Choix automatique du pilote kvm2. Autres choix: podman, qemu2, ssh
+* Démarrage du nœud "secure-monitoring-tutorial" primary control-plane dans le cluster "secure-monitoring-tutorial"
+* Configuration de bridge CNI (Container Networking Interface)...
+* Vérification des composants Kubernetes...
+  - Utilisation de l'image gcr.io/k8s-minikube/storage-provisioner:v5
+* Modules activés: storage-provisioner, default-storageclass
+* Terminé ! kubectl est maintenant configuré pour utiliser "secure-monitoring-tutorial" cluster et espace de noms "default" par défaut.
+* Le profil de minikube a été défini avec succès sur secure-monitoring-tutorial
+* metrics-server est un addon maintenu par Kubernetes. Pour toute question, contactez minikube sur GitHub.
+Vous pouvez consulter la liste des mainteneurs de minikube sur : https://github.com/kubernetes/minikube/blob/master/OWNERS
+  - Utilisation de l'image registry.k8s.io/metrics-server/metrics-server:v0.8.0
+* Le module 'metrics-server' est activé
 ```
 
 The `--memory=8192 --cpus=4` allocation covers all components deployed in this
@@ -287,13 +285,13 @@ minikube addons enable ingress
 minikube kubectl -- patch deployment -n ingress-nginx ingress-nginx-controller --type='json' -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value":"--enable-ssl-passthrough"}]'
 ```
 ```shell markdown_runner
-* ingress is an addon maintained by Kubernetes. For any concerns contact minikube on GitHub.
-You can view the list of minikube maintainers at: https://github.com/kubernetes/minikube/blob/master/OWNERS
-  - Using image registry.k8s.io/ingress-nginx/controller:v1.14.3
-  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.7
-  - Using image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.7
-* Verifying ingress addon...
-* The 'ingress' addon is enabled
+* ingress est un addon maintenu par Kubernetes. Pour toute question, contactez minikube sur GitHub.
+Vous pouvez consulter la liste des mainteneurs de minikube sur : https://github.com/kubernetes/minikube/blob/master/OWNERS
+  - Utilisation de l'image registry.k8s.io/ingress-nginx/controller:v1.13.2
+  - Utilisation de l'image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.2
+  - Utilisation de l'image registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.2
+* Vérification du module ingress...
+* Le module 'ingress' est activé
 deployment.apps/ingress-nginx-controller patched
 ```
 
@@ -347,7 +345,7 @@ helm upgrade -i prometheus prometheus-community/kube-prometheus-stack \
 "prometheus-community" already exists with the same configuration, skipping
 Release "prometheus" does not exist. Installing it now.
 NAME: prometheus
-LAST DEPLOYED: Fri Oct  2 13:57:20 2026
+LAST DEPLOYED: Wed Oct 14 16:23:19 2026
 NAMESPACE: broker-tutorial
 STATUS: deployed
 REVISION: 1
@@ -371,25 +369,25 @@ Get your grafana admin user password by running:
 
 
 Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
-I1002 13:57:18.798864 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:57:18.798885 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:57:19.074923 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:57:19.074936 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:57:19.103361 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:57:19.103377 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:57:19.218459 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:57:19.456082 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:57:19.456104 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:57:19.685828 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:57:19.685845 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:57:19.729889 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:57:19.907424 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:57:19.907442 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:57:19.955516 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:57:20.090595 3091094 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1002 13:57:20.090608 3091094 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1002 13:57:28.785273 3091094 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
-I1002 13:57:28.785274 3091094 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
+I1014 16:23:18.154105  369498 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:23:18.154121  369498 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:23:18.291719  369498 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:23:18.291737  369498 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:23:18.340981  369498 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:23:18.340999  369498 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:23:18.377285  369498 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:23:18.544678  369498 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:23:18.544699  369498 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:23:18.725233  369498 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:23:18.725251  369498 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:23:18.749699  369498 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:23:18.889965  369498 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:23:18.889985  369498 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:23:18.938292  369498 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:23:19.083897  369498 warnings.go:107] "Warning: unrecognized format \"int32\""
+I1014 16:23:19.083911  369498 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:23:27.091516  369498 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
+I1014 16:23:27.093537  369498 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
 ```
 
 ### Install Cert-Manager
@@ -474,9 +472,9 @@ done
 echo "cert-manager webhook is answering"
 ```
 ```shell markdown_runner
-pod/cert-manager-66487b786-xmhqq condition met
-pod/cert-manager-cainjector-65fdc9b9d7-ffzn5 condition met
-pod/cert-manager-webhook-7d96469bf8-9zchl condition met
+pod/cert-manager-66487b786-g5n97 condition met
+pod/cert-manager-cainjector-65fdc9b9d7-pzj8s condition met
+pod/cert-manager-webhook-7d96469bf8-cmpsk condition met
 cert-manager webhook is answering
 ```
 
@@ -499,7 +497,7 @@ helm upgrade trust-manager jetstack/trust-manager --install --namespace cert-man
 ```shell markdown_runner
 Release "trust-manager" does not exist. Installing it now.
 NAME: trust-manager
-LAST DEPLOYED: Fri Oct  2 13:58:29 2026
+LAST DEPLOYED: Wed Oct 14 16:24:33 2026
 NAMESPACE: cert-manager
 STATUS: deployed
 REVISION: 1
@@ -521,7 +519,7 @@ with creating your first bundle, check out the documentation on the
 cert-manager website:
 
 https://cert-manager.io/docs/projects/trust-manager/
-I1002 13:58:29.894544 3092885 warnings.go:107] "Warning: unrecognized format \"int64\""
+I1014 16:24:33.404642  370514 warnings.go:107] "Warning: unrecognized format \"int64\""
 ```
 
 Wait for the Bundles CRD to be ready.
@@ -532,10 +530,10 @@ kubectl wait pod --all --for=condition=Ready --namespace=cert-manager --timeout=
 ```
 ```shell markdown_runner
 customresourcedefinition.apiextensions.k8s.io/bundles.trust.cert-manager.io condition met
-pod/cert-manager-66487b786-xmhqq condition met
-pod/cert-manager-cainjector-65fdc9b9d7-ffzn5 condition met
-pod/cert-manager-webhook-7d96469bf8-9zchl condition met
-pod/trust-manager-84d8595f6b-mv4rm condition met
+pod/cert-manager-66487b786-g5n97 condition met
+pod/cert-manager-cainjector-65fdc9b9d7-pzj8s condition met
+pod/cert-manager-webhook-7d96469bf8-cmpsk condition met
+pod/trust-manager-84d8595f6b-v25ml condition met
 ```
 
 ### Deploy the Operator
@@ -566,8 +564,8 @@ role.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-role created
 rolebinding.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-rolebinding created
 networkpolicy.networking.k8s.io/arkmq-org-broker-controller-manager-netpol created
 deployment.apps/arkmq-org-broker-controller-manager created
-Warning: unrecognized format "int64"
 Warning: unrecognized format "int32"
+Warning: unrecognized format "int64"
 ```
 
 Wait for the operator pod to become ready.
@@ -579,12 +577,12 @@ kubectl wait pod --all --for=condition=Ready --namespace=broker-tutorial --timeo
 ```shell markdown_runner
 deployment.apps/arkmq-org-broker-controller-manager condition met
 pod/alertmanager-prometheus-kube-prometheus-alertmanager-0 condition met
-pod/arkmq-org-broker-controller-manager-7ffd57666b-rstsg condition met
-pod/prometheus-grafana-58cc74c5cf-rktnr condition met
-pod/prometheus-kube-prometheus-operator-5879b7b6fb-4pkzr condition met
-pod/prometheus-kube-state-metrics-86f6f77478-b4xwx condition met
+pod/arkmq-org-broker-controller-manager-7dd5b46d5-5nwfn condition met
+pod/prometheus-grafana-d7b4574db-4kb6c condition met
+pod/prometheus-kube-prometheus-operator-5b56b85dcb-jklcr condition met
+pod/prometheus-kube-state-metrics-86f6f77478-4zgl9 condition met
 pod/prometheus-prometheus-kube-prometheus-prometheus-0 condition met
-pod/prometheus-prometheus-node-exporter-x7jq6 condition met
+pod/prometheus-prometheus-node-exporter-fdx9r condition met
 ```
 
 ## Create Certificate Authority and Issuers
@@ -688,6 +686,7 @@ bundle.trust.cert-manager.io/arkmq-org-broker-manager-ca condition met
 ### Create a Cluster Issuer
 
 Create a `ClusterIssuer` that signs all component certificates using the root CA.
+The operator issues every certificate it needs from it.
 
 ```bash {"stage":"deploy_certs", "label":"create ca issuer", "runtime":"bash"}
 kubectl apply -f - <<EOF
@@ -711,107 +710,30 @@ kubectl wait clusterissuer ca-issuer --for=condition=Ready --timeout=300s
 clusterissuer.cert-manager.io/ca-issuer condition met
 ```
 
-### Create the Operator Certificate
+### Point the Operator at the Cluster Issuer
 
-The operator authenticates with every broker it manages using this certificate.
+`ARKMQ_ORG_BROKER_MANAGER_CLUSTER_ISSUER` names the `ClusterIssuer` the operator
+issues from. Without it the operator issues nothing and expects every
+certificate to exist already.
 
-```bash {"stage":"deploy_certs", "label":"create operator cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: arkmq-org-broker-manager-cert
-  namespace: broker-tutorial
-spec:
-  secretName: arkmq-org-broker-manager-cert
-  commonName: arkmq-org-broker-operator
-  issuerRef:
-    name: ca-issuer
-    kind: ClusterIssuer
-EOF
+```bash {"stage":"deploy_certs", "label":"set the cluster issuer", "runtime":"bash"}
+kubectl set env deployment/arkmq-org-broker-controller-manager ARKMQ_ORG_BROKER_MANAGER_CLUSTER_ISSUER=ca-issuer
+kubectl rollout status deployment/arkmq-org-broker-controller-manager --timeout=240s
 ```
 ```shell markdown_runner
-certificate.cert-manager.io/arkmq-org-broker-manager-cert created
-```
-
-```bash {"stage":"deploy_certs", "label":"wait for operator cert", "runtime":"bash"}
-kubectl wait certificate arkmq-org-broker-manager-cert -n broker-tutorial --for=condition=Ready --timeout=300s
-```
-```shell markdown_runner
-certificate.cert-manager.io/arkmq-org-broker-manager-cert condition met
-```
-
-### Create the Prometheus Certificate
-
-Prometheus uses this certificate to authenticate with the broker's mTLS metrics
-endpoint. The operator reads the CN and grants it metrics read access automatically.
-
-```bash {"stage":"deploy_certs", "label":"create prometheus cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: prometheus-cert
-  namespace: broker-tutorial
-spec:
-  secretName: prometheus-cert
-  commonName: prometheus
-  issuerRef:
-    name: ca-issuer
-    kind: ClusterIssuer
-EOF
-```
-```shell markdown_runner
-certificate.cert-manager.io/prometheus-cert created
-```
-
-```bash {"stage":"deploy_certs", "label":"wait for prometheus cert", "runtime":"bash"}
-kubectl wait certificate prometheus-cert -n broker-tutorial --for=condition=Ready --timeout=300s
-```
-```shell markdown_runner
-certificate.cert-manager.io/prometheus-cert condition met
+deployment.apps/arkmq-org-broker-controller-manager env updated
+Waiting for deployment spec update to be observed...
+Waiting for deployment "arkmq-org-broker-controller-manager" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "arkmq-org-broker-controller-manager" rollout to finish: 0 of 1 updated replicas are available...
+deployment "arkmq-org-broker-controller-manager" successfully rolled out
 ```
 
 ## Deploy the Messaging Service and Application
 
 With the PKI in place, we can now deploy a `BrokerService` and a `BrokerApp`.
-The operator will automatically assign a port from the service's pool for the
-application's acceptor and expose the connection details in a binding secret.
-
-### Create the Service Certificate
-
-The service needs a certificate with DNS names matching its Kubernetes service
-hostname so that mTLS clients can verify they are connecting to the right endpoint.
-
-```bash {"stage":"deploy_service", "label":"create service cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: messaging-service-broker-cert
-  namespace: broker-tutorial
-spec:
-  secretName: messaging-service-broker-cert
-  commonName: messaging-service
-  dnsNames:
-  - messaging-service
-  - messaging-service.broker-tutorial.svc.cluster.local
-  - '*.messaging-service-hdls-svc.broker-tutorial.svc.cluster.local'
-  issuerRef:
-    name: ca-issuer
-    kind: ClusterIssuer
-EOF
-```
-```shell markdown_runner
-certificate.cert-manager.io/messaging-service-broker-cert created
-```
-
-```bash {"stage":"deploy_service", "label":"wait for service cert", "runtime":"bash"}
-kubectl wait certificate messaging-service-broker-cert -n broker-tutorial --for=condition=Ready --timeout=300s
-```
-```shell markdown_runner
-certificate.cert-manager.io/messaging-service-broker-cert condition met
-```
+The operator issues their certificates, assigns a port from the service's pool
+for the application's acceptor and exposes the connection details in a binding
+secret.
 
 ### Deploy `BrokerService`
 
@@ -844,39 +766,26 @@ kubectl wait BrokerService messaging-service -n broker-tutorial --for=condition=
 brokerservice.broker.arkmq.org/messaging-service condition met
 ```
 
-### Create the Application Certificate
+Before creating the broker, the operator issued its own client certificate, the
+broker's, and the one Prometheus presents to scrape it:
 
-```bash {"stage":"deploy_app", "label":"create app cert", "runtime":"bash"}
-kubectl apply -f - <<EOF
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: first-app-app-cert
-  namespace: broker-tutorial
-spec:
-  secretName: first-app-app-cert
-  commonName: first-app
-  issuerRef:
-    name: ca-issuer
-    kind: ClusterIssuer
-EOF
+```bash {"stage":"deploy_service", "label":"show issued certificates", "runtime":"bash"}
+kubectl get certificate -n broker-tutorial \
+  -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,OWNER:.metadata.ownerReferences[0].kind'
 ```
 ```shell markdown_runner
-certificate.cert-manager.io/first-app-app-cert created
-```
-
-```bash {"stage":"deploy_app", "label":"wait for app cert", "runtime":"bash"}
-kubectl wait certificate first-app-app-cert -n broker-tutorial --for=condition=Ready --timeout=300s
-```
-```shell markdown_runner
-certificate.cert-manager.io/first-app-app-cert condition met
+NAME                                READY   OWNER
+arkmq-org-broker-manager-cert       True    <none>
+messaging-service-broker-cert       True    BrokerService
+messaging-service-prometheus-cert   True    BrokerService
 ```
 
 ### Deploy `BrokerApp`
 
 The `BrokerApp` connects to a `BrokerService` using label selectors and declares
-its messaging capabilities. The operator automatically assigns a port from the
-service's port pool for the application's acceptor.
+its messaging capabilities. The operator issues its `first-app-app-cert`
+certificate and assigns a port from the service's port pool for the
+application's acceptor.
 
 ```bash {"stage":"deploy_app", "label":"deploy app crd", "runtime":"bash"}
 kubectl apply -f - <<EOF
@@ -1067,8 +976,8 @@ job.batch/sa-consumer condition met
 The `BrokerService` already manages a running broker pod
 (`messaging-service-ss-0`) with a Prometheus metrics endpoint on port `8888`,
 and the operator has already generated the `ServiceMonitor` that scrapes it over
-mTLS, using the certificate created in the
-[PKI section](#create-certificate-authority-and-issuers). It is labelled
+mTLS, presenting the `messaging-service-prometheus-cert` certificate it issued
+for the service. It is labelled
 `broker.arkmq.org/monitoring: "true"`, the one label a Prometheus needs to
 select it. We now deploy a dedicated Prometheus instance selecting it.
 
@@ -1430,6 +1339,7 @@ kubectl rollout status deployment prometheus-grafana -n broker-tutorial --timeou
 ```shell markdown_runner
 configmap/artemis-dashboard condition met
 deployment.apps/prometheus-grafana restarted
+Waiting for deployment spec update to be observed...
 Waiting for deployment "prometheus-grafana" rollout to finish: 0 out of 1 new replicas have been updated...
 Waiting for deployment "prometheus-grafana" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "prometheus-grafana" rollout to finish: 1 old replicas are pending termination...
@@ -1721,10 +1631,16 @@ While the jobs run, refresh the Grafana dashboard. You will see:
 
 ### Certificate Issues
 
-**Problem:** Certificates stuck in "Pending" or "False" state
+**Problem:** `BrokerService` or `BrokerApp` not `Ready` because a certificate is not issued
+
+The `Deployed` condition says why: `WaitingForCertificate` carries cert-manager's
+own message, such as a missing or unready `ClusterIssuer`, and
+`ConflictingCertSecret` names a Certificate the operator did not create under a
+name it issues.
 ```bash
-kubectl describe certificate prometheus-cert -n broker-tutorial
-kubectl get certificaterequests -n broker-tutorial
+kubectl get brokerservice,brokerapp -n broker-tutorial \
+  -o custom-columns='NAME:.metadata.name,REASON:.status.conditions[?(@.type=="Deployed")].reason,MESSAGE:.status.conditions[?(@.type=="Deployed")].message'
+kubectl get certificates,certificaterequests -n broker-tutorial
 ```
 
 **Solution:** Verify cert-manager is running and check issuer configuration:
@@ -1748,7 +1664,7 @@ kubectl describe servicemonitor messaging-service-metrics -n broker-tutorial
 kubectl get endpointslice -l kubernetes.io/service-name=messaging-service -n broker-tutorial
 ```
 
-**Solution:** The operator generates the `ServiceMonitor` only if the `prometheus-cert` secret existed when it reconciled the `BrokerService`. Verify the metrics port (8888) is accessible:
+**Solution:** The `ServiceMonitor` presents the `messaging-service-prometheus-cert` secret; verify it exists. Verify the metrics port (8888) is accessible:
 ```bash
 kubectl run test-metrics --rm -i --restart=Never --image=curlimages/curl:latest -n broker-tutorial -- \
   curl -sk https://messaging-service-ss-0.messaging-service-hdls-svc.broker-tutorial.svc.cluster.local:8161/metrics
@@ -1832,10 +1748,8 @@ deployed workloads.
 minikube delete --profile secure-monitoring-tutorial 
 ```
 ```shell markdown_runner
-* Deleting "secure-monitoring-tutorial" in docker ...
-* Deleting container "secure-monitoring-tutorial" ...
-* Removing /home/robbo04/.minikube/machines/secure-monitoring-tutorial ...
-* Removed all traces of the "secure-monitoring-tutorial" cluster.
+* Suppression de "secure-monitoring-tutorial" dans kvm2...
+* Le cluster "secure-monitoring-tutorial" a été supprimé.
 ```
 
 ## Conclusion

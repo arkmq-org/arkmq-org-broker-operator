@@ -843,6 +843,8 @@ const (
 	DeployedConditionSelectorEvaluationError      = "AppSelectorEvaluationError"
 	DeployedConditionPortPoolExhaustedReason      = "PortPoolExhausted"
 	DeployedConditionMissingAppCertReason         = "MissingAppCert"
+	DeployedConditionWaitingForCertificateReason  = "WaitingForCertificate"
+	DeployedConditionConflictingCertSecretReason  = "ConflictingCertSecret"
 
 	AppsProvisionedConditionType           = "AppsProvisioned"
 	AppsProvisionedConditionSyncedReason   = "Synced"

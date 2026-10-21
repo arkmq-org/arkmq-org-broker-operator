@@ -13,7 +13,6 @@ rules:
   - events
   - persistentvolumeclaims
   - routes
-  - secrets
   - serviceaccounts
   - services
   verbs:
@@ -35,6 +34,7 @@ rules:
   - ""
   resources:
   - pods
+  - secrets
   verbs:
   - create
   - delete
@@ -147,6 +147,19 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificaterequests
+  verbs:
+  - list
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  verbs:
+  - create
+  - get
 - apiGroups:
   - gateway.networking.k8s.io
   resources:

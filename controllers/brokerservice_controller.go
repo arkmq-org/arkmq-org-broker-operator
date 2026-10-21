@@ -36,6 +36,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/templates"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/pki"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -74,6 +75,9 @@ func NewBrokerServiceReconciler(client client.Client, scheme *runtime.Scheme, co
 
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=cert-manager.io,namespace=arkmq-org-broker-operator,resources=certificates,verbs=get;create
+//+kubebuilder:rbac:groups="",namespace=arkmq-org-broker-operator,resources=secrets,verbs=patch
+//+kubebuilder:rbac:groups=cert-manager.io,namespace=arkmq-org-broker-operator,resources=certificaterequests,verbs=list
 //+kubebuilder:rbac:groups=monitoring.coreos.com,namespace=arkmq-org-broker-operator,resources=servicemonitors,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps,verbs=get;list;watch
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps/status,verbs=get;list;watch
@@ -107,6 +111,9 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 
 	// Validate spec first, before doing any work
 	if err = processor.validateSpec(); err == nil {
+		err = processor.ensureCertificates(processor.certificateRequests()...)
+	}
+	if err == nil {
 		if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
 			if err = processor.processSpec(); err == nil {
 				err = processor.SyncDesiredWithDeployed(instance)
@@ -421,6 +428,43 @@ func PropertiesSecretName(name string) string {
 
 func certSecretName(cr *broker.BrokerService) string {
 	return fmt.Sprintf("%s-%s", cr.Name, common.DefaultOperandCertSecretName)
+}
+
+// certificateRequests are what the service needs issued in issuer mode: the
+// operator cert, shared by every service, and the service's own.
+func (reconciler *BrokerServiceInstanceReconciler) certificateRequests() []pki.Request {
+	requests := reconciler.ownedCertificateRequests()
+	operatorCert, err := operatorCertRequest()
+	if err != nil {
+		reconciler.log.Error(err, "no operator namespace, issuing no operator cert")
+		return requests
+	}
+	return append([]pki.Request{operatorCert}, requests...)
+}
+
+// ownedCertificateRequests are the service's broker and prometheus certs. The
+// broker cert is issued under the name its Broker looks up first, for every name
+// the service and its pods are reached by.
+func (reconciler *BrokerServiceInstanceReconciler) ownedCertificateRequests() []pki.Request {
+	instance := reconciler.instance
+	return []pki.Request{
+		{
+			Name:      certSecretName(instance),
+			Namespace: instance.Namespace,
+			Owner:     instance,
+			DNSNames: []string{
+				instance.Name,
+				fmt.Sprintf("%s.%s", instance.Name, instance.Namespace),
+				fmt.Sprintf("%s.%s.svc.%s", instance.Name, instance.Namespace, common.GetClusterDomain()),
+				common.ClusterDNSWildCard(instance.Name, instance.Namespace),
+			},
+		},
+		{
+			Name:      fmt.Sprintf("%s-%s", instance.Name, common.GetPrometheusCertSecretBaseName()),
+			Namespace: instance.Namespace,
+			Owner:     instance,
+		},
+	}
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) setValidCondition(err error) {
@@ -1000,25 +1044,15 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 
 	realmName := jaasConfigRealmName(app)
 
-	// process authN cert login module params
-
-	/* TODO: pull down full DN from app cert
-
-	var appCert *tls.Certificate
-	if appCert, err = common.ExtractCertFromSecret(...); err != nil {
-		return nil, err
+	// process authN cert login module params: the app is who its cert's common
+	// name says, as on the control plane
+	cn, err := reconciler.appCertCN(app)
+	if err != nil {
+		return err
 	}
-
-	var appCertSubject *pkix.Name
-	if operatorCertSubject, err = common.ExtractCertSubject(appCert); err != nil {
-		return nil, err
-	}
-	*/
 	usersBuf := brokerproperties.NewPropsWithHeader()
-	// Escape app name for safe use in regex pattern to prevent regex injection
-	// The namespacedName format is namespace-name which is already validated
-	escapedAppName := common.EscapeForRegex(app.Name)
-	fmt.Fprintf(usersBuf, "%s=/.*%s.*/\n", namespacedName, escapedAppName)
+	// Escape for safe use in regex pattern to prevent regex injection
+	fmt.Fprintf(usersBuf, "%s=/.*%s.*/\n", namespacedName, common.EscapeForRegex(cn))
 
 	certUsersCfgKey := UnderscoreAppIdentityPrefixed(app, common.GetCertUsersKey(realmName))
 	serverConfigPropertiesSecret.Data[certUsersCfgKey] = usersBuf.Bytes()
