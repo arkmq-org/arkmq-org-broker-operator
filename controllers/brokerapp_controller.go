@@ -36,6 +36,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -189,7 +190,7 @@ func (reconciler BrokerAppInstanceReconciler) verifyAppCert() error {
 		return err
 	}
 
-	secretName := reconciler.instance.Name + common.AppCertSecretSuffix
+	secretName := AppCertSecretName(reconciler.instance)
 
 	secret, err := common.GetNamespacedSecret(reconciler.Client, secretName, reconciler.instance.Namespace)
 	if err != nil {
@@ -208,20 +209,30 @@ func (reconciler BrokerAppInstanceReconciler) verifyAppCert() error {
 }
 
 // appCertRequest is the app's client cert, issued in its own namespace in
-// issuer mode.
+// issuer mode, into its binding secret.
 func (reconciler BrokerAppInstanceReconciler) appCertRequest() pki.Request {
 	return pki.Request{
-		Name:      reconciler.instance.Name + common.AppCertSecretSuffix,
-		Namespace: reconciler.instance.Namespace,
-		Owner:     reconciler.instance,
+		Name:       reconciler.instance.Name + common.AppCertSecretSuffix,
+		SecretName: BindingsSecretName(reconciler.instance.Name),
+		Namespace:  reconciler.instance.Namespace,
+		Owner:      reconciler.instance,
 	}
+}
+
+// AppCertSecretName is the secret holding the app's client cert: its binding
+// secret when the operator issues it, else the one the user provides.
+func AppCertSecretName(app *broker.BrokerApp) string {
+	if common.GetClusterIssuerName() != "" {
+		return BindingsSecretName(app.Name)
+	}
+	return app.Name + common.AppCertSecretSuffix
 }
 
 func (reconciler BrokerAppInstanceReconciler) processBindingSecret() error {
 
 	// Only manage binding secret if app has been bound to a service (status field exists)
 	if reconciler.status.Service == nil {
-		return nil
+		return reconciler.applyIssuedBindingSecret(nil)
 	}
 
 	bindingSecretNsName := types.NamespacedName{
@@ -243,14 +254,42 @@ func (reconciler BrokerAppInstanceReconciler) processBindingSecret() error {
 		return fmt.Errorf("no port assigned for app %s", reconciler.instance.Name)
 	}
 
-	desired.Data = map[string][]byte{
+	data := map[string][]byte{
 		// host as FQQN to work everywhere in the cluster
 		"host": []byte(fmt.Sprintf("%s.%s.svc.%s", reconciler.status.Service.Name, reconciler.status.Service.Namespace, common.GetClusterDomain())),
 		"port": []byte(fmt.Sprintf("%d", port)),
 		"uri":  []byte(fmt.Sprintf("amqps://%s.%s.svc.%s:%d", reconciler.status.Service.Name, reconciler.status.Service.Namespace, common.GetClusterDomain(), port)),
 	}
+	if common.GetClusterIssuerName() != "" {
+		return reconciler.applyIssuedBindingSecret(data)
+	}
+	desired.Data = data
 	reconciler.TrackDesired(desired)
 	return nil
+}
+
+// applyIssuedBindingSecret writes data into the binding secret in issuer mode,
+// where cert-manager writes the app cert into it too. Applied, so that only
+// these keys are written, and those no longer in data are dropped. The secret
+// is owned by the app's Certificate rather than by the app, so the reconcile
+// loop does not track it.
+func (reconciler BrokerAppInstanceReconciler) applyIssuedBindingSecret(data map[string][]byte) error {
+	if common.GetClusterIssuerName() == "" {
+		return nil
+	}
+
+	ctx := context.TODO()
+	name := BindingsSecretName(reconciler.instance.Name)
+	if data == nil {
+		// nothing to drop from a secret that is not there, and none to create
+		err := reconciler.Get(ctx, types.NamespacedName{Name: name, Namespace: reconciler.instance.Namespace}, &corev1.Secret{})
+		if err != nil {
+			return client.IgnoreNotFound(err)
+		}
+	}
+
+	secret := corev1ac.Secret(name, reconciler.instance.Namespace).WithData(data)
+	return reconciler.Apply(ctx, secret, client.FieldOwner(common.OperatorName), client.ForceOwnership)
 }
 
 func NewBrokerAppReconciler(client client.Client, scheme *runtime.Scheme, config *rest.Config, logger logr.Logger) *BrokerAppReconciler {

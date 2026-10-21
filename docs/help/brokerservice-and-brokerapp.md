@@ -184,7 +184,7 @@ status:
     assignedPort: 61616
 ```
 
-A binding secret is created in the app's namespace containing `host`, `port`, and `uri` for the application to connect to the broker.
+A binding secret is created in the app's namespace containing `host`, `port`, and `uri` for the application to connect to the broker. When the operator issues certificates from a `ClusterIssuer`, the app's certificate is issued into it too, as `tls.crt`, `tls.key` and `ca.crt`, and the secret goes with the app.
 
 ## How Matching Works
 

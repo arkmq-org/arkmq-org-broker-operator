@@ -222,7 +222,7 @@ The operator issues these from the `ClusterIssuer` named by `ARKMQ_ORG_BROKER_MA
 |---|---|---|
 | Service certificate | `messaging-service-broker-cert` | TLS identity of the `BrokerService` broker; mounted by the broker pod for its AMQP acceptor |
 | Prometheus client certificate | `messaging-service-prometheus-cert` | Presented by Prometheus to scrape the broker's metrics endpoint |
-| App certificate | `first-app-app-cert` | mTLS credential presented by the producer/consumer when connecting to the app's dedicated acceptor |
+| App certificate | `first-app-binding-secret`, issued by Certificate `first-app-app-cert` | mTLS credential presented by the producer/consumer when connecting to the app's dedicated acceptor, alongside the app's binding |
 
 ## Prerequisites
 
@@ -784,8 +784,8 @@ messaging-service-prometheus-cert   True    BrokerService
 
 The `BrokerApp` connects to a `BrokerService` using label selectors and declares
 its messaging capabilities. The operator issues its `first-app-app-cert`
-certificate and assigns a port from the service's port pool for the
-application's acceptor.
+certificate into its `first-app-binding-secret` and assigns a port from the
+service's port pool for the application's acceptor.
 
 ```bash {"stage":"deploy_app", "label":"deploy app crd", "runtime":"bash"}
 kubectl apply -f - <<EOF
@@ -852,7 +852,8 @@ secret/cert-pemcfg created
 ```
 
 The producer and consumer jobs read the broker hostname and port from the
-`first-app-binding-secret` that the operator created automatically.
+`first-app-binding-secret` that the operator created automatically, and mount
+it for the app certificate it also holds.
 
 ```bash {"stage":"test_messaging", "label":"run producer", "runtime":"bash"}
 cat <<'EOT' | kubectl apply -f -
@@ -897,7 +898,7 @@ spec:
           secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
-          secretName: first-app-app-cert
+          secretName: first-app-binding-secret
       - name: pem
         secret:
           secretName: cert-pemcfg
@@ -951,7 +952,7 @@ spec:
           secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
-          secretName: first-app-app-cert
+          secretName: first-app-binding-secret
       - name: pem
         secret:
           secretName: cert-pemcfg
@@ -1495,9 +1496,9 @@ dashboard.
 ## Exchange Messages
 
 Now generate a larger volume of messages through the `BrokerService` to produce
-visible data in the Grafana dashboard. We reuse the `cert-pemcfg` secret and
-`first-app-app-cert` certificate from the [Test Messaging](#test-messaging) section,
-connecting via the binding secret as before.
+visible data in the Grafana dashboard. We reuse the `cert-pemcfg` secret from the
+[Test Messaging](#test-messaging) section, connecting via the binding secret,
+which holds the app certificate, as before.
 
 ### Run High-Volume Producer and Consumer Jobs
 
@@ -1545,7 +1546,7 @@ spec:
           secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
-          secretName: first-app-app-cert
+          secretName: first-app-binding-secret
       - name: pem
         secret:
           secretName: cert-pemcfg
@@ -1592,7 +1593,7 @@ spec:
           secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
-          secretName: first-app-app-cert
+          secretName: first-app-binding-secret
       - name: pem
         secret:
           secretName: cert-pemcfg
@@ -1704,7 +1705,7 @@ kubectl logs job/bulk-consumer -n broker-tutorial
 **Solution:** Verify the app certificate and trust store configuration:
 ```bash
 kubectl get certificate first-app-app-cert -n broker-tutorial
-kubectl describe secret first-app-app-cert -n broker-tutorial
+kubectl describe secret first-app-binding-secret -n broker-tutorial
 ```
 
 ### Grafana Access Issues

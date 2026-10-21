@@ -1288,11 +1288,11 @@ func (reconciler *BrokerServiceInstanceReconciler) appIdentityEntries(validApps 
 	return entries, nil
 }
 
-// appCertCN returns the common name of the app's client certificate, found by
-// the <app>-app-cert convention, as ResolveControlPlaneCNs does for the other
-// control-plane identities.
+// appCertCN returns the common name of the app's client certificate, found in
+// AppCertSecretName, as ResolveControlPlaneCNs does for the other control-plane
+// identities.
 func (reconciler *BrokerServiceInstanceReconciler) appCertCN(app *broker.BrokerApp) (string, error) {
-	secretName := app.Name + common.AppCertSecretSuffix
+	secretName := AppCertSecretName(app)
 
 	secret, err := common.GetNamespacedSecret(reconciler.Client, secretName, app.Namespace)
 	if err != nil {

@@ -122,6 +122,14 @@ var _ = Describe("certificates issued from a cluster issuer", func() {
 			Expect(secretOf(certificate).OwnerReferences).To(ownedByCertificate(certificate))
 		})
 
+		It("issues into the secret it is told to", func() {
+			request.SecretName = "owner-binding-secret"
+			certificate := requested()
+			Expect(certificate.Name).To(Equal(request.Name))
+			Expect(certificate.Spec.SecretName).To(Equal(request.SecretName))
+			Expect(secretOf(certificate).OwnerReferences).To(ownedByCertificate(certificate))
+		})
+
 		It("gives each certificate its own common name", func() {
 			other := Request{Name: "other-cert", Namespace: namespace, Owner: owner}
 			Expect(Ensure(ctx, c, scheme, issuer, request)).NotTo(Succeed())

@@ -134,6 +134,7 @@ var _ = Describe("pki issuer mode", Label("pki-issuer-mode"), func() {
 		brokerCertKey := types.NamespacedName{Name: serviceName + "-" + common.DefaultOperandCertSecretName, Namespace: defaultNamespace}
 		prometheusCertKey := types.NamespacedName{Name: serviceName + "-" + common.DefaultPrometheusCertSecretName, Namespace: defaultNamespace}
 		appCertKey := types.NamespacedName{Name: app.Name + common.AppCertSecretSuffix, Namespace: app.Namespace}
+		bindingSecretKey := types.NamespacedName{Name: BindingsSecretName(app.Name), Namespace: app.Namespace}
 
 		By("checking the operator issued its own cert, with an unguessable identity")
 		expectIssuedWithUUIDCommonName(operatorCertKey, nil)
@@ -143,6 +144,12 @@ var _ = Describe("pki issuer mode", Label("pki-issuer-mode"), func() {
 		expectIssuedWithUUIDCommonName(prometheusCertKey, &metav1.OwnerReference{Kind: "BrokerService", Name: serviceName})
 		expectIssuedWithUUIDCommonName(appCertKey, &metav1.OwnerReference{Kind: "BrokerApp", Name: app.Name})
 
+		By("checking the app cert is issued into the app's binding secret")
+		certificate := &cmv1.Certificate{}
+		Expect(k8sClient.Get(ctx, appCertKey, certificate)).Should(Succeed())
+		Expect(certificate.Spec.SecretName).Should(Equal(bindingSecretKey.Name))
+		Expect(errors.IsNotFound(k8sClient.Get(ctx, appCertKey, &corev1.Secret{}))).Should(BeTrue())
+
 		By("checking the service and the app become ready")
 		Eventually(func(g Gomega) {
 			current := &broker.BrokerService{}
@@ -150,17 +157,30 @@ var _ = Describe("pki issuer mode", Label("pki-issuer-mode"), func() {
 			g.Expect(meta.IsStatusConditionTrue(current.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
 		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-		var bindingSecretName string
 		Eventually(func(g Gomega) {
 			current := &broker.BrokerApp{}
 			g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, current)).Should(Succeed())
 			g.Expect(meta.IsStatusConditionTrue(current.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
 			g.Expect(current.Status.Service).ShouldNot(BeNil())
-			bindingSecretName = current.Status.Service.Secret
+			g.Expect(current.Status.Service.Secret).Should(Equal(bindingSecretKey.Name))
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		By("checking the binding secret holds the binding and the cert, each written by its own manager")
+		Eventually(func(g Gomega) {
+			binding := &corev1.Secret{}
+			g.Expect(k8sClient.Get(ctx, bindingSecretKey, binding)).Should(Succeed())
+			g.Expect(binding.Data).Should(HaveKey("host"))
+			g.Expect(binding.Data).Should(HaveKey("port"))
+			g.Expect(binding.Data).Should(HaveKey("uri"))
+			g.Expect(binding.Data).Should(HaveKey("tls.crt"))
+			g.Expect(binding.Data).Should(HaveKey("tls.key"))
+			g.Expect(binding.ManagedFields).Should(ContainElement(SatisfyAll(
+				HaveField("Manager", common.OperatorName),
+				HaveField("Operation", metav1.ManagedFieldsOperationApply),
+			)))
 		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 		By("checking the operator's writes do not make cert-manager issue again")
-		certificate := &cmv1.Certificate{}
 		Expect(k8sClient.Get(ctx, appCertKey, certificate)).Should(Succeed())
 		revision := certificate.Status.Revision
 		Expect(revision).ShouldNot(BeNil())
@@ -171,7 +191,7 @@ var _ = Describe("pki issuer mode", Label("pki-issuer-mode"), func() {
 		}, "30s", "5s").Should(Succeed())
 
 		By("sending a message over mtls with the issued app cert")
-		producer := pkiProducerJob(serviceName+"-producer", appCertKey.Name, bindingSecretName, "PKI.JOBS")
+		producer := pkiProducerJob(serviceName+"-producer", bindingSecretKey.Name, bindingSecretKey.Name, "PKI.JOBS")
 		Expect(k8sClient.Create(ctx, producer)).Should(Succeed())
 		DeferCleanup(CleanResource, producer, producer.Name, producer.Namespace)
 		DeferCleanup(UninstallSecret, pkiPemcfgSecretName, defaultNamespace)
@@ -181,11 +201,11 @@ var _ = Describe("pki issuer mode", Label("pki-issuer-mode"), func() {
 			g.Expect(job.Status.Succeeded).Should(BeNumerically("==", 1))
 		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-		By("deleting the app leaves neither its Certificate nor its secret behind")
+		By("deleting the app leaves neither its Certificate nor its binding secret behind")
 		Expect(k8sClient.Delete(ctx, &app)).Should(Succeed())
 		Eventually(func(g Gomega) {
 			g.Expect(errors.IsNotFound(k8sClient.Get(ctx, appCertKey, &cmv1.Certificate{}))).Should(BeTrue())
-			g.Expect(errors.IsNotFound(k8sClient.Get(ctx, appCertKey, &corev1.Secret{}))).Should(BeTrue())
+			g.Expect(errors.IsNotFound(k8sClient.Get(ctx, bindingSecretKey, &corev1.Secret{}))).Should(BeTrue())
 		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 		By("deleting the service leaves none of its certs behind")
@@ -221,6 +241,7 @@ var _ = Describe("pki issuer mode", Label("pki-issuer-mode"), func() {
 		DeferCleanup(CleanResource, &app, app.Name, app.Namespace)
 
 		appCertKey := types.NamespacedName{Name: app.Name + common.AppCertSecretSuffix, Namespace: app.Namespace}
+		bindingSecretKey := types.NamespacedName{Name: BindingsSecretName(app.Name), Namespace: app.Namespace}
 
 		By("checking the cert is issued while the app waits for a service, with no binding yet")
 		expectIssuedWithUUIDCommonName(appCertKey, &metav1.OwnerReference{Kind: "BrokerApp", Name: app.Name})
@@ -231,13 +252,15 @@ var _ = Describe("pki issuer mode", Label("pki-issuer-mode"), func() {
 			g.Expect(condition).ShouldNot(BeNil())
 			g.Expect(condition.Status).Should(Equal(metav1.ConditionFalse))
 		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-		Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: BindingsSecretName(app.Name), Namespace: app.Namespace}, &corev1.Secret{}))).Should(BeTrue())
+		binding := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, bindingSecretKey, binding)).Should(Succeed())
+		Expect(binding.Data).ShouldNot(HaveKey("host"))
 
-		By("deleting the app leaves neither its Certificate nor its secret behind")
+		By("deleting the app leaves neither its Certificate nor its binding secret behind")
 		Expect(k8sClient.Delete(ctx, &app)).Should(Succeed())
 		Eventually(func(g Gomega) {
 			g.Expect(errors.IsNotFound(k8sClient.Get(ctx, appCertKey, &cmv1.Certificate{}))).Should(BeTrue())
-			g.Expect(errors.IsNotFound(k8sClient.Get(ctx, appCertKey, &corev1.Secret{}))).Should(BeTrue())
+			g.Expect(errors.IsNotFound(k8sClient.Get(ctx, bindingSecretKey, &corev1.Secret{}))).Should(BeTrue())
 		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 	})
 

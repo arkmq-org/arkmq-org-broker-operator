@@ -51,10 +51,12 @@ import (
 // whatever else writes into the secret.
 const FieldManager = common.OperatorName + "-pki"
 
-// Request describes a certificate to issue into the secret of the same name.
+// Request describes a certificate to issue.
 type Request struct {
-	Name      string
-	Namespace string
+	Name string
+	// SecretName is the secret the certificate is written into, Name when empty.
+	SecretName string
+	Namespace  string
 	// Owner of the Certificate, nil for one that outlives every CR, such as the
 	// operator's own.
 	Owner    client.Object
@@ -63,6 +65,13 @@ type Request struct {
 
 func (r Request) key() types.NamespacedName {
 	return types.NamespacedName{Name: r.Name, Namespace: r.Namespace}
+}
+
+func (r Request) secretKey() types.NamespacedName {
+	if r.SecretName == "" {
+		return r.key()
+	}
+	return types.NamespacedName{Name: r.SecretName, Namespace: r.Namespace}
 }
 
 // ConflictError reports a resource under the name of a certificate to issue
@@ -115,7 +124,7 @@ func Ensure(ctx context.Context, c client.Client, scheme *runtime.Scheme, issuer
 	}
 
 	secret := &corev1.Secret{}
-	err = c.Get(ctx, key, secret)
+	err = c.Get(ctx, request.secretKey(), secret)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
@@ -140,7 +149,7 @@ func create(ctx context.Context, c client.Client, scheme *runtime.Scheme, issuer
 			Labels:    map[string]string{selectors.LabelAppKubernetesManagedBy: common.OperatorName},
 		},
 		Spec: cmv1.CertificateSpec{
-			SecretName: request.Name,
+			SecretName: request.secretKey().Name,
 			// the common name is the identity a broker authorises, unguessable so
 			// that access to the issuer alone does not let one mint it
 			CommonName: uuid.NewString(),

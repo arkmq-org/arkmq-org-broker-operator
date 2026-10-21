@@ -76,7 +76,7 @@ Role and queue configuration come from environment variables.
 | delivery-service-app | `delivery-service` | `delivery` | `ORDERS.SHIPPED` | `ORDERS.DELIVERED` |
 | camel-jms-master-sink *(optional)* | `master-sink` | `sink` | `ORDERS.DELIVERED` | — |
 
-The Kubernetes Deployment name is the full service name (e.g. `order-processor-app`). The BrokerApp identity drops the `-app` suffix (e.g. `order-processor`) so that the certificate secret the Operator issues for it (`{brokerAppName}-app-cert`) carries the deployment's name.
+The Kubernetes Deployment name is the full service name (e.g. `order-processor-app`). The BrokerApp identity drops the `-app` suffix (e.g. `order-processor`) so that the certificate the Operator issues for it (`{brokerAppName}-app-cert`) carries the deployment's name.
 
 ### Prerequisites
 
@@ -697,7 +697,7 @@ order-generator  →  ORDERS.NEW  →  order-processor  →  ORDERS.PROCESSED  �
 
 Each app only owns the addresses it **produces**. Downstream consumers reference upstream producers using `appName` + `appNamespace`.
 
-The Operator issues each `BrokerApp` its `{brokerAppName}-app-cert` secret, in the app's namespace, before reporting it `Ready`.
+The Operator issues each `BrokerApp` its certificate into its `{brokerAppName}-binding-secret`, in the app's namespace, before reporting it `Ready`.
 
 #### order-generator (Traffic Generator)
 
@@ -850,7 +850,7 @@ statefulset.apps/messaging-service-ss condition met
 
 ### Verify BrokerApp Bindings
 
-Each `BrokerApp` causes the Operator to create a binding secret containing the broker host and port for that application's dedicated acceptor. The Camel Deployments in the next section read these secrets directly — no manual connection string management required.
+Each `BrokerApp` causes the Operator to create a binding secret containing the broker host and port for that application's dedicated acceptor, and the application's certificate. The Camel Deployments in the next section read these secrets directly — no manual connection string management required.
 
 ```bash {"stage":"deploy_app", "label":"verify brokerapp bindings", "runtime":"bash"}
 kubectl get brokerapp -n service-app-project \
@@ -870,10 +870,10 @@ Then confirm the secrets exist:
 kubectl get secret -n service-app-project | grep binding-secret
 ```
 ```shell markdown_runner
-delivery-service-binding-secret                                                       Opaque                                3      18s
-order-generator-binding-secret                                                        Opaque                                3      3m39s
-order-processor-binding-secret                                                        Opaque                                3      2m18s
-shipping-service-binding-secret                                                       Opaque                                3      119s
+delivery-service-binding-secret                                                       Opaque                                6      18s
+order-generator-binding-secret                                                        Opaque                                6      3m39s
+order-processor-binding-secret                                                        Opaque                                6      2m18s
+shipping-service-binding-secret                                                       Opaque                                6      119s
 ```
 
 You should see `order-generator-binding-secret`, `order-processor-binding-secret`, `shipping-service-binding-secret`, and `delivery-service-binding-secret` before proceeding to deploy the Camel applications.
@@ -899,7 +899,7 @@ The main configuration variables are:
 
 Each Camel deployment needs two things for mTLS:
 
-- Its own **app certificate** (for example, `order-generator-app-cert`). The Operator issued it for the app's `BrokerApp`, and the Deployment mounts it at `/app/tls/client/`.
+- Its own **app certificate**, in its binding secret (for example, `order-generator-binding-secret`). The Operator issued it for the app's `BrokerApp`, and the Deployment mounts the binding secret at `/app/tls/client/`.
 - A **PEM keystore configuration** that tells the [dentrassi PEM keystore](https://github.com/ctron/pem-keystore) library where to find the certificate and private key.
 
 The PEM configuration is identical for all four applications because they all use the same filesystem paths:
@@ -1010,7 +1010,7 @@ spec:
           secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
-          secretName: order-generator-app-cert
+          secretName: order-generator-binding-secret
       - name: pem
         secret:
           secretName: cert-pemcfg
@@ -1104,7 +1104,7 @@ spec:
           secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
-          secretName: order-processor-app-cert
+          secretName: order-processor-binding-secret
       - name: pem
         secret:
           secretName: cert-pemcfg
@@ -1198,7 +1198,7 @@ spec:
           secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
-          secretName: shipping-service-app-cert
+          secretName: shipping-service-binding-secret
       - name: pem
         secret:
           secretName: cert-pemcfg
@@ -1292,7 +1292,7 @@ spec:
           secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
-          secretName: delivery-service-app-cert
+          secretName: delivery-service-binding-secret
       - name: pem
         secret:
           secretName: cert-pemcfg
@@ -1344,7 +1344,7 @@ kubectl wait brokerapp/master-sink -n service-app-project --for=condition=Ready 
 brokerapp.broker.arkmq.org/master-sink condition met
 ```
 
-The Camel JMS app uses the [dentrassi PEM keystore](https://github.com/ctron/pem-keystore) library to handle mTLS. The `master-sink-app-cert` Secret, issued by the Operator for the `master-sink` BrokerApp, contains the TLS certificate and private key, which are mounted in the container at `/app/tls/client/`.
+The Camel JMS app uses the [dentrassi PEM keystore](https://github.com/ctron/pem-keystore) library to handle mTLS. The `master-sink-binding-secret` Secret holds the TLS certificate and private key the Operator issued for the `master-sink` BrokerApp, which are mounted in the container at `/app/tls/client/`.
 
 ```bash {"stage":"deploy_camel", "label":"wait for master-sink binding secret", "runtime":"bash"}
 kubectl wait secret master-sink-binding-secret -n service-app-project --for=create --timeout=300s
@@ -1418,7 +1418,7 @@ spec:
           secretName: arkmq-org-broker-manager-ca
       - name: cert
         secret:
-          secretName: master-sink-app-cert
+          secretName: master-sink-binding-secret
       - name: pem
         secret:
           secretName: cert-pemcfg

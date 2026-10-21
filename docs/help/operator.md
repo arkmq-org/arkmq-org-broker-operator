@@ -1470,7 +1470,7 @@ not have write access there. The alternatives considered are in
 #### An app's own metrics identity
 
 The broker also lets each app read the metrics of the queues it is authorised
-on, and no others, by presenting its own `<app>-app-cert` on port `8888`: the
+on, and no others, by presenting its own app certificate on port `8888`: the
 Common Name maps to the app's `<namespace>-<app>-metrics` role. The operator
 generates no scrape for it. It is there for when the labelled scrape above does
 not give an app what it needs:
@@ -1487,7 +1487,8 @@ not give an app what it needs:
   there regardless.
 
 Such a scrape is declared in the app's namespace, so its certificate resolves
-there. A `Probe` works everywhere, OpenShift user workload monitoring included:
+there: the `<app>-app-cert` secret, or the app's `<app>-binding-secret` when
+the operator issues it from a `ClusterIssuer`. A `Probe` works everywhere, OpenShift user workload monitoring included:
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -1516,7 +1517,7 @@ spec:
 
 The broker is its own prober here: the scrape goes to the prober URL and carries
 a `target` parameter the broker ignores. The identity is the certificate, so
-`<app>-app-cert` deserves the same care as any credential.
+the secret holding it deserves the same care as any credential.
 
 The role scopes queue series only. The broker's JVM and process series, heap,
 threads, garbage collection and CPU, come from the metrics agent itself rather
