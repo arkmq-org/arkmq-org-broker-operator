@@ -22,6 +22,11 @@ import (
 	rtclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	// monitoringv1.SchemeHTTPS
+	LowerCaseHTTPSForBackwardCompatability monitoringv1.Scheme = "https"
+)
+
 // ScrapeTarget is everything a scrape of a BrokerService's mTLS metrics
 // endpoint needs.
 type ScrapeTarget struct {
@@ -86,7 +91,7 @@ func BuildServiceMonitor(target ScrapeTarget, existing *monitoringv1.ServiceMoni
 
 	endpoint := monitoringv1.Endpoint{
 		Port:        PortName,
-		Scheme:      ptr.To(monitoringv1.SchemeHTTPS),
+		Scheme:      ptr.To(LowerCaseHTTPSForBackwardCompatability),
 		Path:        Path,
 		HonorLabels: true,
 		// Prometheus would otherwise name the job after the Service, which is

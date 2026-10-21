@@ -68,7 +68,7 @@ var _ = Describe("service monitor unit", func() {
 			TargetPort: intstr.FromInt32(monitoring.Port),
 		}))
 
-		Expect(*serviceMonitor.Spec.Endpoints[0].Scheme).To(Equal(monitoringv1.SchemeHTTPS))
+		Expect(*serviceMonitor.Spec.Endpoints[0].Scheme).To(Equal(monitoring.LowerCaseHTTPSForBackwardCompatability))
 		Expect(serviceMonitor.Spec.Endpoints[0].Path).To(Equal(monitoring.Path))
 		Expect(serviceMonitor.Namespace).To(Equal("svc-ns"))
 	})

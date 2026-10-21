@@ -64,7 +64,7 @@ func TestServiceMonitorScrapesTheMetricsPortOfTheSelectedService(t *testing.T) {
 
 	endpoint := serviceMonitor.Spec.Endpoints[0]
 	assert.Equal(t, PortName, endpoint.Port)
-	assert.Equal(t, monitoringv1.SchemeHTTPS, *endpoint.Scheme)
+	assert.Equal(t, LowerCaseHTTPSForBackwardCompatability, *endpoint.Scheme)
 	assert.Equal(t, Path, endpoint.Path)
 }
 
