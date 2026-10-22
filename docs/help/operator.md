@@ -1202,48 +1202,24 @@ The `spec.restricted` field was a dev preview feature. The impact of this deprec
        - name: JDK_JAVA_OPTIONS
          value: "-Djavax.net.debug=ssl"
    ```
-3. Ensure the required PKI secrets are in place (operator cert, CA bundle, operand cert -- see the operator PKI section below).
+3. Provide the control plane the broker should run, if any (see Broker CR control plane below).
 4. Verify the new Broker CR reaches `Ready=True`.
 5. Delete the old restricted BrokerCluster CR.
 
-### Control Plane Configuration Override
+### Broker CR control plane
 
-The Broker CR supports control plane configuration overrides via a Kubernetes Secret. This is useful for customizing operator-generated broker properties such as Prometheus metrics configuration or Jolokia settings.
+The Broker CR runs what it is given. It generates no Jolokia or Prometheus agent configuration, no control plane realm and no liveness probe.
+A `BrokerService` renders all of these for the Broker it owns: a `<service>-control-plane-bp` secret, mounted next to the operand cert and the operator CA through `spec.extraMounts.secrets`, the agent flags in a `JAVA_ARGS_APPEND` entry of `spec.env`, and an mTLS `spec.livenessProbe`.
 
-The operator looks for a secret named `control-plane-override` (or `[cr-name]-control-plane-override` for CR-specific configuration). If found, the contents of this secret are applied as broker properties, overriding any auto-generated configuration.
-
-**Secret Naming Convention:**
-- The operator first checks for a CR-specific secret: `[cr-name]-control-plane-override`
-- If not found, it falls back to the shared secret: `control-plane-override`
-
-**Example:** Override certificate-based authentication configuration:
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: control-plane-override
-  namespace: your-namespace
-stringData:
-  _cert-users: |
-    # Certificate DN to user mapping
-    hawtio=/CN = hawtio-online\.hawtio\.svc.*/
-    operator=/.\*arkmq-org-broker-operator.\*/
-    probe=/.*arkmq-org-broker-operand.*/
-    new-user=/.*new-user.*/
-  _cert-roles: |
-    # Role assignments for certificate-authenticated users
-    status=operator,probe
-    metrics=operator,new-user
-    hawtio=hawtio
-```
+A standalone Broker CR that needs the same supplies them in the same way; copying them from a `BrokerService` deployment and tuning them is the simplest start.
+Status conditions that read the broker over Jolokia, such as `ConfigApplied` and `BrokerVersionAligned`, need a Jolokia agent that accepts the operator client certificate.
 
 ## operator PKI
 In order for the operator to be able to use mtls to connect to the Broker CR operand it needs a client certificate and a trust bundle listing the trusted CAs. The user needs to provide these two secrets in the operator namespace; cert manager can be used to create and populate both.
 The default operator cert secret name is `arkmq-org-broker-manager-cert` and the default operator trust bundle secret name is `arkmq-org-broker-manager-ca`.
 If either of these secrets need to be named differently, an enviroment variable can provide the alternative name using key ARKMQ_ORG_BROKER_MANAGER_CERT_SECRET_NAME or ARKMQ_ORG_BROKER_MANAGER_CA_SECRET_NAME.
 
-The Broker CR automatically configures control plane authentication for common services. For Prometheus metrics scraping, the operator reads the certificate from a prometheus cert secret and configures the broker to grant metrics access to that certificate's Common Name (CN). The operator first checks for a CR-specific secret `[cr-name]-[base-name]` (allowing per-CR isolation), then falls back to the shared `[base-name]` secret. The base name defaults to `prometheus-cert` but can be overridden using the BASE_PROMETHEUS_CERT_SECRET_NAME environment variable (e.g., if set to `custom-prometheus`, it checks `my-broker-custom-prometheus` then `custom-prometheus`). The same resolution decides which secret the generated `ServiceMonitor` references, so the override carries through to the scrape.
+The BrokerService CR automatically configures control plane authentication for common services. For Prometheus metrics scraping, the operator reads the certificate from a prometheus cert secret and configures the broker to grant metrics access to that certificate's Common Name (CN). The operator first checks for a CR-specific secret `[cr-name]-[base-name]` (allowing per-CR isolation), then falls back to the shared `[base-name]` secret. The base name defaults to `prometheus-cert` but can be overridden using the BASE_PROMETHEUS_CERT_SECRET_NAME environment variable (e.g., if set to `custom-prometheus`, it checks `my-broker-custom-prometheus` then `custom-prometheus`). The same resolution decides which secret the generated `ServiceMonitor` references, so the override carries through to the scrape.
 
 ## Locking down a broker deployment
 
