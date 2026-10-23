@@ -20,12 +20,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/monitoring"
-	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"path"
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/monitoring"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/appselector"
@@ -282,7 +283,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 		return err
 	}
 
-	if common.BrokerNetworkPolicyEnabled() && len(appPorts) > 0 {
+	if common.BrokerNetworkPolicyEnabled() {
 		desired.Spec.ResourceTemplates = appendNetworkPolicyTemplate(desired.Spec.ResourceTemplates, appPorts)
 	}
 
