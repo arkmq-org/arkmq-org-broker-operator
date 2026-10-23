@@ -1,116 +1,133 @@
 package networkpolicies
 
 import (
-	"testing"
-
 	netv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/stretchr/testify/assert"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func TestNewNetworkPolicy_NoAcceptors(t *testing.T) {
-	netpol := NewNetworkPolicy(nil, "my-broker", "test-ns", false, nil)
+var _ = Describe("NetworkPolicy", func() {
 
-	assert.Equal(t, "my-broker-netpol", netpol.Name)
-	assert.Equal(t, "test-ns", netpol.Namespace)
-	assert.Equal(t, "NetworkPolicy", netpol.Kind)
-	assert.Equal(t, "networking.k8s.io/v1", netpol.APIVersion)
+	Describe("NewNetworkPolicy", func() {
 
-	assert.Equal(t, "my-broker", netpol.Spec.PodSelector.MatchLabels["ActiveMQArtemis"])
-	assert.Contains(t, netpol.Spec.PolicyTypes, netv1.PolicyTypeIngress)
-	assert.NotContains(t, netpol.Spec.PolicyTypes, netv1.PolicyTypeEgress)
+		Context("with no acceptors and non-restricted mode", func() {
+			It("sets metadata and selector correctly", func() {
+				netpol := NewNetworkPolicy(nil, "my-broker", "test-ns", false, nil)
 
-	ports := collectPorts(netpol)
-	assert.Empty(t, ports, "no ports without acceptors in non-restricted mode")
-}
+				Expect(netpol.Name).To(Equal("my-broker-netpol"))
+				Expect(netpol.Namespace).To(Equal("test-ns"))
+				Expect(netpol.Kind).To(Equal("NetworkPolicy"))
+				Expect(netpol.APIVersion).To(Equal("networking.k8s.io/v1"))
 
-func TestNewNetworkPolicy_NoEgressRule(t *testing.T) {
-	netpol := NewNetworkPolicy(nil, "broker", "ns", false, nil)
+				Expect(netpol.Spec.PodSelector.MatchLabels).To(HaveKeyWithValue("ActiveMQArtemis", "my-broker"))
+				Expect(netpol.Spec.PolicyTypes).To(ContainElement(netv1.PolicyTypeIngress))
+				Expect(netpol.Spec.PolicyTypes).NotTo(ContainElement(netv1.PolicyTypeEgress))
 
-	assert.Empty(t, netpol.Spec.Egress, "no egress rules — ingress-only policy")
-	assert.NotContains(t, netpol.Spec.PolicyTypes, netv1.PolicyTypeEgress)
-}
+				ports := collectPorts(netpol)
+				Expect(ports).To(BeEmpty(), "no ports without acceptors in non-restricted mode")
+			})
 
-func TestNewNetworkPolicy_WithAcceptorPorts(t *testing.T) {
-	netpol := NewNetworkPolicy(nil, "broker", "ns", false, []int32{5672, 1883})
-	ports := collectPorts(netpol)
+			It("produces deny-all with empty ingress rules", func() {
+				netpol := NewNetworkPolicy(nil, "my-broker", "test-ns", false, nil)
 
-	assert.Contains(t, ports, int32(5672))
-	assert.Contains(t, ports, int32(1883))
-	assert.Len(t, ports, 2, "only declared acceptor ports")
-}
+				Expect(netpol.Spec.Ingress).To(BeEmpty(), "no ingress rules means deny-all, not allow-all")
+			})
+		})
 
-func TestNewNetworkPolicy_DeduplicatesPorts(t *testing.T) {
-	netpol := NewNetworkPolicy(nil, "broker", "ns", false, []int32{5672, 5672})
-	ports := collectPorts(netpol)
+		It("does not include egress rules", func() {
+			netpol := NewNetworkPolicy(nil, "broker", "ns", false, nil)
 
-	assert.Len(t, ports, 1, "duplicate acceptor port should appear exactly once")
-	assert.Contains(t, ports, int32(5672))
-}
+			Expect(netpol.Spec.Egress).To(BeEmpty(), "no egress rules — ingress-only policy")
+			Expect(netpol.Spec.PolicyTypes).NotTo(ContainElement(netv1.PolicyTypeEgress))
+		})
 
-func TestNewNetworkPolicy_Restricted(t *testing.T) {
-	netpol := NewNetworkPolicy(nil, "broker", "ns", true, nil)
-	ports := collectPorts(netpol)
+		It("includes declared acceptor ports", func() {
+			netpol := NewNetworkPolicy(nil, "broker", "ns", false, []int32{5672, 1883})
+			ports := collectPorts(netpol)
 
-	assert.Contains(t, ports, int32(8778), "jolokia agent")
-	assert.Contains(t, ports, int32(8888), "prometheus agent")
-	assert.NotContains(t, ports, int32(7800), "no jgroups in restricted")
-	assert.NotContains(t, ports, int32(8161), "no console in restricted")
-	assert.NotContains(t, ports, int32(61616), "no all-protocols in restricted")
-	assert.Len(t, ports, 2)
-}
+			Expect(ports).To(ContainElement(int32(5672)))
+			Expect(ports).To(ContainElement(int32(1883)))
+			Expect(ports).To(HaveLen(2), "only declared acceptor ports")
+		})
 
-func TestNewNetworkPolicy_RestrictedWithExtraPorts(t *testing.T) {
-	netpol := NewNetworkPolicy(nil, "broker", "ns", true, []int32{5672, 1883})
-	ports := collectPorts(netpol)
+		It("deduplicates ports", func() {
+			netpol := NewNetworkPolicy(nil, "broker", "ns", false, []int32{5672, 5672})
+			ports := collectPorts(netpol)
 
-	assert.Contains(t, ports, int32(8778), "jolokia base port")
-	assert.Contains(t, ports, int32(8888), "prometheus base port")
-	assert.Contains(t, ports, int32(5672), "extra port included")
-	assert.Contains(t, ports, int32(1883), "extra port included")
-	assert.NotContains(t, ports, int32(61616), "no default ports in restricted mode")
-	assert.Len(t, ports, 4)
-}
+			Expect(ports).To(HaveLen(1), "duplicate acceptor port should appear exactly once")
+			Expect(ports).To(ContainElement(int32(5672)))
+		})
 
-func TestBuildNetworkPolicySpec_RestrictedWithExtraPorts(t *testing.T) {
-	spec := BuildNetworkPolicySpec("my-svc", true, []int32{61617, 61618})
+		Context("in restricted mode", func() {
+			It("includes only jolokia and prometheus ports", func() {
+				netpol := NewNetworkPolicy(nil, "broker", "ns", true, nil)
+				ports := collectPorts(netpol)
 
-	var ports []int32
-	for _, rule := range spec.Ingress {
-		for _, p := range rule.Ports {
-			if p.Port != nil {
-				ports = append(ports, int32(p.Port.IntValue()))
+				Expect(ports).To(ContainElement(int32(8778)), "jolokia agent")
+				Expect(ports).To(ContainElement(int32(8888)), "prometheus agent")
+				Expect(ports).NotTo(ContainElement(int32(7800)), "no jgroups in restricted")
+				Expect(ports).NotTo(ContainElement(int32(8161)), "no console in restricted")
+				Expect(ports).NotTo(ContainElement(int32(61616)), "no all-protocols in restricted")
+				Expect(ports).To(HaveLen(2))
+			})
+
+			It("adds extra ports alongside restricted base ports", func() {
+				netpol := NewNetworkPolicy(nil, "broker", "ns", true, []int32{5672, 1883})
+				ports := collectPorts(netpol)
+
+				Expect(ports).To(ContainElement(int32(8778)), "jolokia base port")
+				Expect(ports).To(ContainElement(int32(8888)), "prometheus base port")
+				Expect(ports).To(ContainElement(int32(5672)), "extra port included")
+				Expect(ports).To(ContainElement(int32(1883)), "extra port included")
+				Expect(ports).NotTo(ContainElement(int32(61616)), "no default ports in restricted mode")
+				Expect(ports).To(HaveLen(4))
+			})
+		})
+
+		It("preserves resource version from existing object", func() {
+			existing := &netv1.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            "broker-netpol",
+					Namespace:       "ns",
+					ResourceVersion: "12345",
+				},
 			}
-		}
-	}
 
-	assert.Contains(t, ports, int32(8778))
-	assert.Contains(t, ports, int32(8888))
-	assert.Contains(t, ports, int32(61617))
-	assert.Contains(t, ports, int32(61618))
-	assert.Len(t, ports, 4)
+			netpol := NewNetworkPolicy(existing, "broker", "ns", false, nil)
 
-	assert.Equal(t, "my-svc", spec.PodSelector.MatchLabels["ActiveMQArtemis"])
-	assert.Contains(t, spec.PolicyTypes, netv1.PolicyTypeIngress)
-	assert.NotContains(t, spec.PolicyTypes, netv1.PolicyTypeEgress)
-	assert.Empty(t, spec.Egress)
-}
+			Expect(netpol.ResourceVersion).To(Equal("12345"), "should preserve existing resource version")
+			Expect(netpol.Spec.PodSelector.MatchLabels).To(HaveKeyWithValue("ActiveMQArtemis", "broker"))
+		})
+	})
 
-func TestNewNetworkPolicy_ReusesExisting(t *testing.T) {
-	existing := &netv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            "broker-netpol",
-			Namespace:       "ns",
-			ResourceVersion: "12345",
-		},
-	}
+	Describe("BuildNetworkPolicySpec", func() {
+		It("builds restricted spec with extra ports", func() {
+			spec := BuildNetworkPolicySpec("my-svc", true, []int32{61617, 61618})
 
-	netpol := NewNetworkPolicy(existing, "broker", "ns", false, nil)
+			var ports []int32
+			for _, rule := range spec.Ingress {
+				for _, p := range rule.Ports {
+					if p.Port != nil {
+						ports = append(ports, int32(p.Port.IntValue()))
+					}
+				}
+			}
 
-	assert.Equal(t, "12345", netpol.ResourceVersion, "should preserve existing resource version")
-	assert.Equal(t, "broker", netpol.Spec.PodSelector.MatchLabels["ActiveMQArtemis"])
-}
+			Expect(ports).To(ContainElement(int32(8778)))
+			Expect(ports).To(ContainElement(int32(8888)))
+			Expect(ports).To(ContainElement(int32(61617)))
+			Expect(ports).To(ContainElement(int32(61618)))
+			Expect(ports).To(HaveLen(4))
+
+			Expect(spec.PodSelector.MatchLabels).To(HaveKeyWithValue("ActiveMQArtemis", "my-svc"))
+			Expect(spec.PolicyTypes).To(ContainElement(netv1.PolicyTypeIngress))
+			Expect(spec.PolicyTypes).NotTo(ContainElement(netv1.PolicyTypeEgress))
+			Expect(spec.Egress).To(BeEmpty())
+		})
+	})
+})
 
 func collectPorts(netpol *netv1.NetworkPolicy) []int32 {
 	var ports []int32
