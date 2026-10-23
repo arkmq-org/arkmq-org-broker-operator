@@ -91,6 +91,24 @@ var _ = Describe("artemis controller", Label("do"), func() {
 					g.Expect(k8sClient.Get(ctx, secretKey, &createdSecret)).To(Succeed())
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
+				By("Creating operator CA secret for jolokia TLS verification")
+				caPEM, err := ExtractCertPEMFromKeystore(commonSecret.Data["broker.ks"], defaultPassword)
+				Expect(err).To(BeNil())
+				operatorCASecret := corev1.Secret{
+					TypeMeta: metav1.TypeMeta{
+						APIVersion: "v1",
+						Kind:       "Secret",
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      common.DefaultOperatorCASecretName,
+						Namespace: defaultNamespace,
+					},
+					Data: map[string][]byte{
+						"ca-bundle.pem": caPEM,
+					},
+				}
+				Expect(k8sClient.Create(ctx, &operatorCASecret)).Should(Succeed())
+
 				By("Deploying the broker cr")
 				brokerCr, createdBrokerCr := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
 
@@ -143,6 +161,7 @@ var _ = Describe("artemis controller", Label("do"), func() {
 
 				CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
 				CleanResource(commonSecret, commonSecret.Name, defaultNamespace)
+				CleanResource(&operatorCASecret, operatorCASecret.Name, defaultNamespace)
 			}
 		})
 	})

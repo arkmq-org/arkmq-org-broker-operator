@@ -56,6 +56,7 @@ import (
 
 type BrokerServiceReconciler struct {
 	*ReconcilerLoop
+	brokerTLS *brokerproperties.BrokerTLSSpec
 }
 
 type BrokerServiceInstanceReconciler struct {
@@ -64,9 +65,10 @@ type BrokerServiceInstanceReconciler struct {
 	status   *broker.BrokerServiceStatus
 }
 
-func NewBrokerServiceReconciler(client client.Client, scheme *runtime.Scheme, config *rest.Config, logger logr.Logger) *BrokerServiceReconciler {
+func NewBrokerServiceReconciler(client client.Client, scheme *runtime.Scheme, config *rest.Config, logger logr.Logger, brokerTLS *brokerproperties.BrokerTLSSpec) *BrokerServiceReconciler {
 	reconciler := BrokerServiceReconciler{
 		ReconcilerLoop: &ReconcilerLoop{KubeBits: &KubeBits{client, scheme, config, logger}},
+		brokerTLS:      brokerTLS,
 	}
 	reconciler.ReconcilerLoopType = &reconciler
 	return &reconciler
@@ -98,7 +100,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 	}
 
 	processor := BrokerServiceInstanceReconciler{
-		BrokerServiceReconciler: &BrokerServiceReconciler{ReconcilerLoop: localLoop},
+		BrokerServiceReconciler: &BrokerServiceReconciler{ReconcilerLoop: localLoop, brokerTLS: reconciler.brokerTLS},
 		instance:                instance,
 		status:                  instance.Status.DeepCopy(),
 	}
@@ -1053,22 +1055,28 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 	name := fmt.Sprintf("%d", port)
 	secretsBase := path.Join(common.SecretPathBase, AppPropertiesSecretName(reconciler.instance.Name))
 
+	acceptorParams := brokerproperties.AcceptorParams{
+		SecurityDomain: realmName,
+		Host:           "${HOSTNAME}",
+		Port:           port,
+		SslEnabled:     true,
+		NeedClientAuth: true,
+		SaslMechanisms: brokerproperties.SaslExternal,
+		KeyStoreType:   brokerproperties.KeyStoreTypePEMCFG,
+		KeyStorePath:   path.Join(secretsBase, pemCfgkey),
+		TrustStoreType: brokerproperties.TrustStoreTypePEMCA,
+		TrustStorePath: trustStorePath,
+	}
+	if reconciler.brokerTLS != nil {
+		acceptorParams.EnabledCipherSuites = reconciler.brokerTLS.Ciphers
+		acceptorParams.EnabledProtocols = reconciler.brokerTLS.Protocols
+	}
+
 	acceptorJSON := &brokerproperties.AcceptorJSON{
 		AcceptorConfigurations: map[string]*brokerproperties.AcceptorConfiguration{
 			name: {
 				FactoryClassName: brokerproperties.NettyAcceptorFactory,
-				Params: brokerproperties.AcceptorParams{
-					SecurityDomain: realmName,
-					Host:           "${HOSTNAME}",
-					Port:           port,
-					SslEnabled:     true,
-					NeedClientAuth: true,
-					SaslMechanisms: brokerproperties.SaslExternal,
-					KeyStoreType:   brokerproperties.KeyStoreTypePEMCFG,
-					KeyStorePath:   path.Join(secretsBase, pemCfgkey),
-					TrustStoreType: brokerproperties.TrustStoreTypePEMCA,
-					TrustStorePath: trustStorePath,
-				},
+				Params:           acceptorParams,
 			},
 		},
 		JaasConfigs: map[string]*brokerproperties.JaasRealmConfig{

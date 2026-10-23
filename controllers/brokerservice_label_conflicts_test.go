@@ -73,7 +73,7 @@ var _ = Describe("brokerservice label conflicts", func() {
 			}).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), req)
@@ -139,7 +139,7 @@ var _ = Describe("brokerservice label conflicts", func() {
 			}).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 		_, err := r.Reconcile(context.TODO(), req)

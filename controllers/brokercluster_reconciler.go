@@ -133,6 +133,7 @@ type BrokerClusterReconcilerImpl struct {
 	jolokiaEndpoints          []*jolokia_client.JkInfo
 	cachedBrokerClusterStatus map[string]any
 	matchedTemplates          map[int]bool
+	brokerTLS                 *brokerproperties.BrokerTLSSpec
 }
 
 func NewBrokerClusterReconcilerImpl(customResource *v1beta2.BrokerCluster, parent *BrokerClusterReconciler) *BrokerClusterReconcilerImpl {
@@ -145,6 +146,7 @@ func NewBrokerClusterReconcilerImpl(customResource *v1beta2.BrokerCluster, paren
 		isGatewayAPIAvailable:     parent.isGatewayAPIAvailable,
 		cachedBrokerClusterStatus: make(map[string]any),
 		matchedTemplates:          make(map[int]bool),
+		brokerTLS:                 parent.brokerTLS,
 	}
 }
 
@@ -896,6 +898,8 @@ func (reconciler *BrokerClusterReconcilerImpl) generateAcceptorsString(customRes
 	// TODO: Optimize for the single broker configuration
 	ensureCOREOn61616Exists := true // as clustered is no longer an option but true by default
 
+	brokerTLS := reconciler.brokerTLS
+
 	acceptorEntry := ""
 	defaultArgs := "tcpSendBufferSize=1048576;tcpReceiveBufferSize=1048576;useEpoll=true;amqpCredits=1000;amqpMinCredits=300"
 
@@ -951,7 +955,7 @@ func (reconciler *BrokerClusterReconcilerImpl) generateAcceptorsString(customRes
 				reconciler.addPemConfigFileSecret(currentSS, sslArgs.PemCfgs)
 			}
 
-			sslOptionalArguments := reconciler.generateAcceptorSSLOptionalArguments(acceptor)
+			sslOptionalArguments := reconciler.generateAcceptorSSLOptionalArguments(acceptor, brokerTLS)
 
 			if sslOptionalArguments != "" {
 				acceptorEntry = acceptorEntry + ";" + sslOptionalArguments
@@ -1002,6 +1006,8 @@ func (reconciler *BrokerClusterReconcilerImpl) generateAcceptorsString(customRes
 
 func (reconciler *BrokerClusterReconcilerImpl) generateConnectorsString(customResource *v1beta2.BrokerCluster, client rtclient.Client, currentSS *appsv1.StatefulSet) (string, error) {
 
+	brokerTLS := reconciler.brokerTLS
+
 	connectorEntry := ""
 	connectors := customResource.Spec.Connectors
 	for _, connector := range connectors {
@@ -1033,7 +1039,7 @@ func (reconciler *BrokerClusterReconcilerImpl) generateConnectorsString(customRe
 				reconciler.addPemConfigFileSecret(currentSS, sslArgs.PemCfgs)
 			}
 
-			sslOptionalArguments := reconciler.generateConnectorSSLOptionalArguments(connector)
+			sslOptionalArguments := reconciler.generateConnectorSSLOptionalArguments(connector, brokerTLS)
 
 			if sslOptionalArguments != "" {
 				connectorEntry = connectorEntry + ";" + sslOptionalArguments
@@ -1530,15 +1536,24 @@ func (reconciler *BrokerClusterReconcilerImpl) generateCommonSSLFlags(customReso
 	return sslArgs, sslFlags, nil
 }
 
-func (reconciler *BrokerClusterReconcilerImpl) generateAcceptorSSLOptionalArguments(acceptor v1beta2.AcceptorType) string {
+func (reconciler *BrokerClusterReconcilerImpl) generateAcceptorSSLOptionalArguments(acceptor v1beta2.AcceptorType, brokerTLS *brokerproperties.BrokerTLSSpec) string {
 
 	sslOptionalArguments := ""
 
-	if acceptor.EnabledCipherSuites != "" {
-		sslOptionalArguments = sslOptionalArguments + "enabledCipherSuites=" + acceptor.EnabledCipherSuites
+	cipherSuites := acceptor.EnabledCipherSuites
+	if cipherSuites == "" && brokerTLS != nil {
+		cipherSuites = brokerTLS.Ciphers
 	}
-	if acceptor.EnabledProtocols != "" {
-		sslOptionalArguments = sslOptionalArguments + ";" + "enabledProtocols=" + acceptor.EnabledProtocols
+	if cipherSuites != "" {
+		sslOptionalArguments = sslOptionalArguments + "enabledCipherSuites=" + cipherSuites
+	}
+
+	protocols := acceptor.EnabledProtocols
+	if protocols == "" && brokerTLS != nil {
+		protocols = brokerTLS.Protocols
+	}
+	if protocols != "" {
+		sslOptionalArguments = sslOptionalArguments + ";" + "enabledProtocols=" + protocols
 	}
 	if acceptor.NeedClientAuth {
 		sslOptionalArguments = sslOptionalArguments + ";" + "needClientAuth=true"
@@ -1601,15 +1616,24 @@ func (reconciler *BrokerClusterReconcilerImpl) addPemConfigFileSecret(ss *appsv1
 	}
 }
 
-func (reconciler *BrokerClusterReconcilerImpl) generateConnectorSSLOptionalArguments(connector v1beta2.ConnectorType) string {
+func (reconciler *BrokerClusterReconcilerImpl) generateConnectorSSLOptionalArguments(connector v1beta2.ConnectorType, brokerTLS *brokerproperties.BrokerTLSSpec) string {
 
 	sslOptionalArguments := ""
 
-	if connector.EnabledCipherSuites != "" {
-		sslOptionalArguments = sslOptionalArguments + "enabledCipherSuites=" + connector.EnabledCipherSuites
+	cipherSuites := connector.EnabledCipherSuites
+	if cipherSuites == "" && brokerTLS != nil {
+		cipherSuites = brokerTLS.Ciphers
 	}
-	if connector.EnabledProtocols != "" {
-		sslOptionalArguments = sslOptionalArguments + ";" + "enabledProtocols=" + connector.EnabledProtocols
+	if cipherSuites != "" {
+		sslOptionalArguments = sslOptionalArguments + "enabledCipherSuites=" + cipherSuites
+	}
+
+	protocols := connector.EnabledProtocols
+	if protocols == "" && brokerTLS != nil {
+		protocols = brokerTLS.Protocols
+	}
+	if protocols != "" {
+		sslOptionalArguments = sslOptionalArguments + ";" + "enabledProtocols=" + protocols
 	}
 	if connector.NeedClientAuth {
 		sslOptionalArguments = sslOptionalArguments + ";" + "needClientAuth=true"

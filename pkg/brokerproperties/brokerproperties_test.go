@@ -8,6 +8,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/certutil"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	configv1 "github.com/openshift/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -828,6 +829,71 @@ var _ = Describe("RBACConfigData", func() {
 	It("contains exactly 6 security role entries", func() {
 		r := parse()
 		Expect(r.SecurityRoles).To(HaveLen(6))
+	})
+})
+
+var _ = Describe("TLSProfileToBrokerSpec", func() {
+
+	It("returns TLSv1.2,TLSv1.3 protocols for Intermediate min version", func() {
+		spec := &configv1.TLSProfileSpec{
+			Ciphers:       []string{"ECDHE-RSA-AES128-GCM-SHA256"},
+			MinTLSVersion: configv1.VersionTLS12,
+		}
+		result := TLSProfileToBrokerSpec(spec)
+		Expect(result.Protocols).To(Equal("TLSv1.2,TLSv1.3"))
+	})
+
+	It("returns all protocols for Old min version (TLS 1.0)", func() {
+		spec := &configv1.TLSProfileSpec{
+			Ciphers:       []string{"ECDHE-RSA-AES128-GCM-SHA256"},
+			MinTLSVersion: configv1.VersionTLS10,
+		}
+		result := TLSProfileToBrokerSpec(spec)
+		Expect(result.Protocols).To(Equal("TLSv1,TLSv1.1,TLSv1.2,TLSv1.3"))
+	})
+
+	It("returns only TLSv1.3 for Modern min version", func() {
+		spec := &configv1.TLSProfileSpec{
+			MinTLSVersion: configv1.VersionTLS13,
+		}
+		result := TLSProfileToBrokerSpec(spec)
+		Expect(result.Protocols).To(Equal("TLSv1.3"))
+	})
+
+	It("excludes TLS 1.3 cipher names (TLS_ prefix) from broker ciphers", func() {
+		spec := &configv1.TLSProfileSpec{
+			Ciphers: []string{
+				"TLS_AES_128_GCM_SHA256",
+				"ECDHE-RSA-AES128-GCM-SHA256",
+			},
+			MinTLSVersion: configv1.VersionTLS12,
+		}
+		result := TLSProfileToBrokerSpec(spec)
+		Expect(result.Ciphers).To(Equal("ECDHE-RSA-AES128-GCM-SHA256"))
+	})
+
+	It("joins multiple ciphers with commas", func() {
+		spec := &configv1.TLSProfileSpec{
+			Ciphers: []string{
+				"ECDHE-ECDSA-AES128-GCM-SHA256",
+				"ECDHE-RSA-AES128-GCM-SHA256",
+			},
+			MinTLSVersion: configv1.VersionTLS12,
+		}
+		result := TLSProfileToBrokerSpec(spec)
+		Expect(result.Ciphers).To(Equal("ECDHE-ECDSA-AES128-GCM-SHA256,ECDHE-RSA-AES128-GCM-SHA256"))
+	})
+
+	It("returns empty ciphers when all ciphers are TLS 1.3 names", func() {
+		spec := &configv1.TLSProfileSpec{
+			Ciphers: []string{
+				"TLS_AES_128_GCM_SHA256",
+				"TLS_AES_256_GCM_SHA384",
+			},
+			MinTLSVersion: configv1.VersionTLS13,
+		}
+		result := TLSProfileToBrokerSpec(spec)
+		Expect(result.Ciphers).To(BeEmpty())
 	})
 })
 

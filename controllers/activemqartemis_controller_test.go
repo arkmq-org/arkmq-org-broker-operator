@@ -4053,7 +4053,7 @@ var _ = Describe("artemis controller", func() {
 			brokerCR, convertErr := ConvertArtemisToBrokerCluster(&crd)
 			Expect(convertErr).To(BeNil())
 
-			outer := NewBrokerClusterReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable)
+			outer := NewBrokerClusterReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable, nil)
 			reconcilerImpl := NewBrokerClusterReconcilerImpl(brokerCR, outer)
 
 			defaultConsoleSecretName := crd.Name + "-console-secret"
@@ -4149,7 +4149,7 @@ var _ = Describe("artemis controller", func() {
 			brokerCR, convertErr := ConvertArtemisToBrokerCluster(createdCrd)
 			Expect(convertErr).To(BeNil())
 
-			outer := NewBrokerClusterReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable)
+			outer := NewBrokerClusterReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable, nil)
 			reconcilerImpl := NewBrokerClusterReconcilerImpl(brokerCR, outer)
 
 			namers := MakeNamers(brokerCR)
@@ -4257,7 +4257,7 @@ var _ = Describe("artemis controller", func() {
 			brokerCR, convertErr := ConvertArtemisToBrokerCluster(&crd)
 			Expect(convertErr).To(BeNil())
 
-			outer := NewBrokerClusterReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable)
+			outer := NewBrokerClusterReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable, nil)
 			reconcilerImpl := NewBrokerClusterReconcilerImpl(brokerCR, outer)
 			reconcilerImpl.deployed = make(map[reflect.Type][]client.Object)
 

@@ -9,7 +9,11 @@
 package brokerproperties
 
 import (
+	"crypto/tls"
 	"encoding/json"
+	"strings"
+
+	configv1 "github.com/openshift/api/config/v1"
 )
 
 const (
@@ -75,17 +79,68 @@ func (c *CapabilitiesJSON) EnsureSecurityRole(addressKey, roleKey string) *RoleP
 	return c.SecurityRoles[addressKey][roleKey]
 }
 
+var opensslVersionToBroker = map[configv1.TLSProtocolVersion]string{
+	configv1.VersionTLS10: "TLSv1",
+	configv1.VersionTLS11: "TLSv1.1",
+	configv1.VersionTLS12: "TLSv1.2",
+	configv1.VersionTLS13: "TLSv1.3",
+}
+
+var tlsVersionOrder = []configv1.TLSProtocolVersion{
+	configv1.VersionTLS10,
+	configv1.VersionTLS11,
+	configv1.VersionTLS12,
+	configv1.VersionTLS13,
+}
+
+var opensslVersionToGo = map[configv1.TLSProtocolVersion]uint16{
+	configv1.VersionTLS10: tls.VersionTLS10,
+	configv1.VersionTLS11: tls.VersionTLS11,
+	configv1.VersionTLS12: tls.VersionTLS12,
+	configv1.VersionTLS13: tls.VersionTLS13,
+}
+
+type BrokerTLSSpec struct {
+	Protocols string
+	Ciphers   string
+}
+
+func TLSProfileToBrokerSpec(spec *configv1.TLSProfileSpec) *BrokerTLSSpec {
+	goMinVersion := opensslVersionToGo[spec.MinTLSVersion]
+
+	var brokerCiphers []string
+	for _, name := range spec.Ciphers {
+		if !strings.HasPrefix(name, "TLS_") {
+			brokerCiphers = append(brokerCiphers, name)
+		}
+	}
+
+	var brokerProtocols []string
+	for _, v := range tlsVersionOrder {
+		if opensslVersionToGo[v] >= goMinVersion {
+			brokerProtocols = append(brokerProtocols, opensslVersionToBroker[v])
+		}
+	}
+
+	return &BrokerTLSSpec{
+		Protocols: strings.Join(brokerProtocols, ","),
+		Ciphers:   strings.Join(brokerCiphers, ","),
+	}
+}
+
 type AcceptorParams struct {
-	SecurityDomain string `json:"securityDomain"`
-	Host           string `json:"host"`
-	Port           int32  `json:"port"`
-	SslEnabled     bool   `json:"sslEnabled"`
-	NeedClientAuth bool   `json:"needClientAuth"`
-	SaslMechanisms string `json:"saslMechanisms"`
-	KeyStoreType   string `json:"keyStoreType"`
-	KeyStorePath   string `json:"keyStorePath"`
-	TrustStoreType string `json:"trustStoreType"`
-	TrustStorePath string `json:"trustStorePath"`
+	SecurityDomain      string `json:"securityDomain"`
+	Host                string `json:"host"`
+	Port                int32  `json:"port"`
+	SslEnabled          bool   `json:"sslEnabled"`
+	NeedClientAuth      bool   `json:"needClientAuth"`
+	SaslMechanisms      string `json:"saslMechanisms"`
+	KeyStoreType        string `json:"keyStoreType"`
+	KeyStorePath        string `json:"keyStorePath"`
+	TrustStoreType      string `json:"trustStoreType"`
+	TrustStorePath      string `json:"trustStorePath"`
+	EnabledCipherSuites string `json:"enabledCipherSuites,omitempty"`
+	EnabledProtocols    string `json:"enabledProtocols,omitempty"`
 }
 
 type AcceptorConfiguration struct {

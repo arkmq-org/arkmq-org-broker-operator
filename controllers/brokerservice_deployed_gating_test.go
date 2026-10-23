@@ -58,7 +58,7 @@ var _ = Describe("brokerservice deployed gating", func() {
 			WithStatusSubresource(svc, &v1beta2.Broker{})).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 		_, err := r.Reconcile(context.TODO(), req)
@@ -97,7 +97,7 @@ var _ = Describe("brokerservice deployed gating", func() {
 			WithStatusSubresource(svc, &v1beta2.Broker{})).
 			Build()
 
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}), nil)
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 
 		_, err := r.Reconcile(context.TODO(), req)
