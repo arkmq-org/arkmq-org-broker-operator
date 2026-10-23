@@ -26,16 +26,21 @@ func NewNetworkPolicy(existing *netv1.NetworkPolicy, name, namespace string, res
 
 // BuildNetworkPolicySpec returns the NetworkPolicySpec used by NewNetworkPolicy.
 func BuildNetworkPolicySpec(brokerName string, restricted bool, extraPorts []int32) *netv1.NetworkPolicySpec {
+	ports := buildIngressPorts(restricted, extraPorts)
+	var ingress []netv1.NetworkPolicyIngressRule
+	if len(ports) > 0 {
+		ingress = []netv1.NetworkPolicyIngressRule{
+			{
+				Ports: ports,
+			},
+		}
+	}
 	return &netv1.NetworkPolicySpec{
 		PodSelector: metav1.LabelSelector{
 			MatchLabels: map[string]string{selectors.LabelActiveMQArtemisKey: brokerName},
 		},
 		PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress},
-		Ingress: []netv1.NetworkPolicyIngressRule{
-			{
-				Ports: buildIngressPorts(restricted, extraPorts),
-			},
-		},
+		Ingress:     ingress,
 	}
 }
 
