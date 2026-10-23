@@ -258,10 +258,13 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			CleanupAppCerts(consumerAppName, defaultNamespace)
+			CleanupAppCerts(ownerAppName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
 		It("Scenario 8: should reject addressRef to non-existent app", func() {
@@ -391,9 +394,12 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &app)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(appCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			CleanupAppCerts(appName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
 		It("Scenario 5: should allow app to declare addresses without capabilities, lifecycle", func() {
@@ -556,10 +562,13 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &registryApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(registryCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			CleanupAppCerts(consumerAppName, defaultNamespace)
+			CleanupAppCerts(registryAppName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
 		It("Scenario 9: should reject addressRef when target app doesn't declare that address", func() {
@@ -729,10 +738,13 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			CleanupAppCerts(consumerAppName, defaultNamespace)
+			CleanupAppCerts(ownerAppName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 	})
 
@@ -932,10 +944,13 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Expect(k8sClient.Delete(ctx, &app2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &app1)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(app2CertName, defaultNamespace)
-			UninstallCert(app1CertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			CleanupAppCerts(app2Name, defaultNamespace)
+			CleanupAppCerts(app1Name, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 	})
 
@@ -1119,16 +1134,21 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			UninstallCert(consumerAppName+common.AppCertSecretSuffix, otherNamespace)
 			UninstallCert(consumerCertName, otherNamespace)
+			UninstallCert(ownerAppName+common.AppCertSecretSuffix, defaultNamespace)
 			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 	})
 
 	Context("Phase 6: SharedAddresses Validation", func() {
 
-		It("Scenario 10: should reject reference to private address in Addresses, not SharedAddresses", func() {
+		It("Scenario 10: should reject reference to private address in existing Addresses, not SharedAddresses", func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -1277,6 +1297,18 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				},
 			}
 			InstallAppCert(&consumerApp)
+
+			By("verifying owner app is deployed first")
+			createdOwner := &broker.BrokerApp{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ownerAppName, Namespace: defaultNamespace}, createdOwner)).Should(Succeed())
+				if verbose {
+					fmt.Printf("owner app conditions: %v\n", createdOwner.Status.Conditions)
+				}
+				g.Expect(meta.IsStatusConditionTrue(createdOwner.Status.Conditions, broker.ReadyConditionType)).To(BeTrue())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("deployed referencing app after!")
 			Expect(k8sClient.Create(ctx, &consumerApp)).Should(Succeed())
 
 			createdConsumer := &broker.BrokerApp{}
@@ -1301,10 +1333,219 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			CleanupAppCerts(consumerAppName, defaultNamespace)
+			CleanupAppCerts(ownerAppName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
+		})
+
+		It("Scenario 10a: should detect and reject reference to private address in later deployed Addresses, not SharedAddresses", func() {
+
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				return
+			}
+
+			ctx := context.Background()
+			serviceName := NextSpecResourceName()
+
+			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
+			By("installing broker cert")
+			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = sharedOperandCertName
+				candidate.Spec.CommonName = serviceName
+				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
+
+			prometheusCertName := common.DefaultPrometheusCertSecretName
+			By("installing prometheus cert")
+			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = prometheusCertName
+				candidate.Spec.CommonName = "prometheus"
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
+
+			By("creating BrokerService")
+			service := broker.BrokerService{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "BrokerService",
+					APIVersion: broker.GroupVersion.Identifier(),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      serviceName,
+					Namespace: defaultNamespace,
+					Labels: map[string]string{
+						"test": "private-address",
+					},
+				},
+				Spec: broker.BrokerServiceSpec{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							corev1.ResourceMemory: resource.MustParse("2Gi"),
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
+
+			ownerAppName := NextSpecResourceName()
+			ownerCertName := ownerAppName + "-" + common.DefaultOperandCertSecretName
+			By("installing owner app cert")
+			InstallCert(ownerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = ownerCertName
+				candidate.Spec.CommonName = ownerAppName
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
+
+			By("creating owner app with private address (Addresses only, not in SharedAddresses)")
+			ownerApp := broker.BrokerApp{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "BrokerApp",
+					APIVersion: broker.GroupVersion.Identifier(),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      ownerAppName,
+					Namespace: defaultNamespace,
+				},
+				Spec: broker.BrokerAppSpec{
+					ServiceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"test": "private-address",
+						},
+					},
+					Addresses: []broker.AddressType{{Address: "private-data"}},
+					// Note: NOT in SharedAddresses - this is a private address
+					Capabilities: []broker.AppCapabilityType{
+						{
+							ProducerOf: []broker.AddressRef{
+								{Address: "private-data"},
+							},
+						},
+					},
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+				},
+			}
+			InstallAppCert(&ownerApp)
+
+			consumerAppName := NextSpecResourceName()
+			consumerCertName := consumerAppName + "-" + common.DefaultOperandCertSecretName
+			By("installing consumer app cert")
+			InstallCert(consumerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = consumerCertName
+				candidate.Spec.CommonName = consumerAppName
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
+
+			By("creating consumer app that tries to reference private address")
+			consumerApp := broker.BrokerApp{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "BrokerApp",
+					APIVersion: broker.GroupVersion.Identifier(),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      consumerAppName,
+					Namespace: defaultNamespace,
+				},
+				Spec: broker.BrokerAppSpec{
+					ServiceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"test": "private-address",
+						},
+					},
+					Capabilities: []broker.AppCapabilityType{
+						{
+							ConsumerOf: []broker.AddressRef{
+								{
+									Address:      "private-data",
+									AppNamespace: defaultNamespace,
+									AppName:      ownerAppName,
+								},
+							},
+						},
+					},
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+				},
+			}
+			InstallAppCert(&consumerApp)
+			Expect(k8sClient.Create(ctx, &consumerApp)).Should(Succeed())
+
+			createdConsumer := &broker.BrokerApp{}
+			By("verifying consumer app is rejected, missing dependent")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: consumerAppName, Namespace: defaultNamespace}, createdConsumer)).Should(Succeed())
+				if verbose {
+					fmt.Printf("Consumer app conditions: %v\n", createdConsumer.Status.Conditions)
+				}
+				deployedCondition := meta.FindStatusCondition(createdConsumer.Status.Conditions, broker.DeployedConditionType)
+				g.Expect(deployedCondition).ShouldNot(BeNil())
+				g.Expect(deployedCondition.Status).Should(Equal(metav1.ConditionFalse))
+				g.Expect(deployedCondition.Reason).Should(Equal(broker.DeployedConditionNoServiceCapacityReason))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("now deploying owner app with private address")
+			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
+
+			By("verifying owner app is deployed")
+			createdOwner := &broker.BrokerApp{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ownerAppName, Namespace: defaultNamespace}, createdOwner)).Should(Succeed())
+				if verbose {
+					fmt.Printf("owner app conditions: %v\n", createdOwner.Status.Conditions)
+				}
+				g.Expect(meta.IsStatusConditionTrue(createdOwner.Status.Conditions, broker.ReadyConditionType)).To(BeTrue())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("verifying consumer app transitions to rejected (address not in SharedAddresses)")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: consumerAppName, Namespace: defaultNamespace}, createdConsumer)).Should(Succeed())
+				if verbose {
+					fmt.Printf("Transitioned consumer app conditions: %v\n", createdConsumer.Status.Conditions)
+				}
+				validCondition := meta.FindStatusCondition(createdConsumer.Status.Conditions, broker.ValidConditionType)
+				g.Expect(validCondition).ShouldNot(BeNil())
+				g.Expect(validCondition.Status).Should(Equal(metav1.ConditionTrue))
+
+				deployedCondition := meta.FindStatusCondition(createdConsumer.Status.Conditions, broker.DeployedConditionType)
+				g.Expect(deployedCondition).ShouldNot(BeNil())
+				g.Expect(deployedCondition.Status).Should(Equal(metav1.ConditionFalse))
+				g.Expect(deployedCondition.Message).Should(ContainSubstring("does not share address"))
+				g.Expect(createdConsumer.Status.Service).Should(BeNil())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("cleaning up")
+			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
+			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
+			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			CleanupAppCerts(consumerAppName, defaultNamespace)
+			CleanupAppCerts(ownerAppName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
 		It("Scenario 11: should allow app with SharedAddresses only no Addresses", func() {
@@ -1474,10 +1715,13 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerApp{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			CleanupAppCerts(consumerAppName, defaultNamespace)
+			CleanupAppCerts(ownerAppName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
 		It("Scenario 12: should reject clash between two SharedAddresses", func() {
@@ -1659,10 +1903,13 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Expect(k8sClient.Delete(ctx, &app2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &app1)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(app2CertName, defaultNamespace)
-			UninstallCert(app1CertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerApp{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			CleanupAppCerts(app2Name, defaultNamespace)
+			CleanupAppCerts(app1Name, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
 		It("Scenario 13: should reject clash between Addresses and SharedAddresses", func() {
@@ -1844,10 +2091,13 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Expect(k8sClient.Delete(ctx, &app2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &app1)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(app2CertName, defaultNamespace)
-			UninstallCert(app1CertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			CleanupAppCerts(app2Name, defaultNamespace)
+			CleanupAppCerts(app1Name, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 	})
 })

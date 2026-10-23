@@ -36,7 +36,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
-var _ = Describe("broker-service edge cases and concurrent operations", func() {
+var _ = Describe("broker-service edge cases and concurrent operations", Label("verySlow"), func() {
 
 	BeforeEach(func() {
 		BeforeEachSpec()

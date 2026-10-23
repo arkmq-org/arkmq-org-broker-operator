@@ -300,10 +300,13 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{})).ToNot(BeNil())
+			}, timeout, interval).Should(Succeed())
+			CleanupAppCerts(consumerAppName, defaultNamespace)
+			CleanupAppCerts(ownerAppName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
 		It("Scenario 2: should detect when sharedAddresses is modified to remove referenced address", func() {
@@ -517,10 +520,13 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{})).ToNot(BeNil())
+			}, timeout, interval).Should(Succeed())
+			CleanupAppCerts(consumerAppName, defaultNamespace)
+			CleanupAppCerts(ownerAppName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
 		It("Scenario 3: should detect routing type conflict after binding", func() {
@@ -822,13 +828,16 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{})).ToNot(BeNil())
+			}, timeout, interval).Should(Succeed())
+			CleanupAppCerts(consumerAppName, defaultNamespace)
+			CleanupAppCerts(ownerAppName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
-		It("Scenario 4: should detect new address clash introduced post-binding", func() {
+		It("Scenario 4: should detect new address clash introduced post-binding", Label("verySlow"), func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -1033,11 +1042,23 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &app2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &app1)).Should(Succeed())
+
+			By("waiting on server to quesce/drain before whacking certs")
+			Eventually(func(g Gomega) {
+				updatedService := &broker.BrokerService{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, updatedService)).Should(Succeed())
+
+				g.Expect(len(updatedService.Status.ProvisionedApps)).Should(Equal(0))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(app2CertName, defaultNamespace)
-			UninstallCert(app1CertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{})).ToNot(BeNil())
+			}, timeout, interval).Should(Succeed())
+			CleanupAppCerts(app2Name, defaultNamespace)
+			CleanupAppCerts(app1Name, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 	})
 })

@@ -52,6 +52,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"software.sslmate.com/src/go-pkcs12"
 
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+
 	cmv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	tm "github.com/cert-manager/trust-manager/pkg/apis/trust/v1alpha1"
@@ -60,6 +62,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -76,6 +79,16 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/tools/remotecommand"
 )
+
+func NewServiceUnitTestScheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	_ = brokerv1beta2.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+	_ = appsv1.AddToScheme(s)
+	_ = networkingv1.AddToScheme(s)
+	_ = monitoringv1.AddToScheme(s)
+	return s
+}
 
 var chars = []rune("hgjkmnpqrtvwxyzslbcdaefiou")
 var defaultPassword string = "password"
@@ -1116,6 +1129,16 @@ func InstallAppCert(app *brokerv1beta2.BrokerApp) *cmv1.Certificate {
 			Kind: "ClusterIssuer",
 		}
 	})
+}
+
+func CleanupAppCerts(appName string, namespace string) {
+	UninstallCert(appName+common.AppCertSecretSuffix, namespace)
+	UninstallCert(appName+"-"+common.DefaultOperandCertSecretName, namespace)
+}
+
+func CleanupServiceCerts(serviceName string, namespace string) {
+	UninstallCert(serviceName+"-"+common.DefaultOperandCertSecretName, namespace)
+	UninstallCert(common.DefaultPrometheusCertSecretName, namespace)
 }
 
 func InstallCert(certName string, namespace string, customFunc func(candidate *cmv1.Certificate)) *cmv1.Certificate {

@@ -123,23 +123,16 @@ rules:
 - apiGroups:
   - broker.arkmq.org
   resources:
-  - brokerapps/status
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - broker.arkmq.org
-  resources:
+  - brokerapps/finalizers
   - brokerclusters/finalizers
   - brokers/finalizers
+  - brokerservices/finalizers
   verbs:
   - update
 - apiGroups:
   - broker.arkmq.org
   resources:
+  - brokerapps/status
   - brokerclusters/status
   - brokers/status
   - brokerservices/status

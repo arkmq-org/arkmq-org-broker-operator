@@ -20,13 +20,16 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
+	"time"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/appselector"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -39,6 +42,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -134,9 +138,10 @@ type BrokerAppReconciler struct {
 
 type BrokerAppInstanceReconciler struct {
 	*BrokerAppReconciler
-	instance *broker.BrokerApp
-	service  *broker.BrokerService
-	status   *broker.BrokerAppStatus
+	instance        *broker.BrokerApp
+	service         *broker.BrokerService
+	status          *broker.BrokerAppStatus
+	unbindingReason string
 }
 
 func (reconciler BrokerAppInstanceReconciler) validateSpec() error {
@@ -160,7 +165,11 @@ func (reconciler BrokerAppInstanceReconciler) validateSpec() error {
 	}
 
 	// Validate that declared addresses match their usage in capabilities
-	return reconciler.validateAddressCapabilityConsistency()
+	if err := reconciler.validateAddressCapabilityConsistency(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (reconciler BrokerAppInstanceReconciler) validateServiceSelector() error {
@@ -247,13 +256,14 @@ func NewBrokerAppReconciler(client client.Client, scheme *runtime.Scheme, config
 
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps/finalizers,verbs=update
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices,verbs=get;list;watch;update
 
 func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
 	reqLogger := reconciler.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "BrokerApp")
 
 	instance := &broker.BrokerApp{}
-	var err = reconciler.Client.Get(context.TODO(), request.NamespacedName, instance)
+	var err = reconciler.Get(ctx, request.NamespacedName, instance)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -302,8 +312,30 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 	if statusErr != nil {
 		return ctrl.Result{}, fmt.Errorf("Failed to update status: error %v", statusErr)
 	}
+	if processor.unbindingReason != "" {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
 	// Success
 	return ctrl.Result{}, nil
+}
+
+func hasOwnedContent(instance *broker.BrokerApp) bool {
+	if len(instance.Spec.Addresses) > 0 || len(instance.Spec.SharedAddresses) > 0 {
+		return true
+	}
+	for _, capability := range instance.Spec.Capabilities {
+		for _, ref := range capability.ProducerOf {
+			if ref.AppNamespace == "" && ref.AppName == "" {
+				return true
+			}
+		}
+		for _, ref := range capability.ConsumerOf {
+			if ref.AppNamespace == "" && ref.AppName == "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // instance specifics for a reconciler loop
@@ -327,7 +359,7 @@ func (reconciler *BrokerAppInstanceReconciler) resolveBrokerService() error {
 			broker.ValidConditionSpecSelectorError,
 			"failed to evaluate Spec.Selector: %v", err)
 	}
-	err = reconciler.Client.List(context.TODO(), list, &client.ListOptions{LabelSelector: opts})
+	err = reconciler.List(context.TODO(), list, &client.ListOptions{LabelSelector: opts})
 	if err != nil {
 		// API error, not a CR validation issue - wrap as TransientError
 		return NewTransientErrorWithCause(
@@ -336,96 +368,37 @@ func (reconciler *BrokerAppInstanceReconciler) resolveBrokerService() error {
 			err)
 	}
 
-	var service *broker.BrokerService
+	var desiredService *broker.BrokerService
 	needsServiceAssignment := false
 
 	// Check if we have an existing binding in status
 	hasBinding := reconciler.status.Service != nil
 
 	if hasBinding {
-		deployedTo := reconciler.status.Service.Key()
 		// Try to find the bound service in the list
 		for index, candidate := range list.Items {
 			if candidate.Namespace == reconciler.status.Service.Namespace && candidate.Name == reconciler.status.Service.Name {
-				service = &list.Items[index]
+				desiredService = &list.Items[index]
 				break
 			}
 		}
 
-		// if we found the service and if it still matches, is it still valid
-		// the findservice with capactity does the same checks, here we use them to validate the current service
-		// which avoids choosing a different service unless really necessary
-		// REVISIT: can this logic be combined in a single place?
-		if service != nil {
-			// Check if app is in service's RejectedApps
-			if reconciler.isAppRejectedByService(service) {
-				reconciler.log.V(1).Info("App rejected by service, reassigning",
-					"app", reconciler.instance.Name,
-					"service", deployedTo,
-					"currentPort", reconciler.status.Service.AssignedPort)
-				reconciler.status.Service = nil
-				service = nil
-				needsServiceAssignment = true
-			}
-
-			if service != nil {
-				matches, matchErr := reconciler.matchesServiceSelector(service)
-				if !matches || matchErr != nil {
-					reconciler.log.V(1).Info("App no longer matches service selector, removing binding",
-						"app", reconciler.instance.Name,
-						"service", deployedTo,
-						"error", matchErr,
-					)
-					reconciler.status.Service = nil
-					service = nil
-					needsServiceAssignment = true
-				}
-			}
-
-			// Check if addressRef dependencies are still valid
-			if service != nil {
-				if addrRefErr := reconciler.checkAddressRefCapacity(service); addrRefErr != nil {
-					reconciler.log.V(1).Info("AddressRef dependencies no longer valid, reassigning",
-						"app", reconciler.instance.Name,
-						"service", deployedTo,
-						"error", addrRefErr)
-					reconciler.status.Service = nil
-					service = nil
-					needsServiceAssignment = true
-				}
-
-				// Check for address clashes with apps already on this service
-				if service != nil {
-					if clashErr := reconciler.checkAddressClashOnService(service); clashErr != nil {
-						reconciler.log.V(1).Info("address clash detected, reassigning",
-							"app", reconciler.instance.Name,
-							"service", deployedTo,
-							"error", clashErr)
-						reconciler.status.Service = nil
-						service = nil
-						needsServiceAssignment = true
-					}
-				}
-			}
+		if desiredService == nil {
+			reconciler.unbindingReason = "Bound service not found"
+		} else {
+			reconciler.unbindingReason = reconciler.unbindingCheck(desiredService)
 		}
 
-		// If bound service not found, selector may have changed
-		if service == nil && !needsServiceAssignment {
-			if len(list.Items) > 0 {
-				reconciler.log.V(1).Info("Bound service not found in selector matches, reassigning",
-					"app", reconciler.instance.Name,
-					"old-binding", deployedTo,
-					"matching-services", len(list.Items))
-				needsServiceAssignment = true
-			}
-			// else: no services match current selector, processStatus will handle it
+		if reconciler.unbindingReason != "" {
+			desiredService, needsServiceAssignment = reconciler.handleUnbinding(desiredService)
 		}
+
 	} else {
 		// No binding yet, need initial assignment
 		needsServiceAssignment = true
 	}
 
-	// Assign service if needed (initial assignment or reassignment due to selector change)
+	// Assign service if needed (initial assignment or reassignment due to unbind)
 	if needsServiceAssignment {
 
 		if len(list.Items) == 0 {
@@ -436,7 +409,7 @@ func (reconciler *BrokerAppInstanceReconciler) resolveBrokerService() error {
 		}
 
 		var assignedPort int32
-		service, assignedPort, err = reconciler.findServiceWithCapacity(list)
+		desiredService, assignedPort, err = reconciler.findServiceWithCapacity(list)
 		if err != nil {
 			// If findServiceWithCapacity returned a TransientError, preserve it
 			if _, isTransient := err.(*TransientError); !isTransient {
@@ -446,22 +419,22 @@ func (reconciler *BrokerAppInstanceReconciler) resolveBrokerService() error {
 					fmt.Sprintf("no service with capacity available for selector %v, %v", opts, err))
 			}
 		}
-		if service != nil {
+		if desiredService != nil {
 			// Set service binding including assigned port
 			reconciler.status.Service = &broker.BrokerServiceBindingStatus{
-				Name:         service.Name,
-				Namespace:    service.Namespace,
+				Name:         desiredService.Name,
+				Namespace:    desiredService.Namespace,
 				Secret:       BindingsSecretName(reconciler.instance.Name),
 				AssignedPort: assignedPort,
 			}
 			reconciler.log.V(1).Info("Assigned port to app",
 				"app", reconciler.instance.Name,
-				"service", service.Name,
+				"service", desiredService.Name,
 				"port", assignedPort)
 		}
 	}
 
-	reconciler.service = service
+	reconciler.service = desiredService
 	return err
 }
 
@@ -474,9 +447,46 @@ func serviceKey(service *broker.BrokerService) string {
 	return service.Namespace + ":" + service.Name
 }
 
-// matchesServiceSelector checks if the app matches the service's appSelectorExpression.
-// Returns (matches, nil) if evaluation succeeds.
-// Returns (false, error) if CEL evaluation fails - caller should surface this to user.
+// unbindingCheck returns a non-empty reason string when the app should unbind
+// from the given service, or "" when the current binding is still valid.
+func (reconciler *BrokerAppInstanceReconciler) unbindingCheck(service *broker.BrokerService) string {
+	if reconciler.instance.DeletionTimestamp != nil {
+		return "Deletion pending"
+	}
+	if service.DeletionTimestamp != nil {
+		return "Bound service is being deleted"
+	}
+	if matches, err := reconciler.matchesServiceSelector(service); !matches || err != nil {
+		return "Service selector mismatch"
+	}
+	if err := reconciler.checkAddressRefCapacity(service); err != nil {
+		return fmt.Sprintf("AddressRef dependencies no longer valid, %v", err)
+	}
+	if err := reconciler.checkAddressClashOnService(service); err != nil {
+		return fmt.Sprintf("Address clash detected, %v", err)
+	}
+	return ""
+}
+
+// handleUnbinding clears the service binding unless the pending-empty finalizer
+// is still present (addresses still draining). Returns (service, needsServiceAssignment).
+func (reconciler *BrokerAppInstanceReconciler) handleUnbinding(service *broker.BrokerService) (*broker.BrokerService, bool) {
+	binding := "<none>"
+	if reconciler.status.Service != nil {
+		binding = reconciler.status.Service.Key()
+	}
+	if controllerutil.ContainsFinalizer(reconciler.instance, broker.AddressesPendingEmptyFinalizer) {
+		reconciler.log.V(1).Info("Unbinding held, addresses pending empty",
+			"app", reconciler.instance.Name, "binding", binding, "reason", reconciler.unbindingReason)
+		return service, false
+	}
+
+	reconciler.log.V(1).Info("Unbinding, clearing binding",
+		"app", reconciler.instance.Name, "binding", binding, "reason", reconciler.unbindingReason)
+	reconciler.status.Service = nil
+	return nil, true
+}
+
 func (reconciler *BrokerAppInstanceReconciler) matchesServiceSelector(service *broker.BrokerService) (bool, error) {
 	matches, err := appselector.Matches(reconciler.instance, service, reconciler.Client)
 	if err != nil {
@@ -538,6 +548,15 @@ func (reconciler *BrokerAppInstanceReconciler) findServiceWithCapacity(list *bro
 
 	for i := range list.Items {
 		service := &list.Items[i]
+
+		if service.DeletionTimestamp != nil {
+			rejections = append(rejections, ServiceRejection{
+				ServiceName: service.Name,
+				Category:    RejectionNotDeployed,
+				Message:     "service is being deleted",
+			})
+			continue
+		}
 
 		// Only consider deployed services (port discovery must be complete)
 		deployedCond := meta.FindStatusCondition(service.Status.Conditions, broker.DeployedConditionType)
@@ -817,7 +836,7 @@ func (reconciler *BrokerAppInstanceReconciler) buildCapacityError(
 func (reconciler *BrokerAppInstanceReconciler) listOtherAppsForService(service *broker.BrokerService) ([]broker.BrokerApp, error) {
 	apps := &broker.BrokerAppList{}
 	key := serviceKey(service)
-	if err := reconciler.Client.List(context.TODO(), apps, client.MatchingFields{common.AppServiceBindingField: key}); err != nil {
+	if err := reconciler.List(context.TODO(), apps, client.MatchingFields{common.AppServiceBindingField: key}); err != nil {
 		return nil, err
 	}
 
@@ -960,7 +979,7 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressRefCapacity(service *
 					Namespace: addressRef.AppNamespace,
 					Name:      addressRef.AppName,
 				}
-				if getErr := reconciler.Client.Get(ctx, refKey, referencedApp); getErr != nil {
+				if getErr := reconciler.Get(ctx, refKey, referencedApp); getErr != nil {
 					if errors.IsNotFound(getErr) {
 						return fmt.Errorf("referenced app %s/%s not found",
 							addressRef.AppNamespace, addressRef.AppName)
@@ -984,7 +1003,7 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressRefCapacity(service *
 						Namespace: referencedApp.Status.Service.Namespace,
 						Name:      referencedApp.Status.Service.Name,
 					}
-					if getErr := reconciler.Client.Get(ctx, refServiceName, refService); getErr != nil {
+					if getErr := reconciler.Get(ctx, refServiceName, refService); getErr != nil {
 						if errors.IsNotFound(getErr) {
 							return fmt.Errorf("referenced app %s/%s was provisioned on service %s which no longer exists",
 								addressRef.AppNamespace, addressRef.AppName, refServiceKey)
@@ -1307,17 +1326,6 @@ func (reconciler *BrokerAppInstanceReconciler) validateAddressCapabilityConsiste
 	return nil
 }
 
-// isAppRejectedByService checks if this app appears in the service's RejectedApps list
-func (reconciler *BrokerAppInstanceReconciler) isAppRejectedByService(service *broker.BrokerService) bool {
-	appKey := reconciler.instance.Namespace + "/" + reconciler.instance.Name
-	for _, rejected := range service.Status.RejectedApps {
-		if rejected.Namespace+"/"+rejected.Name == appKey {
-			return true
-		}
-	}
-	return false
-}
-
 func (reconciler *BrokerAppInstanceReconciler) processStatus(reconcilerError error) error {
 	// Set Valid condition (always updated with current generation)
 	reconciler.setValidCondition(reconcilerError)
@@ -1419,17 +1427,31 @@ func (reconciler *BrokerAppInstanceReconciler) setDeployedCondition(err error) {
 
 		if isProvisioned {
 			condition.Status = metav1.ConditionTrue
-			condition.Reason = broker.DeployedConditionProvisionedReason
-			condition.Message = "Application provisioned to broker"
+			condition.Reason = broker.DeployedConditionBoundReason
+			condition.Message = "Application bound to broker"
+
+			if reconciler.unbindingReason != "" {
+				condition.Reason = broker.DeployedConditionUnbindingReason
+				condition.Message = reconciler.pendingEmptyDetailMessage()
+			}
+		} else if reconciler.unbindingReason != "" {
+			condition.Status = metav1.ConditionFalse
+			condition.Reason = broker.DeployedConditionUnbindingReason
+			condition.Message = reconciler.pendingEmptyDetailMessage()
 		} else {
 			condition.Status = metav1.ConditionFalse
-			condition.Reason = broker.DeployedConditionProvisioningPendingReason
-			condition.Message = "Waiting for broker to provision"
+			condition.Reason = broker.DeployedConditionBindingReason
+			condition.Message = "Waiting for broker to bind"
 		}
 	} else if reconciler.status.Service != nil {
 		condition.Status = metav1.ConditionFalse
 		condition.Reason = broker.DeployedConditionMatchedServiceNotFoundReason
 		condition.Message = fmt.Sprintf("matching service %s not found", reconciler.status.Service.Key())
+
+		if reconciler.unbindingReason != "" {
+			condition.Reason = broker.DeployedConditionUnbindingReason
+			condition.Message = reconciler.pendingEmptyDetailMessage()
+		}
 	} else {
 		// No matching service
 		condition.Status = metav1.ConditionFalse
@@ -1440,10 +1462,48 @@ func (reconciler *BrokerAppInstanceReconciler) setDeployedCondition(err error) {
 	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
 }
 
+func (reconciler *BrokerAppInstanceReconciler) pendingEmptyDetailMessage() string {
+	message := "addresses pending empty"
+
+	// see if we can pull details from the service
+	svc := &broker.BrokerService{}
+	if err := reconciler.Get(context.TODO(), types.NamespacedName{
+		Name:      reconciler.status.Service.Name,
+		Namespace: reconciler.status.Service.Namespace,
+	}, svc); err == nil {
+
+		appIdentity := AppIdentity(reconciler.instance)
+		for _, ds := range svc.Status.PendingEmpty {
+			if ds.App == appIdentity {
+				if len(ds.Messages) > 0 {
+					addresses := make([]string, 0, len(ds.Messages))
+					for fqqn := range ds.Messages {
+						addresses = append(addresses, fqqn)
+					}
+					sort.Strings(addresses)
+					message = fmt.Sprintf("%s: %s", message, strings.Join(addresses, ", "))
+					break
+				}
+			}
+		}
+	} else {
+		message = fmt.Sprintf("%s, error: %v", message, err)
+	}
+	return message
+}
+
 func (reconciler *BrokerAppInstanceReconciler) setReadyCondition() {
 	condition := metav1.Condition{
 		Type:               broker.ReadyConditionType,
 		ObservedGeneration: reconciler.instance.Generation,
+	}
+
+	if reconciler.unbindingReason != "" {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = broker.ReadyConditionUnbindingReason
+		condition.Message = reconciler.unbindingReason
+		meta.SetStatusCondition(&reconciler.status.Conditions, condition)
+		return
 	}
 
 	validCond := meta.FindStatusCondition(reconciler.status.Conditions, broker.ValidConditionType)
@@ -1460,7 +1520,7 @@ func (reconciler *BrokerAppInstanceReconciler) setReadyCondition() {
 	} else {
 		condition.Status = metav1.ConditionFalse
 		condition.Reason = broker.NotReadyConditionReason
-		condition.Message = "Waiting for Valid and Deployed conditions at current generation"
+		condition.Message = fmt.Sprintf("Waiting for Valid and Deployed conditions at current generation: %d", reconciler.instance.Generation)
 	}
 
 	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
@@ -1524,37 +1584,43 @@ func (r *BrokerAppReconciler) enqueueAppsForReferencedApp() handler.EventHandler
 			Name:      changedApp.Name,
 		}
 
-		// Only propagate watch events when appropriate
-		if !shouldPropagateWatchForReferencedApp(changedApp) {
-			// App is in an intermediate/invalid state - don't propagate to consumers
-			// When it becomes valid again, another watch event will fire
-			return nil
-		}
-
-		// Find all BrokerApps that reference this app via addressRef
-		appList := &broker.BrokerAppList{}
-		if err := r.Client.List(ctx, appList); err != nil {
-			r.log.Error(err, "Failed to list BrokerApps for addressRef watch", "app", changedKey)
-			return nil
-		}
-
 		requests := make([]reconcile.Request, 0)
-		for _, app := range appList.Items {
-			// Skip the changed app itself
-			if app.Namespace == changedApp.Namespace && app.Name == changedApp.Name {
-				continue
+
+		if shouldPropagateWatchForReferencedApp(changedApp) {
+			appList := &broker.BrokerAppList{}
+			if err := r.List(ctx, appList); err != nil {
+				r.log.Error(err, "Failed to list BrokerApps for addressRef watch", "app", changedKey)
+				return nil
 			}
 
-			// Check if this app references the changed app
-			if hasAddressRefTo(&app, changedKey) {
-				requests = append(requests, reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Namespace: app.Namespace,
-						Name:      app.Name,
-					},
-				})
+			for _, app := range appList.Items {
+				if app.Namespace == changedApp.Namespace && app.Name == changedApp.Name {
+					continue
+				}
+				if hasAddressRefTo(&app, changedKey) {
+					requests = append(requests, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Namespace: app.Namespace,
+							Name:      app.Name,
+						},
+					})
+				}
 			}
 		}
+
+		// Reverse: when a dependent is deleted, notify the apps it references
+		if changedApp.DeletionTimestamp != nil {
+			seen := make(map[types.NamespacedName]bool)
+			for _, req := range requests {
+				seen[req.NamespacedName] = true
+			}
+			for _, refKey := range getReferencedApps(changedApp) {
+				if refKey != changedKey && !seen[refKey] {
+					requests = append(requests, reconcile.Request{NamespacedName: refKey})
+				}
+			}
+		}
+
 		return requests
 	})
 }
@@ -1574,6 +1640,27 @@ func hasAddressRefTo(app *broker.BrokerApp, targetApp types.NamespacedName) bool
 		}
 	}
 	return false
+}
+
+func getReferencedApps(app *broker.BrokerApp) []types.NamespacedName {
+	seen := make(map[types.NamespacedName]bool)
+	var result []types.NamespacedName
+
+	for _, capability := range app.Spec.Capabilities {
+		allRefs := [][]broker.AddressRef{capability.ProducerOf, capability.ConsumerOf}
+		for _, refs := range allRefs {
+			for _, ref := range refs {
+				if ref.AppNamespace != "" && ref.AppName != "" {
+					key := types.NamespacedName{Namespace: ref.AppNamespace, Name: ref.AppName}
+					if !seen[key] {
+						seen[key] = true
+						result = append(result, key)
+					}
+				}
+			}
+		}
+	}
+	return result
 }
 
 func (r *BrokerAppReconciler) SetupWithManager(mgr ctrl.Manager) error {
