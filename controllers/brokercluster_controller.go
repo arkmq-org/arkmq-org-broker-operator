@@ -37,6 +37,7 @@ import (
 	routev1 "github.com/openshift/api/route/v1"
 
 	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
@@ -48,6 +49,7 @@ type BrokerClusterReconciler struct {
 	log                   logr.Logger
 	isOnOpenShift         bool
 	isGatewayAPIAvailable bool
+	brokerTLS             *brokerproperties.BrokerTLSSpec
 }
 
 func NewBrokerClusterReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShift bool, gatewayAPIAvailable bool) *BrokerClusterReconciler {
@@ -58,6 +60,11 @@ func NewBrokerClusterReconciler(cluster cluster.Cluster, logger logr.Logger, isO
 		Scheme:                cluster.GetScheme(),
 		log:                   logger,
 	}
+}
+
+func (r *BrokerClusterReconciler) WithBrokerTLS(tls *brokerproperties.BrokerTLSSpec) *BrokerClusterReconciler {
+	r.brokerTLS = tls
+	return r
 }
 
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerclusters,verbs=get;list;watch;create;update;patch;delete

@@ -1175,6 +1175,10 @@ func OperatorHasCertAndTrustBundle(client rtclient.Client) bool {
 	return *operatorHasCertAndTrustBundle
 }
 
+func ResetOperatorCertCache() {
+	operatorHasCertAndTrustBundle = nil
+}
+
 func GetOperatorClientCertificate(client rtclient.Client, info *tls.CertificateRequestInfo) (cert *tls.Certificate, err error) {
 
 	var secret *corev1.Secret
