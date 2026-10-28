@@ -1,0 +1,374 @@
+# Grafana dashboard for the Acme tutorial. The kube-prometheus-stack sidecar loads every
+# ConfigMap labelled grafana_dashboard=1 in its namespace. The "team" variable lists the
+# per-namespace datasources of the Observability section; every panel queries through it,
+# except the broker row, which reads the platform namespace.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: acme-messaging-dashboard
+  namespace: acme-platform
+  labels:
+    grafana_dashboard: '1'
+data:
+  acme-messaging-by-team.json: |
+    {
+      "title": "Acme ID - Messaging by team",
+      "uid": "acme-messaging-by-team",
+      "tags": [
+        "acme",
+        "arkmq",
+        "brokerservice"
+      ],
+      "editable": true,
+      "graphTooltip": 1,
+      "time": {
+        "from": "now-30m",
+        "to": "now"
+      },
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "version": 1,
+      "templating": {
+        "list": [
+          {
+            "name": "team",
+            "label": "Team",
+            "type": "datasource",
+            "query": "prometheus",
+            "regex": "/^acme-/",
+            "refresh": 1,
+            "multi": false,
+            "includeAll": false,
+            "current": {
+              "selected": true,
+              "text": "acme-enroll",
+              "value": "acme-enroll"
+            }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Queues of the selected team, filed under the BrokerApp that owns them",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "panels": []
+        },
+        {
+          "id": 10,
+          "title": "Queue depth",
+          "description": "One series per queue of the selected team. The query is sent with the viewer's own token: a team member gets 403 on any other team's datasource.",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${team}"
+          },
+          "gridPos": {
+            "h": 11,
+            "w": 24,
+            "x": 0,
+            "y": 1
+          },
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "right",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (namespace, brokerapp, queue) (broker_queue_message_count{job=~\"core-.*-metrics\"})",
+              "legendFormat": "{{namespace}}/{{brokerapp}}/{{queue}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${team}"
+              }
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "title": "Consumers per queue",
+          "description": "Drops to zero when a team scales its consumer down; the queue above starts filling.",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${team}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 12
+          },
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "right",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "max by (namespace, brokerapp, queue) (broker_queue_consumer_count{job=~\"core-.*-metrics\"})",
+              "legendFormat": "{{namespace}}/{{brokerapp}}/{{queue}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${team}"
+              }
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "title": "Current queues",
+          "description": "Every queue on every broker, with the team that owns it.",
+          "type": "table",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${team}"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 20
+          },
+          "targets": [
+            {
+              "expr": "max by (broker, namespace, brokerapp, address, queue, routing_type) (broker_queue_message_count{job=~\"core-.*-metrics\"})",
+              "format": "table",
+              "instant": true,
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${team}"
+              }
+            },
+            {
+              "expr": "max by (broker, namespace, brokerapp, address, queue, routing_type) (broker_queue_consumer_count{job=~\"core-.*-metrics\"})",
+              "format": "table",
+              "instant": true,
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${team}"
+              }
+            },
+            {
+              "expr": "max by (broker, namespace, brokerapp, address, queue, routing_type) (broker_queue_persistent_size{job=~\"core-.*-metrics\"})",
+              "format": "table",
+              "instant": true,
+              "refId": "C",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${team}"
+              }
+            }
+          ],
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "broker": 0,
+                  "namespace": 1,
+                  "brokerapp": 2,
+                  "address": 3,
+                  "queue": 4,
+                  "routing_type": 5,
+                  "Value #A": 6,
+                  "Value #B": 7,
+                  "Value #C": 8
+                },
+                "renameByName": {
+                  "broker": "Broker",
+                  "namespace": "Team namespace",
+                  "brokerapp": "BrokerApp",
+                  "address": "Address",
+                  "queue": "Queue",
+                  "routing_type": "Routing",
+                  "Value #A": "Messages",
+                  "Value #B": "Consumers",
+                  "Value #C": "Persistent data"
+                }
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Persistent data"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "bytes"
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Messages"
+                },
+                "properties": [
+                  {
+                    "id": "custom.cellOptions",
+                    "value": {
+                      "type": "gauge",
+                      "mode": "gradient"
+                    }
+                  },
+                  {
+                    "id": "max",
+                    "value": 300
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "sortBy": [
+              {
+                "displayName": "Messages",
+                "desc": true
+              }
+            ]
+          }
+        },
+        {
+          "id": 2,
+          "type": "row",
+          "title": "Brokers (platform namespace, platform user only)",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 30
+          },
+          "panels": []
+        },
+        {
+          "id": 20,
+          "title": "Broker memory",
+          "description": "Read through the acme-platform datasource: only the platform user can open it.",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "acme-platform"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 31
+          },
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "right",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "max by (pod) (container_memory_working_set_bytes{pod=~\"core-.*-ss-.*\",container=\"\"})",
+              "legendFormat": "{{pod}} working set",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "acme-platform"
+              }
+            },
+            {
+              "expr": "sum by (pod) (kube_pod_container_resource_limits{pod=~\"core-.*-ss-.*\",resource=\"memory\"})",
+              "legendFormat": "{{pod}} limit",
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "acme-platform"
+              }
+            }
+          ]
+        }
+      ]
+    }
