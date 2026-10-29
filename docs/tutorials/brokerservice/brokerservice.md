@@ -746,7 +746,7 @@ order-generator  →  ORDERS.NEW  →  order-processor  →  ORDERS.PROCESSED  �
    (produce)              (consume/produce)                       (consume/produce)                              (consume/produce)
 ```
 
-Each app only owns the addresses it **produces**. Downstream consumers reference upstream producers using `appName` + `appNamespace`.
+Each app only owns the addresses it **produces**. Downstream consumers reference upstream producers using the `appName` field in their capabilities. Each address entry also carries a `consumerOfAppSelector` — a CEL expression that guards which apps may consume from that address (e.g., `app.metadata.name == 'order-processor'`).
 
 #### order-generator (Traffic Generator)
 
@@ -788,11 +788,12 @@ metadata:
   name: order-generator
   namespace: service-app-project
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       app: "order-processing-pipeline"
-  sharedAddresses:
+  addresses:
     - address: "ORDERS.NEW"
+      consumerOfAppSelector: "app.metadata.name == 'order-processor'"
   capabilities:
     - producerOf:
         - address: "ORDERS.NEW"
@@ -847,16 +848,16 @@ metadata:
   name: order-processor
   namespace: service-app-project
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       app: "order-processing-pipeline"
-  sharedAddresses:
+  addresses:
     - address: "ORDERS.PROCESSED"
+      consumerOfAppSelector: "app.metadata.name == 'shipping-service'"
   capabilities:
     - consumerOf:
         - address: "ORDERS.NEW"
           appName: "order-generator"
-          appNamespace: "service-app-project"
       producerOf:
         - address: "ORDERS.PROCESSED"
 EOF
@@ -910,16 +911,16 @@ metadata:
   name: shipping-service
   namespace: service-app-project
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       app: "order-processing-pipeline"
-  sharedAddresses:
+  addresses:
     - address: "ORDERS.SHIPPED"
+      consumerOfAppSelector: "app.metadata.name == 'delivery-service'"
   capabilities:
     - consumerOf:
         - address: "ORDERS.PROCESSED"
           appName: "order-processor"
-          appNamespace: "service-app-project"
       producerOf:
         - address: "ORDERS.SHIPPED"
 EOF
@@ -973,16 +974,16 @@ metadata:
   name: delivery-service
   namespace: service-app-project
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       app: "order-processing-pipeline"
-  sharedAddresses:
+  addresses:
     - address: "ORDERS.DELIVERED"
+      consumerOfAppSelector: "app.metadata.name == 'master-sink'"
   capabilities:
     - consumerOf:
         - address: "ORDERS.SHIPPED"
           appName: "shipping-service"
-          appNamespace: "service-app-project"
       producerOf:
         - address: "ORDERS.DELIVERED"
 EOF
@@ -1512,14 +1513,13 @@ metadata:
   name: master-sink
   namespace: service-app-project
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       app: "order-processing-pipeline"
   capabilities:
     - consumerOf:
         - address: "ORDERS.DELIVERED"
           appName: "delivery-service"
-          appNamespace: "service-app-project"
 EOF
 ```
 ```shell markdown_runner

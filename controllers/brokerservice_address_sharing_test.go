@@ -176,7 +176,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 							"test": "address-sharing",
 						},
 					},
-					SharedAddresses: []broker.AddressType{{Address: "orders"}},
+					Addresses: []broker.AddressType{{Address: "orders", ConsumerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", defaultNamespace)}},
 					Capabilities: []broker.AppCapabilityType{
 						{
 							ProducerOf: []broker.AddressRef{
@@ -479,7 +479,11 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 							"test": "address-sharing",
 						},
 					},
-					SharedAddresses: []broker.AddressType{{Address: "events"}, {Address: "commands"}, {Address: "queries"}},
+					Addresses: []broker.AddressType{
+						{Address: "events", ConsumerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", defaultNamespace)},
+						{Address: "commands", ConsumerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", defaultNamespace)},
+						{Address: "queries", ConsumerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", defaultNamespace)},
+					},
 					// No capabilities - just owns the addresses
 					Resources: corev1.ResourceRequirements{
 						Requests: corev1.ResourceList{
@@ -1036,7 +1040,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 							"test": "cross-namespace",
 						},
 					},
-					SharedAddresses: []broker.AddressType{{Address: "shared-events"}},
+					Addresses: []broker.AddressType{{Address: "shared-events", ConsumerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", otherNamespace)}},
 					Capabilities: []broker.AppCapabilityType{
 						{
 							ProducerOf: []broker.AddressRef{
@@ -1126,9 +1130,9 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 		})
 	})
 
-	Context("Phase 6: SharedAddresses Validation", func() {
+	Context("Phase 6: Address Sharing Validation", func() {
 
-		It("Scenario 10: should reject reference to private address in Addresses, not SharedAddresses", func() {
+		It("Scenario 10: should reject reference to address without sharing selector", func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -1195,7 +1199,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				}
 			})
 
-			By("creating owner app with private address (Addresses only, not in SharedAddresses)")
+			By("creating owner app with private address (no sharing selectors)")
 			ownerApp := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "BrokerApp",
@@ -1212,7 +1216,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 						},
 					},
 					Addresses: []broker.AddressType{{Address: "private-data"}},
-					// Note: NOT in SharedAddresses - this is a private address
+					// Note: no sharing selectors - this is a private address
 					Capabilities: []broker.AppCapabilityType{
 						{
 							ProducerOf: []broker.AddressRef{
@@ -1280,7 +1284,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Expect(k8sClient.Create(ctx, &consumerApp)).Should(Succeed())
 
 			createdConsumer := &broker.BrokerApp{}
-			By("verifying consumer app is rejected (address not in SharedAddresses)")
+			By("verifying consumer app is rejected (address has no sharing selector)")
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: consumerAppName, Namespace: defaultNamespace}, createdConsumer)).Should(Succeed())
 				if verbose {
@@ -1307,7 +1311,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			UninstallCert(sharedOperandCertName, defaultNamespace)
 		})
 
-		It("Scenario 11: should allow app with SharedAddresses only no Addresses", func() {
+		It("Scenario 11: should allow app with shared addresses via CEL selectors", func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -1374,7 +1378,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				}
 			})
 
-			By("creating owner app with SharedAddresses only (no Addresses)")
+			By("creating owner app with shared address (CEL selector)")
 			ownerApp := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "BrokerApp",
@@ -1390,8 +1394,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 							"test": "shared-only",
 						},
 					},
-					// Note: no Addresses field, only SharedAddresses
-					SharedAddresses: []broker.AddressType{{Address: "public-api"}},
+					Addresses: []broker.AddressType{{Address: "public-api", ConsumerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", defaultNamespace)}},
 					Capabilities: []broker.AppCapabilityType{
 						{
 							ProducerOf: []broker.AddressRef{
@@ -1421,7 +1424,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				}
 			})
 
-			By("creating consumer app that references SharedAddresses-only owner")
+			By("creating consumer app that references shared address owner")
 			consumerApp := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "BrokerApp",
@@ -1480,7 +1483,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			UninstallCert(sharedOperandCertName, defaultNamespace)
 		})
 
-		It("Scenario 12: should reject clash between two SharedAddresses", func() {
+		It("Scenario 12: should reject clash between two shared addresses", func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -1547,7 +1550,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				}
 			})
 
-			By("creating app1 with SharedAddresses")
+			By("creating app1 with shared address")
 			app1 := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "BrokerApp",
@@ -1563,7 +1566,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 							"test": "shared-clash",
 						},
 					},
-					SharedAddresses: []broker.AddressType{{Address: "api"}},
+					Addresses: []broker.AddressType{{Address: "api", ConsumerOfAppSelector: "true"}},
 					Capabilities: []broker.AppCapabilityType{
 						{
 							ProducerOf: []broker.AddressRef{
@@ -1601,7 +1604,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				}
 			})
 
-			By("creating app2 that also declares 'api' in SharedAddresses (clash!)")
+			By("creating app2 that also declares 'api' as shared address (clash!)")
 			app2 := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "BrokerApp",
@@ -1617,7 +1620,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 							"test": "shared-clash",
 						},
 					},
-					SharedAddresses: []broker.AddressType{{Address: "api"}},
+					Addresses: []broker.AddressType{{Address: "api", ConsumerOfAppSelector: "true"}},
 					Capabilities: []broker.AppCapabilityType{
 						{
 							ConsumerOf: []broker.AddressRef{
@@ -1665,7 +1668,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			UninstallCert(sharedOperandCertName, defaultNamespace)
 		})
 
-		It("Scenario 13: should reject clash between Addresses and SharedAddresses", func() {
+		It("Scenario 13: should reject clash between private and shared addresses", func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -1786,7 +1789,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 				}
 			})
 
-			By("creating app2 that declares same address in SharedAddresses (clash!)")
+			By("creating app2 that declares same address as shared (clash!)")
 			app2 := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "BrokerApp",
@@ -1802,7 +1805,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 							"test": "mixed-clash",
 						},
 					},
-					SharedAddresses: []broker.AddressType{{Address: "data"}},
+					Addresses: []broker.AddressType{{Address: "data", ConsumerOfAppSelector: "true"}},
 					Capabilities: []broker.AppCapabilityType{
 						{
 							ConsumerOf: []broker.AddressRef{

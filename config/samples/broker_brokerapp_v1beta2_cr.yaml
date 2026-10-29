@@ -6,7 +6,7 @@ spec:
   capabilities:
     - producerOf:
         - address: APP.JOBS
-  selector:
+  serviceSelector:
     matchLabels:
       forWorkQueue: 'true'
 status:

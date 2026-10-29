@@ -201,11 +201,6 @@ func (b *BrokerAppBuilder) WithProducerOf(addresses ...v1beta2.AddressRef) *Brok
 	return b
 }
 
-func (b *BrokerAppBuilder) WithSharedAddresses(addresses ...v1beta2.AddressType) *BrokerAppBuilder {
-	b.app.Spec.SharedAddresses = append(b.app.Spec.SharedAddresses, addresses...)
-	return b
-}
-
 func (b *BrokerAppBuilder) WithAddresses(addresses ...v1beta2.AddressType) *BrokerAppBuilder {
 	b.app.Spec.Addresses = append(b.app.Spec.Addresses, addresses...)
 	return b
@@ -269,30 +264,40 @@ func (a *AddressRefBuilder) Build() v1beta2.AddressRef {
 
 // AddressTypeBuilder builds AddressType test fixtures
 type AddressTypeBuilder struct {
-	addrType v1beta2.AddressType
+	addr v1beta2.AddressType
 }
 
 // NewAddressType creates a new AddressType builder
 func NewAddressType(address string) *AddressTypeBuilder {
 	return &AddressTypeBuilder{
-		addrType: v1beta2.AddressType{
+		addr: v1beta2.AddressType{
 			Address: address,
 		},
 	}
 }
 
 func (a *AddressTypeBuilder) WithSubscriptions(subs ...string) *AddressTypeBuilder {
-	a.addrType.Subscriptions = subs
+	a.addr.Subscriptions = subs
 	return a
 }
 
 func (a *AddressTypeBuilder) WithPubSub(pubSub bool) *AddressTypeBuilder {
-	a.addrType.PubSub = &pubSub
+	a.addr.PubSub = &pubSub
+	return a
+}
+
+func (a *AddressTypeBuilder) WithProducerOfAppSelector(expr string) *AddressTypeBuilder {
+	a.addr.ProducerOfAppSelector = expr
+	return a
+}
+
+func (a *AddressTypeBuilder) WithConsumerOfAppSelector(expr string) *AddressTypeBuilder {
+	a.addr.ConsumerOfAppSelector = expr
 	return a
 }
 
 func (a *AddressTypeBuilder) Build() v1beta2.AddressType {
-	return a.addrType
+	return a.addr
 }
 
 // CreateNamespace creates a test namespace object

@@ -67,11 +67,13 @@ var _ = Describe("brokerapp deployed condition", func() {
 					MatchLabels: map[string]string{"app": "broker"},
 				},
 				Addresses: []v1beta2.AddressType{
-					{Address: "conflicting-address"},
+					{Address: "conflicting-address", PubSub: func() *bool { b := true; return &b }()},
 				},
-				SharedAddresses: []v1beta2.AddressType{
-					{Address: "conflicting-address"},
-				},
+				Capabilities: []v1beta2.AppCapabilityType{{
+					ConsumerOf: []v1beta2.AddressRef{
+						{Address: "conflicting-address"},
+					},
+				}},
 			},
 			Status: v1beta2.BrokerAppStatus{
 				Service: &v1beta2.BrokerServiceBindingStatus{
@@ -101,7 +103,7 @@ var _ = Describe("brokerapp deployed condition", func() {
 
 		fakeClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithRuntimeObjects(namespace, service, app).
+			WithObjects(WithCerts(namespace, service, app)...).
 			WithStatusSubresource(app).
 			Build()
 
@@ -126,7 +128,7 @@ var _ = Describe("brokerapp deployed condition", func() {
 		Expect(validCond).NotTo(BeNil())
 		Expect(validCond.Status).To(Equal(metav1.ConditionFalse), "Valid should be False due to address conflict")
 		Expect(validCond.Reason).To(Equal(v1beta2.ValidConditionAddressTypeError))
-		Expect(validCond.Message).To(ContainSubstring("cannot be both private and public"))
+		Expect(validCond.Message).To(ContainSubstring("consistent routing semantics"))
 		Expect(validCond.ObservedGeneration).To(Equal(app.Generation))
 
 		deployedCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
@@ -173,11 +175,13 @@ var _ = Describe("brokerapp deployed condition", func() {
 					MatchLabels: map[string]string{"app": "broker"},
 				},
 				Addresses: []v1beta2.AddressType{
-					{Address: "conflicting-address"},
+					{Address: "conflicting-address", PubSub: func() *bool { b := true; return &b }()},
 				},
-				SharedAddresses: []v1beta2.AddressType{
-					{Address: "conflicting-address"},
-				},
+				Capabilities: []v1beta2.AppCapabilityType{{
+					ConsumerOf: []v1beta2.AddressRef{
+						{Address: "conflicting-address"},
+					},
+				}},
 			},
 		}
 
@@ -187,7 +191,7 @@ var _ = Describe("brokerapp deployed condition", func() {
 
 		fakeClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithRuntimeObjects(namespace, service, app).
+			WithObjects(WithCerts(namespace, service, app)...).
 			WithStatusSubresource(app).
 			Build()
 
@@ -250,11 +254,13 @@ var _ = Describe("brokerapp deployed condition", func() {
 					MatchLabels: map[string]string{"app": "broker"},
 				},
 				Addresses: []v1beta2.AddressType{
-					{Address: "conflicting-address"},
+					{Address: "conflicting-address", PubSub: func() *bool { b := true; return &b }()},
 				},
-				SharedAddresses: []v1beta2.AddressType{
-					{Address: "conflicting-address"},
-				},
+				Capabilities: []v1beta2.AppCapabilityType{{
+					ConsumerOf: []v1beta2.AddressRef{
+						{Address: "conflicting-address"},
+					},
+				}},
 			},
 			Status: v1beta2.BrokerAppStatus{
 				Service: &v1beta2.BrokerServiceBindingStatus{
@@ -284,7 +290,7 @@ var _ = Describe("brokerapp deployed condition", func() {
 
 		fakeClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithRuntimeObjects(namespace, service, app).
+			WithObjects(WithCerts(namespace, service, app)...).
 			WithStatusSubresource(app).
 			Build()
 

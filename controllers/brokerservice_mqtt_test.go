@@ -484,7 +484,10 @@ var _ = Describe("broker-service mqtt", func() {
 			// series belong to alpha alone, beta reading them needs access to
 			// alpha's namespace
 			const sharedQueue = "SHARED.Q"
-			appAlpha.Spec.SharedAddresses = []brokerv1beta2.AddressType{{Address: sharedQueue}}
+			appAlpha.Spec.Addresses = append(appAlpha.Spec.Addresses, brokerv1beta2.AddressType{
+				Address:               sharedQueue,
+				ConsumerOfAppSelector: fmt.Sprintf("app.metadata.name == '%s'", appBeta.Name),
+			})
 			appAlpha.Spec.Capabilities[0].ProducerOf = append(appAlpha.Spec.Capabilities[0].ProducerOf,
 				brokerv1beta2.AddressRef{Address: sharedQueue})
 			appBeta.Spec.Capabilities[0].ConsumerOf = append(appBeta.Spec.Capabilities[0].ConsumerOf,

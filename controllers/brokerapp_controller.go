@@ -69,58 +69,27 @@ func extractBaseAddress(address string) string {
 	return address
 }
 
-// collectOwnedAddresses returns all addresses "owned" by an app for clash detection purposes.
-//
-// An app owns an address if:
-//  1. Explicitly declared in spec.sharedAddresses (shareable with other apps)
-//  2. Explicitly declared in spec.addresses (private, not shareable)
-//  3. Implicitly used in capabilities with empty appNamespace/appName (private, not shareable)
-//
-// Both types count as "owned" to prevent address clashes between apps on the same service,
-// but only explicitly declared addresses (type 1) can be referenced by other apps via addressRef.
-//
-// This function is used for:
-//   - Clash detection: prevent two apps from using the same address name
-//   - AddressConfigurations generation: app needs broker config for all addresses it uses
-//
-// This function is NOT used for:
 // collectOwnedAddresses returns all addresses owned by this app (lifecycle tied to this app).
 // This is the union of:
-//   - spec.addresses (private addresses - cannot be referenced by other apps)
-//   - spec.sharedAddresses (public addresses - can be referenced by other apps)
-//   - addresses declared inline in capabilities (local addresses only)
-//
-// Sharing validation: checkAddressRefCapacity() checks spec.sharedAddresses (only explicit shared addresses are referenceable)
+//   - spec.addresses (private or shared, depending on sharing selectors)
+//   - addresses declared inline in capabilities (local addresses only, where App is nil)
 func collectOwnedAddresses(app *broker.BrokerApp) map[string]bool {
 	addresses := make(map[string]bool)
 
-	// Add from spec.addresses (private)
-	for _, addrType := range app.Spec.Addresses {
-		addresses[addrType.Address] = true
+	for _, addr := range app.Spec.Addresses {
+		addresses[addr.Address] = true
 	}
 
-	// Add from spec.sharedAddresses (public)
-	for _, addrType := range app.Spec.SharedAddresses {
-		addresses[addrType.Address] = true
-	}
-
-	// Add from capabilities (local addresses only - where appNamespace and appName are empty)
 	for _, capability := range app.Spec.Capabilities {
-		// Handle ProducerOf and ConsumerOf
-		allAddresses := [][]broker.AddressRef{
+		for _, addrList := range [][]broker.AddressRef{
 			capability.ProducerOf,
 			capability.ConsumerOf,
-		}
-
-		for _, addrList := range allAddresses {
+		} {
 			for _, addressRef := range addrList {
-				// Only count as owned if this is a local reference (no cross-app fields)
-				if addressRef.AppNamespace == "" && addressRef.AppName == "" {
+				if addressRef.AppName == "" {
 					baseAddr := extractBaseAddress(addressRef.Address)
 					addresses[baseAddr] = true
 				}
-				// Note: subscriptions array contains queue names, not addresses
-				// The address itself is owned, not the queue names
 			}
 		}
 	}
@@ -149,13 +118,12 @@ func (reconciler BrokerAppInstanceReconciler) validateSpec() error {
 		return err
 	}
 
-	// Validate capability address types (structural checks only)
-	if err := reconciler.verifyCapabilityAddressType(); err != nil {
+	if err := reconciler.validateAddressSharingSelectors(); err != nil {
 		return err
 	}
 
-	// Validate that Addresses and SharedAddresses don't overlap
-	if err := reconciler.validateAddressesDisjoint(); err != nil {
+	// Validate capability address types (structural checks only)
+	if err := reconciler.verifyCapabilityAddressType(); err != nil {
 		return err
 	}
 
@@ -173,6 +141,26 @@ func (reconciler BrokerAppInstanceReconciler) validateServiceSelector() error {
 		return NewValidationError(
 			broker.ValidConditionServiceSelectorError,
 			"spec.ServiceSelector must contain a non empty MatchLabels or MatchExpressions")
+	}
+	return nil
+}
+
+func (reconciler BrokerAppInstanceReconciler) validateAddressSharingSelectors() error {
+	for i, addr := range reconciler.instance.Spec.Addresses {
+		if addr.ProducerOfAppSelector != "" {
+			if err := appselector.ValidateExpression(addr.ProducerOfAppSelector); err != nil {
+				return NewValidationError(
+					broker.ValidConditionAddressTypeError,
+					"Spec.Addresses[%d].producerOfAppSelector: %v", i, err)
+			}
+		}
+		if addr.ConsumerOfAppSelector != "" {
+			if err := appselector.ValidateExpression(addr.ConsumerOfAppSelector); err != nil {
+				return NewValidationError(
+					broker.ValidConditionAddressTypeError,
+					"Spec.Addresses[%d].consumerOfAppSelector: %v", i, err)
+			}
+		}
 	}
 	return nil
 }
@@ -925,115 +913,129 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressClashOnService(servic
 }
 
 // checkAddressRefCapacity validates that cross-app addressRefs can be satisfied by the referenced apps.
-//
-// IMPORTANT: Only addresses explicitly declared in spec.sharedAddresses can be referenced by other apps.
-// Both spec.addresses and spec.sharedAddresses define owned addresses (lifecycle tied to the app),
-// but only sharedAddresses grant sharing permission.
-//
-// For example:
-//
-//	App A: addresses: ["orders"], capabilities.producerOf[{address: "orders"}]  -> PRIVATE
-//	App B: capabilities.consumerOf[{address: "orders", appNamespace: "ns", appName: "A"}] -> REJECTED
-//
-//	App A: sharedAddresses: ["orders"], capabilities.producerOf[{address: "orders"}] -> PUBLIC
-//	App B: capabilities.consumerOf[{address: "orders", appNamespace: "ns", appName: "A"}] -> ALLOWED
+// Only addresses with a matching sharing selector (producerOfAppSelector or consumerOfAppSelector) can be referenced.
 func (reconciler *BrokerAppInstanceReconciler) checkAddressRefCapacity(service *broker.BrokerService) error {
 	ctx := context.Background()
 
+	type roleAddrRef struct {
+		role string
+		ref  broker.AddressRef
+	}
+
+	var refs []roleAddrRef
 	for _, capability := range reconciler.instance.Spec.Capabilities {
-		// Check ProducerOf and ConsumerOf cross-app references
-		allAddresses := [][]broker.AddressRef{
-			capability.ProducerOf,
-			capability.ConsumerOf,
+		for _, ref := range capability.ProducerOf {
+			if ref.AppName != "" {
+				refs = append(refs, roleAddrRef{"producer", ref})
+			}
+		}
+		for _, ref := range capability.ConsumerOf {
+			if ref.AppName != "" {
+				refs = append(refs, roleAddrRef{"consumer", ref})
+			}
+		}
+	}
+
+	for _, item := range refs {
+		addressRef := item.ref
+
+		refNamespace := addressRef.AppNamespace
+		if refNamespace == "" {
+			refNamespace = reconciler.instance.Namespace
 		}
 
-		for _, addrList := range allAddresses {
-			for _, addressRef := range addrList {
-				// Only check cross-app references (where appNamespace and appName are set)
-				if addressRef.AppNamespace == "" || addressRef.AppName == "" {
-					continue // local reference, no dependency check needed
-				}
-
-				// Look up the referenced app
-				referencedApp := &broker.BrokerApp{}
-				refKey := types.NamespacedName{
-					Namespace: addressRef.AppNamespace,
-					Name:      addressRef.AppName,
-				}
-				if getErr := reconciler.Client.Get(ctx, refKey, referencedApp); getErr != nil {
-					if errors.IsNotFound(getErr) {
-						return fmt.Errorf("referenced app %s/%s not found",
-							addressRef.AppNamespace, addressRef.AppName)
-					}
-					return fmt.Errorf("failed to lookup referenced app %s/%s: %v",
-						addressRef.AppNamespace, addressRef.AppName, getErr)
-				}
-
-				// Check if the referenced app is provisioned on this same service
-				if referencedApp.Status.Service == nil {
-					return fmt.Errorf("referenced app %s/%s not yet provisioned on any service",
-						addressRef.AppNamespace, addressRef.AppName)
-				}
-
-				refServiceKey := referencedApp.Status.Service.Key()
-				thisServiceKey := serviceKey(service)
-				if refServiceKey != thisServiceKey {
-					// Verify the referenced service still exists to provide better error message
-					refService := &broker.BrokerService{}
-					refServiceName := types.NamespacedName{
-						Namespace: referencedApp.Status.Service.Namespace,
-						Name:      referencedApp.Status.Service.Name,
-					}
-					if getErr := reconciler.Client.Get(ctx, refServiceName, refService); getErr != nil {
-						if errors.IsNotFound(getErr) {
-							return fmt.Errorf("referenced app %s/%s was provisioned on service %s which no longer exists",
-								addressRef.AppNamespace, addressRef.AppName, refServiceKey)
-						}
-						return fmt.Errorf("failed to lookup service %s for referenced app %s/%s: %v",
-							refServiceKey, addressRef.AppNamespace, addressRef.AppName, getErr)
-					}
-					return fmt.Errorf("referenced app %s/%s is provisioned on different service %s (this app would bind to: %s)",
-						addressRef.AppNamespace, addressRef.AppName, refServiceKey, thisServiceKey)
-				}
-
-				// Extract base address from FQQN if present
-				//baseAddr := extractBaseAddress(addressRef.Address)
-
-				// Check if the referenced app declares this address in spec.sharedAddresses
-				addressShared := false
-				var ownerIsMulticast = false
-				for _, sharedAddrType := range referencedApp.Spec.SharedAddresses {
-					if sharedAddrType.Address == addressRef.Address {
-						addressShared = true
-						ownerIsMulticast = isMulticastAddress(sharedAddrType.PubSub, sharedAddrType.Subscriptions)
-						break
-					}
-				}
-
-				if !addressShared {
-					return fmt.Errorf("referenced app %s/%s does not share address '%s' (add to spec.sharedAddresses)",
-						addressRef.AppNamespace, addressRef.AppName, addressRef.Address)
-				}
-
-				// Check for routing type conflict
-				currentIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
-
-				// Detect conflict
-				if currentIsMulticast && !ownerIsMulticast {
-					return fmt.Errorf(
-						"referenced app %s/%s declares address '%s' without pubSub, "+
-							"but this app uses it with pubSub. "+
-							"Shared addresses must use consistent semantics across all apps",
-						addressRef.AppNamespace, addressRef.AppName, addressRef.Address)
-				}
-				if !currentIsMulticast && ownerIsMulticast {
-					return fmt.Errorf(
-						"referenced app %s/%s declares address '%s' with pubSub, "+
-							"but this app references it without pubSub. "+
-							"Shared addresses must use consistent semantics across all apps",
-						addressRef.AppNamespace, addressRef.AppName, addressRef.Address)
-				}
+		referencedApp := &broker.BrokerApp{}
+		refKey := types.NamespacedName{
+			Namespace: refNamespace,
+			Name:      addressRef.AppName,
+		}
+		if getErr := reconciler.Get(ctx, refKey, referencedApp); getErr != nil {
+			if errors.IsNotFound(getErr) {
+				return fmt.Errorf("referenced app %s/%s not found",
+					refNamespace, addressRef.AppName)
 			}
+			return fmt.Errorf("failed to lookup referenced app %s/%s: %v",
+				refNamespace, addressRef.AppName, getErr)
+		}
+
+		if referencedApp.Status.Service == nil {
+			return fmt.Errorf("referenced app %s/%s not yet provisioned on any service",
+				refNamespace, addressRef.AppName)
+		}
+
+		refServiceKey := referencedApp.Status.Service.Key()
+		thisServiceKey := serviceKey(service)
+		if refServiceKey != thisServiceKey {
+			refService := &broker.BrokerService{}
+			refServiceName := types.NamespacedName{
+				Namespace: referencedApp.Status.Service.Namespace,
+				Name:      referencedApp.Status.Service.Name,
+			}
+			if getErr := reconciler.Get(ctx, refServiceName, refService); getErr != nil {
+				if errors.IsNotFound(getErr) {
+					return fmt.Errorf("referenced app %s/%s was provisioned on service %s which no longer exists",
+						refNamespace, addressRef.AppName, refServiceKey)
+				}
+				return fmt.Errorf("failed to lookup service %s for referenced app %s/%s: %v",
+					refServiceKey, refNamespace, addressRef.AppName, getErr)
+			}
+			return fmt.Errorf("referenced app %s/%s is provisioned on different service %s (this app would bind to: %s)",
+				refNamespace, addressRef.AppName, refServiceKey, thisServiceKey)
+		}
+
+		// Check if the referenced app declares this address with a matching sharing selector
+		addressShared := false
+		var ownerIsMulticast bool
+		for _, addr := range referencedApp.Spec.Addresses {
+			if addr.Address != addressRef.Address {
+				continue
+			}
+			var selector string
+			if item.role == "producer" {
+				selector = addr.ProducerOfAppSelector
+			} else {
+				selector = addr.ConsumerOfAppSelector
+			}
+			if selector == "" {
+				break
+			}
+			matched, matchErr := appselector.MatchesAppSelector(selector, reconciler.instance, reconciler.Client)
+			if matchErr != nil {
+				return fmt.Errorf("failed to evaluate %sOfAppSelector on address '%s' of app %s/%s: %v",
+					item.role, addressRef.Address, refNamespace, addressRef.AppName, matchErr)
+			}
+			if matched {
+				addressShared = true
+				ownerIsMulticast = isMulticastAddress(addr.PubSub, addr.Subscriptions)
+			}
+			break
+		}
+
+		if !addressShared {
+			var selectorField string
+			if item.role == "producer" {
+				selectorField = "producerOfAppSelector"
+			} else {
+				selectorField = "consumerOfAppSelector"
+			}
+			return fmt.Errorf("referenced app %s/%s does not share address '%s' for role '%s' (add %s to spec.addresses[])",
+				refNamespace, addressRef.AppName, addressRef.Address, item.role, selectorField)
+		}
+
+		currentIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
+		if currentIsMulticast && !ownerIsMulticast {
+			return fmt.Errorf(
+				"referenced app %s/%s declares address '%s' without pubSub, "+
+					"but this app uses it with pubSub. "+
+					"Shared addresses must use consistent semantics across all apps",
+				refNamespace, addressRef.AppName, addressRef.Address)
+		}
+		if !currentIsMulticast && ownerIsMulticast {
+			return fmt.Errorf(
+				"referenced app %s/%s declares address '%s' with pubSub, "+
+					"but this app references it without pubSub. "+
+					"Shared addresses must use consistent semantics across all apps",
+				refNamespace, addressRef.AppName, addressRef.Address)
 		}
 	}
 
@@ -1043,35 +1045,27 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressRefCapacity(service *
 func (reconciler *BrokerAppInstanceReconciler) verifyCapabilityAddressType() (err error) {
 
 	for _, capability := range reconciler.instance.Spec.Capabilities {
-		// Validate ProducerOf
 		for index, addressRef := range capability.ProducerOf {
-			// Address field is required
 			if addressRef.Address == "" {
 				err = fmt.Errorf("Spec.Capability.ProducerOf[%d].address must be specified", index)
 				break
 			}
 
-			// Address should NOT use FQQN format - FQQN is generated internally
 			if strings.Contains(addressRef.Address, FQQNSeparator) {
 				err = fmt.Errorf("Spec.Capability.ProducerOf[%d].address should not use FQQN format (no '::'). Use plain address name", index)
 				break
 			}
 
-			// Validate cross-app reference consistency
-			hasNamespace := addressRef.AppNamespace != ""
-			hasAppName := addressRef.AppName != ""
-			if hasNamespace != hasAppName {
-				err = fmt.Errorf("Spec.Capability.ProducerOf[%d]: appNamespace and appName must both be set (for cross-app reference) or both empty (for local reference)", index)
+			if addressRef.AppName == "" && addressRef.AppNamespace != "" {
+				err = fmt.Errorf("Spec.Capability.ProducerOf[%d]: appName is required when appNamespace is set", index)
 				break
 			}
 
-			// Validate pubSub and subscriptions consistency
 			if addressRef.PubSub != nil && !*addressRef.PubSub && len(addressRef.Subscriptions) > 0 {
 				err = fmt.Errorf("Spec.Capability.ProducerOf[%d]: pubSub cannot be false when subscriptions are specified", index)
 				break
 			}
 
-			// ProducerOf with pubSub: can declare intent but cannot create queues
 			if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
 				if len(addressRef.Subscriptions) > 0 {
 					err = fmt.Errorf("Spec.Capability.ProducerOf[%d]: subscriptions cannot contain queue names (producers don't create queues). Use empty array or omit", index)
@@ -1083,49 +1077,39 @@ func (reconciler *BrokerAppInstanceReconciler) verifyCapabilityAddressType() (er
 			break
 		}
 
-		// Validate ConsumerOf
 		for index, addressRef := range capability.ConsumerOf {
-			// Address field is required
 			if addressRef.Address == "" {
 				err = fmt.Errorf("Spec.Capability.ConsumerOf[%d].address must be specified", index)
 				break
 			}
 
-			// Address should NOT use FQQN format - FQQN is generated internally
 			if strings.Contains(addressRef.Address, FQQNSeparator) {
 				err = fmt.Errorf("Spec.Capability.ConsumerOf[%d].address should not use FQQN format (no '::'). Use plain address name", index)
 				break
 			}
 
-			// Validate cross-app reference consistency
-			hasNamespace := addressRef.AppNamespace != ""
-			hasAppName := addressRef.AppName != ""
-			if hasNamespace != hasAppName {
-				err = fmt.Errorf("Spec.Capability.ConsumerOf[%d]: appNamespace and appName must both be set (for cross-app reference) or both empty (for local reference)", index)
+			if addressRef.AppName == "" && addressRef.AppNamespace != "" {
+				err = fmt.Errorf("Spec.Capability.ConsumerOf[%d]: appName is required when appNamespace is set", index)
 				break
 			}
 
-			// Validate pubSub and subscriptions consistency
 			if addressRef.PubSub != nil && !*addressRef.PubSub && len(addressRef.Subscriptions) > 0 {
 				err = fmt.Errorf("Spec.Capability.ConsumerOf[%d]: pubSub cannot be false when subscriptions are specified", index)
 				break
 			}
 
-			// ConsumerOf with pubSub: must specify at least one queue name
 			if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
 				if len(addressRef.Subscriptions) == 0 {
 					err = fmt.Errorf("Spec.Capability.ConsumerOf[%d]: pubSub consumers must specify at least one subscription queue name", index)
 					break
 				}
 
-				// Validate multicast queue names
 				for subIdx, queueName := range addressRef.Subscriptions {
 					if queueName == "" {
 						err = fmt.Errorf("Spec.Capability.ConsumerOf[%d].subscriptions[%d]: queue name cannot be empty", index, subIdx)
 						break
 					}
 
-					// Queue names should NOT use FQQN format
 					if strings.Contains(queueName, FQQNSeparator) {
 						err = fmt.Errorf("Spec.Capability.ConsumerOf[%d].subscriptions[%d]: queue name should not use FQQN format (no '::')", index, subIdx)
 						break
@@ -1139,123 +1123,81 @@ func (reconciler *BrokerAppInstanceReconciler) verifyCapabilityAddressType() (er
 		if err != nil {
 			break
 		}
+	}
 
-		// Validate routing type consistency within this capability
-		// Check for same-app conflicts: address used with consistent semantics
-		addressRoutingTypes := make(map[string]bool) // address -> isMulticast
+	if err == nil {
+		addressRoutingTypes := make(map[string]bool)
 
-		// Check ProducerOf addresses
-		for _, addressRef := range capability.ProducerOf {
-			if addressRef.AppNamespace == "" && addressRef.AppName == "" {
-				if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-					// Explicitly MULTICAST (pubSub=true or has subscriptions)
-					if prevType, exists := addressRoutingTypes[addressRef.Address]; exists && !prevType {
-						err = fmt.Errorf(
-							"address '%s' is referenced with both pubSub and non pubSub semantics in the same capability. "+
-								"Shared addresses must use consistent semantics",
-							addressRef.Address)
-						break
-					}
-					addressRoutingTypes[addressRef.Address] = true
-				}
-				// Not multicast in ProducerOf means routing type not specified by producer
-			}
-		}
-		if err != nil {
-			break
-		}
-
-		// Check ConsumerOf addresses
-		for _, addressRef := range capability.ConsumerOf {
-			if addressRef.AppNamespace == "" && addressRef.AppName == "" {
-				isMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
-
-				if prevType, exists := addressRoutingTypes[addressRef.Address]; exists {
-					if prevType != isMulticast {
-						err = fmt.Errorf(
-							"address '%s' is referenced with both pubSub and non pubSub semantics in the same capability. "+
-								"Shared addresses must use consistent semantics",
-							addressRef.Address)
-						break
+		for _, capability := range reconciler.instance.Spec.Capabilities {
+			for _, addressRef := range capability.ProducerOf {
+				if addressRef.AppName == "" {
+					if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
+						if prevType, exists := addressRoutingTypes[addressRef.Address]; exists && !prevType {
+							err = fmt.Errorf(
+								"address '%s' is referenced with both pubSub and non pubSub semantics in the same capability. "+
+									"Shared addresses must use consistent semantics",
+								addressRef.Address)
+							break
+						}
+						addressRoutingTypes[addressRef.Address] = true
 					}
 				}
-				addressRoutingTypes[addressRef.Address] = isMulticast
 			}
-		}
-		if err != nil {
-			break
+			if err != nil {
+				break
+			}
+
+			for _, addressRef := range capability.ConsumerOf {
+				if addressRef.AppName == "" {
+					isMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
+
+					if prevType, exists := addressRoutingTypes[addressRef.Address]; exists {
+						if prevType != isMulticast {
+							err = fmt.Errorf(
+								"address '%s' is referenced with both pubSub and non pubSub semantics in the same capability. "+
+									"Shared addresses must use consistent semantics",
+								addressRef.Address)
+							break
+						}
+					}
+					addressRoutingTypes[addressRef.Address] = isMulticast
+				}
+			}
+			if err != nil {
+				break
+			}
 		}
 	}
+
 	if err != nil {
 		return NewValidationError(broker.ValidConditionAddressTypeError, "%v", err)
 	}
 	return nil
 }
 
-// validateAddressesDisjoint ensures Addresses and SharedAddresses don't overlap.
-// An address cannot be both private (Addresses) and public (SharedAddresses).
-func (reconciler *BrokerAppInstanceReconciler) validateAddressesDisjoint() error {
-	if len(reconciler.instance.Spec.Addresses) == 0 || len(reconciler.instance.Spec.SharedAddresses) == 0 {
-		return nil // No overlap possible
-	}
-
-	// Build a set from Addresses
-	privateAddresses := make(map[string]bool)
-	for _, addr := range reconciler.instance.Spec.Addresses {
-		privateAddresses[addr.Address] = true
-	}
-
-	// Check for overlap with SharedAddresses
-	for _, sharedAddr := range reconciler.instance.Spec.SharedAddresses {
-		if privateAddresses[sharedAddr.Address] {
-			return NewValidationError(
-				broker.ValidConditionAddressTypeError,
-				"address '%s' appears in both spec.addresses and spec.sharedAddresses (cannot be both private and public)",
-				sharedAddr.Address)
-		}
-	}
-
-	return nil
-}
-
 // validateAddressCapabilityConsistency ensures that addresses declared in spec.addresses
-// or spec.sharedAddresses are used consistently in capabilities (same routing type).
+// are used consistently in capabilities (same routing type).
 func (reconciler *BrokerAppInstanceReconciler) validateAddressCapabilityConsistency() error {
-	// Build a map of declared addresses with their routing types
-	declaredAddresses := make(map[string]bool) // address -> isMulticast
+	declaredAddresses := make(map[string]bool)
 
-	// Collect from spec.addresses (private)
-	for _, addrType := range reconciler.instance.Spec.Addresses {
-		isMulticast := isMulticastAddress(addrType.PubSub, addrType.Subscriptions)
-		declaredAddresses[addrType.Address] = isMulticast
+	for _, addr := range reconciler.instance.Spec.Addresses {
+		declaredAddresses[addr.Address] = isMulticastAddress(addr.PubSub, addr.Subscriptions)
 	}
 
-	// Collect from spec.sharedAddresses (public)
-	for _, addrType := range reconciler.instance.Spec.SharedAddresses {
-		isMulticast := isMulticastAddress(addrType.PubSub, addrType.Subscriptions)
-		declaredAddresses[addrType.Address] = isMulticast
-	}
-
-	// If no declared addresses, nothing to validate
 	if len(declaredAddresses) == 0 {
 		return nil
 	}
 
-	// Check all capability references to local addresses (appNamespace/appName empty)
 	for _, capability := range reconciler.instance.Spec.Capabilities {
-		// Check ProducerOf
 		for _, addressRef := range capability.ProducerOf {
-			// Only check local addresses (not cross-app references)
-			if addressRef.AppNamespace == "" && addressRef.AppName == "" {
-				// Check if this address was declared
+			if addressRef.AppName == "" {
 				if declaredIsMulticast, isDeclared := declaredAddresses[addressRef.Address]; isDeclared {
-					// Check if usage matches declaration
 					usageIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
 
 					if declaredIsMulticast && !usageIsMulticast {
 						return NewValidationError(
 							broker.ValidConditionAddressTypeError,
-							"address '%s' is declared with pubSub semantics in spec.addresses or spec.sharedAddresses, "+
+							"address '%s' is declared with pubSub semantics in spec.addresses, "+
 								"but is used without pubSub semantics in capabilities.producerOf. "+
 								"Address declaration and usage must have consistent routing semantics",
 							addressRef.Address)
@@ -1264,7 +1206,7 @@ func (reconciler *BrokerAppInstanceReconciler) validateAddressCapabilityConsiste
 					if !declaredIsMulticast && usageIsMulticast {
 						return NewValidationError(
 							broker.ValidConditionAddressTypeError,
-							"address '%s' is declared without pubSub semantics in spec.addresses or spec.sharedAddresses, "+
+							"address '%s' is declared without pubSub semantics in spec.addresses, "+
 								"but is used with pubSub semantics in capabilities.producerOf. "+
 								"Address declaration and usage must have consistent routing semantics",
 							addressRef.Address)
@@ -1273,19 +1215,15 @@ func (reconciler *BrokerAppInstanceReconciler) validateAddressCapabilityConsiste
 			}
 		}
 
-		// Check ConsumerOf
 		for _, addressRef := range capability.ConsumerOf {
-			// Only check local addresses (not cross-app references)
-			if addressRef.AppNamespace == "" && addressRef.AppName == "" {
-				// Check if this address was declared
+			if addressRef.AppName == "" {
 				if declaredIsMulticast, isDeclared := declaredAddresses[addressRef.Address]; isDeclared {
-					// Check if usage matches declaration
 					usageIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
 
 					if declaredIsMulticast && !usageIsMulticast {
 						return NewValidationError(
 							broker.ValidConditionAddressTypeError,
-							"address '%s' is declared with pubSub semantics in spec.addresses or spec.sharedAddresses, "+
+							"address '%s' is declared with pubSub semantics in spec.addresses, "+
 								"but is used without pubSub semantics in capabilities.consumerOf. "+
 								"Address declaration and usage must have consistent routing semantics",
 							addressRef.Address)
@@ -1294,7 +1232,7 @@ func (reconciler *BrokerAppInstanceReconciler) validateAddressCapabilityConsiste
 					if !declaredIsMulticast && usageIsMulticast {
 						return NewValidationError(
 							broker.ValidConditionAddressTypeError,
-							"address '%s' is declared without pubSub semantics in spec.addresses or spec.sharedAddresses, "+
+							"address '%s' is declared without pubSub semantics in spec.addresses, "+
 								"but is used with pubSub semantics in capabilities.consumerOf. "+
 								"Address declaration and usage must have consistent routing semantics",
 							addressRef.Address)
@@ -1562,14 +1500,20 @@ func (r *BrokerAppReconciler) enqueueAppsForReferencedApp() handler.EventHandler
 // hasAddressRefTo checks if app has any addressRef pointing to targetApp
 func hasAddressRefTo(app *broker.BrokerApp, targetApp types.NamespacedName) bool {
 	for _, capability := range app.Spec.Capabilities {
-		for _, addressRef := range capability.ProducerOf {
-			if addressRef.AppNamespace == targetApp.Namespace && addressRef.AppName == targetApp.Name {
-				return true
-			}
-		}
-		for _, addressRef := range capability.ConsumerOf {
-			if addressRef.AppNamespace == targetApp.Namespace && addressRef.AppName == targetApp.Name {
-				return true
+		for _, addrList := range [][]broker.AddressRef{
+			capability.ProducerOf,
+			capability.ConsumerOf,
+		} {
+			for _, addressRef := range addrList {
+				if addressRef.AppName != "" {
+					refNs := addressRef.AppNamespace
+					if refNs == "" {
+						refNs = app.Namespace
+					}
+					if refNs == targetApp.Namespace && addressRef.AppName == targetApp.Name {
+						return true
+					}
+				}
 			}
 		}
 	}

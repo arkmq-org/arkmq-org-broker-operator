@@ -34,25 +34,17 @@ func parseCapabilities(secret *corev1.Secret, appName string) brokerproperties.C
 	return result
 }
 
-func testAddressRegistryNoCapabilities(useShared bool) {
+func testAddressRegistryNoCapabilities() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
-	builder := NewBrokerApp("address-registry", "test")
-	if useShared {
-		builder.WithSharedAddresses(
+	app := NewBrokerApp("address-registry", "test").
+		WithAddresses(
 			NewAddressType("events").Build(),
 			NewAddressType("commands").Build(),
 			NewAddressType("queries").Build(),
-		)
-	} else {
-		builder.WithAddresses(
-			NewAddressType("events").Build(),
-			NewAddressType("commands").Build(),
-			NewAddressType("queries").Build(),
-		)
-	}
-	app := builder.Build()
+		).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	Expect(err).NotTo(HaveOccurred())
@@ -68,23 +60,17 @@ func testAddressRegistryNoCapabilities(useShared bool) {
 	Expect(caps.SecurityRoles).NotTo(HaveKey("queries"), "should NOT have securityRoles when app has no capabilities")
 }
 
-func testSpecAddressesWithCapabilities(useShared bool) {
+func testSpecAddressesWithCapabilities() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
-	builder := NewBrokerApp("producer", "test")
-	if useShared {
-		builder.WithSharedAddresses(
+	app := NewBrokerApp("producer", "test").
+		WithAddresses(
 			NewAddressType("events").Build(),
 			NewAddressType("commands").Build(),
-		)
-	} else {
-		builder.WithAddresses(
-			NewAddressType("events").Build(),
-			NewAddressType("commands").Build(),
-		)
-	}
-	app := builder.WithProducerOf(NewAddressRef("events").Build()).Build()
+		).
+		WithProducerOf(NewAddressRef("events").Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	Expect(err).NotTo(HaveOccurred())
@@ -169,20 +155,12 @@ var _ = Describe("brokerservice capabilities", func() {
 		Expect(caps.SecurityRoles).To(HaveKey("shared-queue"), "expected securityRoles for referenced address 'shared-queue'")
 	})
 
-	It("address registry no capabilities private", Label(unitLabel), func() {
-		testAddressRegistryNoCapabilities(false)
+	It("address registry no capabilities", Label(unitLabel), func() {
+		testAddressRegistryNoCapabilities()
 	})
 
-	It("address registry no capabilities shared", Label(unitLabel), func() {
-		testAddressRegistryNoCapabilities(true)
-	})
-
-	It("spec addresses with capabilities private", Label(unitLabel), func() {
-		testSpecAddressesWithCapabilities(false)
-	})
-
-	It("spec addresses with capabilities shared", Label(unitLabel), func() {
-		testSpecAddressesWithCapabilities(true)
+	It("spec addresses with capabilities", Label(unitLabel), func() {
+		testSpecAddressesWithCapabilities()
 	})
 
 	It("generates queue configs for single consumer", Label(unitLabel), func() {

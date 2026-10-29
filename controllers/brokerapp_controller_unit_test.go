@@ -539,7 +539,8 @@ var _ = Describe("brokerapp controller unit", func() {
 
 			ownerApp := NewBrokerApp("owner-app", ns).
 				WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
-				WithSharedAddresses(NewAddressType("events").WithPubSub(true).Build()).
+				WithAddresses(NewAddressType("events").WithPubSub(true).
+					WithConsumerOfAppSelector("app.metadata.name == 'consumer-app'").Build()).
 				WithConsumerOf(NewAddressRef("events").WithSubscriptions("sub1").Build()).
 				WithServiceBinding(svcName, ns, "", 0).
 				Build()
@@ -579,7 +580,8 @@ var _ = Describe("brokerapp controller unit", func() {
 
 			ownerApp := NewBrokerApp("owner-app-2", ns).
 				WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
-				WithSharedAddresses(NewAddressType("commands").Build()).
+				WithAddresses(NewAddressType("commands").
+					WithConsumerOfAppSelector("app.metadata.name == 'subscriber-app'").Build()).
 				WithConsumerOf(NewAddressRef("commands").Build()).
 				WithServiceBinding(svcName, ns, "", 0).
 				Build()
@@ -622,7 +624,8 @@ var _ = Describe("brokerapp controller unit", func() {
 
 			ownerApp := NewBrokerApp("owner-app-3", ns).
 				WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
-				WithSharedAddresses(NewAddressType("topic").Build()).
+				WithAddresses(NewAddressType("topic").
+					WithConsumerOfAppSelector("app.metadata.name == 'subscriber-app-2'").Build()).
 				WithConsumerOf(NewAddressRef("topic").WithSubscriptions("sub1").Build()).
 				WithServiceBinding(svcName, ns, "", 0).
 				Build()
@@ -662,7 +665,8 @@ var _ = Describe("brokerapp controller unit", func() {
 
 			ownerApp := NewBrokerApp("owner-app-4", ns).
 				WithServiceSelector(&v1.LabelSelector{MatchLabels: map[string]string{"type": "messaging"}}).
-				WithSharedAddresses(NewAddressType("queue").Build()).
+				WithAddresses(NewAddressType("queue").
+					WithConsumerOfAppSelector("app.metadata.name == 'consumer-app-2'").Build()).
 				WithConsumerOf(NewAddressRef("queue").Build()).
 				WithServiceBinding(svcName, ns, "", 0).
 				Build()
@@ -749,7 +753,7 @@ var _ = Describe("brokerapp controller unit", func() {
 		svc := NewBrokerService(svcName, ns).Build()
 
 		publisher := NewBrokerApp("publisher", ns).
-			WithSharedAddresses(NewAddressType("events").WithPubSub(true).Build()).
+			WithAddresses(NewAddressType("events").WithPubSub(true).Build()).
 			WithServiceBinding(svcName, ns, "", 0).
 			Build()
 		first := NewBrokerApp("first", ns).
