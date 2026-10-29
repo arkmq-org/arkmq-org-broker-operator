@@ -170,7 +170,10 @@ var _ = Describe("broker-service address post-binding validation", func() {
 							"test": "post-binding",
 						},
 					},
-					SharedAddresses: []broker.AddressType{{Address: "orders"}},
+					Addresses: []broker.AddressType{{
+						Address:               "orders",
+						ConsumerOfAppSelector: "true",
+					}},
 					Capabilities: []broker.AppCapabilityType{
 						{
 							ProducerOf: []broker.AddressRef{
@@ -306,7 +309,7 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			UninstallCert(sharedOperandCertName, defaultNamespace)
 		})
 
-		It("Scenario 2: should detect when sharedAddresses is modified to remove referenced address", func() {
+		It("Scenario 2: should detect when shared address is modified to remove sharing selector", func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -389,9 +392,9 @@ var _ = Describe("broker-service address post-binding validation", func() {
 							"test": "post-binding",
 						},
 					},
-					SharedAddresses: []broker.AddressType{
-						{Address: "orders"},
-						{Address: "shipments"},
+					Addresses: []broker.AddressType{
+						{Address: "orders", ConsumerOfAppSelector: "true"},
+						{Address: "shipments", ConsumerOfAppSelector: "true"},
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
@@ -487,18 +490,15 @@ var _ = Describe("broker-service address post-binding validation", func() {
 				g.Expect(updatedService.Status.ProvisionedApps).Should(HaveLen(2))
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("updating owner app to remove 'orders' from sharedAddresses")
+			By("updating owner app to remove sharing selector from 'orders'")
 			Eventually(func(g Gomega) {
 				updatedOwner := &broker.BrokerApp{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ownerAppName, Namespace: defaultNamespace}, updatedOwner)).Should(Succeed())
 
-				// Remove 'orders' from sharedAddresses, keep only 'shipments'
-				updatedOwner.Spec.SharedAddresses = []broker.AddressType{
-					{Address: "shipments"},
-				}
-				// Still produce to orders, but don't share it
+				// Remove selector from 'orders' (make private), keep 'shipments' shared
 				updatedOwner.Spec.Addresses = []broker.AddressType{
 					{Address: "orders"},
+					{Address: "shipments", ConsumerOfAppSelector: "true"},
 				}
 
 				g.Expect(k8sClient.Update(ctx, updatedOwner)).Should(Succeed())
@@ -606,8 +606,8 @@ var _ = Describe("broker-service address post-binding validation", func() {
 							"test": "post-binding",
 						},
 					},
-					SharedAddresses: []broker.AddressType{
-						{Address: "events"}, // anycast - no subscriptions
+					Addresses: []broker.AddressType{
+						{Address: "events", ConsumerOfAppSelector: "true"}, // anycast - no subscriptions
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
@@ -719,7 +719,7 @@ var _ = Describe("broker-service address post-binding validation", func() {
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ownerAppName, Namespace: defaultNamespace}, updatedOwner)).Should(Succeed())
 
 				// Change existing address to multicast by adding subscriptions (implicit pubSub inference)
-				updatedOwner.Spec.SharedAddresses[0].Subscriptions = []string{"sub1"}
+				updatedOwner.Spec.Addresses[0].Subscriptions = []string{"sub1"}
 
 				// ProducerOf is still with an anycast reference, should be invalid
 
@@ -1008,15 +1008,15 @@ var _ = Describe("broker-service address post-binding validation", func() {
 				g.Expect(updatedService.Status.ProvisionedApps).Should(HaveLen(2))
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("updating app2 to add 'orders' to sharedAddresses (introducing clash)")
+			By("updating app2 to add 'orders' to addresses with sharing selector (introducing clash)")
 			Eventually(func(g Gomega) {
 				updatedApp2 := &broker.BrokerApp{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: app2Name, Namespace: defaultNamespace}, updatedApp2)).Should(Succeed())
 
-				// Add 'orders' to shared addresses - this clashes with app1's private 'orders'
-				updatedApp2.Spec.SharedAddresses = []broker.AddressType{
-					{Address: "orders"}, // CLASH!
-				}
+				// Add 'orders' to addresses - this clashes with app1's private 'orders'
+				updatedApp2.Spec.Addresses = append(updatedApp2.Spec.Addresses, broker.AddressType{
+					Address: "orders", // CLASH!
+				})
 
 				g.Expect(k8sClient.Update(ctx, updatedApp2)).Should(Succeed())
 			}, timeout, interval).Should(Succeed())

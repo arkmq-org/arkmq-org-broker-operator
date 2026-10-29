@@ -36,7 +36,7 @@ var _ = Describe("brokerapp address capability consistency", func() {
 				ServiceSelector: &v1.LabelSelector{
 					MatchLabels: map[string]string{"type": "broker"},
 				},
-				SharedAddresses: []broker.AddressType{
+				Addresses: []broker.AddressType{
 					{
 						Address:       "events",
 						Subscriptions: []string{"sub1"},
@@ -97,7 +97,7 @@ var _ = Describe("brokerapp address capability consistency", func() {
 				ServiceSelector: &v1.LabelSelector{
 					MatchLabels: map[string]string{"type": "broker"},
 				},
-				SharedAddresses: []broker.AddressType{
+				Addresses: []broker.AddressType{
 					{
 						Address: "orders",
 					},
@@ -219,7 +219,7 @@ var _ = Describe("brokerapp address capability consistency", func() {
 				ServiceSelector: &v1.LabelSelector{
 					MatchLabels: map[string]string{"type": "broker"},
 				},
-				SharedAddresses: []broker.AddressType{
+				Addresses: []broker.AddressType{
 					{
 						Address:       "events",
 						Subscriptions: []string{"sub1"},
@@ -287,7 +287,7 @@ var _ = Describe("brokerapp address capability consistency", func() {
 				ServiceSelector: &v1.LabelSelector{
 					MatchLabels: map[string]string{"type": "broker"},
 				},
-				SharedAddresses: []broker.AddressType{
+				Addresses: []broker.AddressType{
 					{
 						Address: "orders",
 					},
@@ -353,7 +353,7 @@ var _ = Describe("brokerapp address capability consistency", func() {
 				ServiceSelector: &v1.LabelSelector{
 					MatchLabels: map[string]string{"type": "broker"},
 				},
-				SharedAddresses: []broker.AddressType{
+				Addresses: []broker.AddressType{
 					{
 						Address:       "events",
 						Subscriptions: []string{"sub1"},
@@ -456,7 +456,7 @@ var _ = Describe("brokerapp address capability consistency", func() {
 				ServiceSelector: &v1.LabelSelector{
 					MatchLabels: map[string]string{"type": "broker"},
 				},
-				SharedAddresses: []broker.AddressType{
+				Addresses: []broker.AddressType{
 					{
 						Address:       "events",
 						PubSub:        &pubSubFalse,

@@ -124,6 +124,16 @@ func Matches(app *broker.BrokerApp, service *broker.BrokerService, client client
 	return evaluateExpression(expression, app, service, client)
 }
 
+// MatchesAppSelector evaluates a CEL expression against a BrokerApp for address sharing selectors.
+// The expression has access to the same `app` variable as appSelectorExpression.
+// Returns (matches, error). On error, matches will be false (fail-safe).
+func MatchesAppSelector(expression string, app *broker.BrokerApp, c client.Client) (bool, error) {
+	if expression == "" {
+		return false, nil
+	}
+	return evaluateExpression(expression, app, &broker.BrokerService{}, c)
+}
+
 // analyzeVariableUsage walks the CEL AST to determine which variables are referenced.
 // This allows us to skip fetching namespace objects when they're not used in the expression.
 func analyzeVariableUsage(ast *cel.Ast) (usesAppNamespace, usesServiceNamespace bool) {

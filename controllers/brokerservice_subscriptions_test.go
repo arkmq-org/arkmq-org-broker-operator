@@ -20,17 +20,13 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func testEmptySubscriptionsArrayMulticastOnly(useShared bool) {
+func testEmptySubscriptionsArrayMulticastOnly() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
-	builder := NewBrokerApp("multicast-app", "test")
-	if useShared {
-		builder.WithSharedAddresses(NewAddressType("events").WithPubSub(true).Build())
-	} else {
-		builder.WithAddresses(NewAddressType("events").WithPubSub(true).Build())
-	}
-	app := builder.Build()
+	app := NewBrokerApp("multicast-app", "test").
+		WithAddresses(NewAddressType("events").WithPubSub(true).Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	Expect(err).NotTo(HaveOccurred())
@@ -50,17 +46,13 @@ func testEmptySubscriptionsArrayMulticastOnly(useShared bool) {
 		"should NOT have securityRoles when app has no capabilities")
 }
 
-func testSingleQueueAnycastRouting(useShared bool) {
+func testSingleQueueAnycastRouting() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
-	builder := NewBrokerApp("anycast-app", "test")
-	if useShared {
-		builder.WithSharedAddresses(NewAddressType("orders").Build())
-	} else {
-		builder.WithAddresses(NewAddressType("orders").Build())
-	}
-	app := builder.Build()
+	app := NewBrokerApp("anycast-app", "test").
+		WithAddresses(NewAddressType("orders").Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	Expect(err).NotTo(HaveOccurred())
@@ -81,17 +73,13 @@ func testSingleQueueAnycastRouting(useShared bool) {
 		"expected queueConfigs address=orders")
 }
 
-func testMultipleSubsAllCreated(useShared bool) {
+func testMultipleSubsAllCreated() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
-	builder := NewBrokerApp("multi-queue-app", "test")
-	if useShared {
-		builder.WithSharedAddresses(NewAddressType("tasks").WithSubscriptions("high-priority", "low-priority", "default").Build())
-	} else {
-		builder.WithAddresses(NewAddressType("tasks").WithSubscriptions("high-priority", "low-priority", "default").Build())
-	}
-	app := builder.Build()
+	app := NewBrokerApp("multi-queue-app", "test").
+		WithAddresses(NewAddressType("tasks").WithSubscriptions("high-priority", "low-priority", "default").Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	Expect(err).NotTo(HaveOccurred())
@@ -114,17 +102,13 @@ func testMultipleSubsAllCreated(useShared bool) {
 	}
 }
 
-func testSubsWithCapabilitiesSubsAndRBAC(useShared bool) {
+func testSubsWithCapabilitiesSubsAndRBAC() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
-	builder := NewBrokerApp("queue-with-caps", "test")
-	if useShared {
-		builder.WithSharedAddresses(NewAddressType("commands").Build())
-	} else {
-		builder.WithAddresses(NewAddressType("commands").Build())
-	}
-	app := builder.WithProducerOf(NewAddressRef("commands").Build()).
+	app := NewBrokerApp("queue-with-caps", "test").
+		WithAddresses(NewAddressType("commands").Build()).
+		WithProducerOf(NewAddressRef("commands").Build()).
 		WithConsumerOf(NewAddressRef("commands").Build()).
 		Build()
 
@@ -151,17 +135,14 @@ func testSubsWithCapabilitiesSubsAndRBAC(useShared bool) {
 	Expect(c.Consume).To(BeTrue(), "expected consumer RBAC role with consume=true")
 }
 
-func testNoQueuesFieldInferredFromCapabilities(useShared bool) {
+func testNoQueuesFieldInferredFromCapabilities() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
-	builder := NewBrokerApp("inferred-queues", "test")
-	if useShared {
-		builder.WithSharedAddresses(NewAddressType("legacy").Build())
-	} else {
-		builder.WithAddresses(NewAddressType("legacy").Build())
-	}
-	app := builder.WithConsumerOf(NewAddressRef("legacy").Build()).Build()
+	app := NewBrokerApp("inferred-queues", "test").
+		WithAddresses(NewAddressType("legacy").Build()).
+		WithConsumerOf(NewAddressRef("legacy").Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	Expect(err).NotTo(HaveOccurred())
@@ -175,23 +156,16 @@ func testNoQueuesFieldInferredFromCapabilities(useShared bool) {
 	Expect(caps.SecurityRoles).To(HaveKey("legacy"), "expected securityRoles from capabilities")
 }
 
-func testMixedMulticastAndAnycast(useShared bool) {
+func testMixedMulticastAndAnycast() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
-	builder := NewBrokerApp("mixed-routing", "test")
-	if useShared {
-		builder.WithSharedAddresses(
+	app := NewBrokerApp("mixed-routing", "test").
+		WithAddresses(
 			NewAddressType("events").WithPubSub(true).Build(),
 			NewAddressType("commands").Build(),
-		)
-	} else {
-		builder.WithAddresses(
-			NewAddressType("events").WithPubSub(true).Build(),
-			NewAddressType("commands").Build(),
-		)
-	}
-	app := builder.Build()
+		).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	Expect(err).NotTo(HaveOccurred())
@@ -207,17 +181,14 @@ func testMixedMulticastAndAnycast(useShared bool) {
 		"expected queueConfigs for anycast address 'commands'")
 }
 
-func testSubsWithSubscriberCapability(useShared bool) {
+func testSubsWithSubscriberCapability() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
-	builder := NewBrokerApp("subscriber-with-queues", "test")
-	if useShared {
-		builder.WithSharedAddresses(NewAddressType("notifications").WithSubscriptions("email", "sms").Build())
-	} else {
-		builder.WithAddresses(NewAddressType("notifications").WithSubscriptions("email", "sms").Build())
-	}
-	app := builder.WithConsumerOf(NewAddressRef("notifications").WithSubscriptions("push").Build()).Build()
+	app := NewBrokerApp("subscriber-with-queues", "test").
+		WithAddresses(NewAddressType("notifications").WithSubscriptions("email", "sms").Build()).
+		WithConsumerOf(NewAddressRef("notifications").WithSubscriptions("push").Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	Expect(err).NotTo(HaveOccurred())
@@ -237,59 +208,31 @@ func testSubsWithSubscriberCapability(useShared bool) {
 
 var _ = Describe("brokerservice subscriptions", func() {
 
-	It("empty subscriptions array multicast only private", Label(unitLabel), func() {
-		testEmptySubscriptionsArrayMulticastOnly(false)
+	It("empty subscriptions array multicast only", Label(unitLabel), func() {
+		testEmptySubscriptionsArrayMulticastOnly()
 	})
 
-	It("empty subscriptions array multicast only shared", Label(unitLabel), func() {
-		testEmptySubscriptionsArrayMulticastOnly(true)
+	It("single queue anycast routing", Label(unitLabel), func() {
+		testSingleQueueAnycastRouting()
 	})
 
-	It("single queue anycast routing private", Label(unitLabel), func() {
-		testSingleQueueAnycastRouting(false)
+	It("multiple subs all created", Label(unitLabel), func() {
+		testMultipleSubsAllCreated()
 	})
 
-	It("single queue anycast routing shared", Label(unitLabel), func() {
-		testSingleQueueAnycastRouting(true)
+	It("subs with capabilities subs and RBAC", Label(unitLabel), func() {
+		testSubsWithCapabilitiesSubsAndRBAC()
 	})
 
-	It("multiple subs all created private", Label(unitLabel), func() {
-		testMultipleSubsAllCreated(false)
+	It("no queues field inferred from capabilities", Label(unitLabel), func() {
+		testNoQueuesFieldInferredFromCapabilities()
 	})
 
-	It("multiple subs all created shared", Label(unitLabel), func() {
-		testMultipleSubsAllCreated(true)
+	It("mixed multicast and anycast", Label(unitLabel), func() {
+		testMixedMulticastAndAnycast()
 	})
 
-	It("subs with capabilities subs and RBAC private", Label(unitLabel), func() {
-		testSubsWithCapabilitiesSubsAndRBAC(false)
-	})
-
-	It("subs with capabilities subs and RBAC shared", Label(unitLabel), func() {
-		testSubsWithCapabilitiesSubsAndRBAC(true)
-	})
-
-	It("no queues field inferred from capabilities private", Label(unitLabel), func() {
-		testNoQueuesFieldInferredFromCapabilities(false)
-	})
-
-	It("no queues field inferred from capabilities shared", Label(unitLabel), func() {
-		testNoQueuesFieldInferredFromCapabilities(true)
-	})
-
-	It("mixed multicast and anycast private", Label(unitLabel), func() {
-		testMixedMulticastAndAnycast(false)
-	})
-
-	It("mixed multicast and anycast shared", Label(unitLabel), func() {
-		testMixedMulticastAndAnycast(true)
-	})
-
-	It("subs with subscriber capability private", Label(unitLabel), func() {
-		testSubsWithSubscriberCapability(false)
-	})
-
-	It("subs with subscriber capability shared", Label(unitLabel), func() {
-		testSubsWithSubscriberCapability(true)
+	It("subs with subscriber capability", Label(unitLabel), func() {
+		testSubsWithSubscriberCapability()
 	})
 })

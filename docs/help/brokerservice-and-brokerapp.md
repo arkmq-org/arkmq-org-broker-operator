@@ -10,13 +10,14 @@ The relationship between them is intentionally decoupled: applications declare w
 ┌─────────────────────┐         label selector           ┌─────────────────────┐
 │     BrokerApp       │ ──────────────────────────────>  │   BrokerService     │
 │                     │                                  │                     │
-│  spec.selector:     │    matches service labels        │  metadata.labels:   │
-│    matchLabels:     │                                  │    env: production  │
-│      env: production│                                  │    tier: shared     │
-│                     │                                  │                     │
-│  spec.capabilities: │                                  │  spec.resources:    │
-│    - producerOf:    │                                  │    limits:          │
-│      - address: Q1  │  <─── binding secret ──────────  │      memory: 2Gi    │
+│  spec.              │    matches service labels        │  metadata.labels:   │
+│   serviceSelector:  │                                  │    env: production  │
+│    matchLabels:     │                                  │    tier: shared     │
+│      env: production│                                  │                     │
+│                     │                                  │  spec.resources:    │
+│  spec.capabilities: │                                  │    limits:          │
+│    - producerOf:    │                                  │      memory: 2Gi    │
+│      - address: Q1  │  <─── binding secret ──────────  │                     │
 └─────────────────────┘                                  └─────────────────────┘
 ```
 
@@ -72,7 +73,7 @@ metadata:
   name: order-processor
   namespace: orders
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       env: production
       tier: shared
@@ -90,20 +91,16 @@ spec:
 
 | Field | Description |
 |---|---|
-| `selector` | Label selector to find matching BrokerServices (required, must be non-empty) |
-| `addresses` | Private addresses owned by this app, not referenceable by other apps |
-| `sharedAddresses` | Public addresses owned by this app, referenceable by other apps via `appNamespace`/`appName` |
+| `serviceSelector` | Label selector to find matching BrokerServices (required, must be non-empty) |
+| `addresses` | Addresses owned by this app. Private by default; opt-in to sharing via `producerOfAppSelector`/`consumerOfAppSelector` |
 | `capabilities` | Declares produce/consume permissions using `producerOf` and `consumerOf` |
 | `resources` | Resource requirements for this app's share of broker capacity |
 
-### Addresses and SharedAddresses
+### Addresses and Sharing
 
-The use of this optional field allows Addresses to exist with a lifecycle tied to the app, independent of their reference from capabilities.
+Addresses declared under `addresses` have a lifecycle tied to the app, independent of their reference from capabilities. An address is **private by default** — other apps cannot reference it.
 
-Addresses declared under `addresses` are private to this BrokerApp. Other apps cannot reference them. Sharing addresses must be intentional when apps share a broker service.
-
-Addresses declared under `sharedAddresses` are public. Other apps can reference them in their capabilities using cross-app address references:
-
+To share an address, add a `producerOfAppSelector` and/or `consumerOfAppSelector` CEL expression. The expression is evaluated against the requesting app to determine if it is allowed to reference the address in that role:
 
 ```yaml
 # App "order-service" owns a shared work queue
@@ -113,11 +110,12 @@ metadata:
   name: order-service
   namespace: orders
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       env: production
-  sharedAddresses:
+  addresses:
     - address: ORDERS.FULFILLMENT
+      consumerOfAppSelector: "app.metadata.name == 'warehouse' && app.metadata.namespace == 'fulfillment'"
   capabilities:
     - producerOf:
         - address: ORDERS.FULFILLMENT
@@ -129,7 +127,7 @@ metadata:
   name: warehouse
   namespace: fulfillment
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       env: production
   capabilities:
@@ -139,7 +137,92 @@ spec:
           appName: order-service
 ```
 
-The same address cannot appear in both `addresses` and `sharedAddresses`.
+### Address Sharing in Detail
+
+Sharing is opt-in, per-address, and per-role. Both sides must agree: the address owner declares who may reference it via a CEL selector, and the referencing app names the owner.
+
+#### Owner Side: CEL Selectors
+
+Each `AddressType` has two optional CEL selector fields:
+
+| Field | Meaning |
+|---|---|
+| `producerOfAppSelector` | CEL expression selecting apps allowed to **produce** to this address |
+| `consumerOfAppSelector` | CEL expression selecting apps allowed to **consume** from this address |
+
+The expression is evaluated with the requesting app as the `app` variable (the same variable available in `appSelectorExpression`). Common fields: `app.metadata.name`, `app.metadata.namespace`, `app.metadata.labels`.
+
+Selectors are **role-specific**: a `consumerOfAppSelector` does not authorize producing, and vice versa.
+
+#### Requester Side: `appName` / `appNamespace`
+
+To reference another app's address, set `appName` (and optionally `appNamespace`) on the address ref in `capabilities[].producerOf` or `capabilities[].consumerOf`:
+
+```yaml
+capabilities:
+  - consumerOf:
+      - address: ORDERS.FULFILLMENT
+        appNamespace: orders       # owner's namespace (omit if same namespace)
+        appName: order-service     # owner's name
+```
+
+When `appNamespace` is omitted, it defaults to the **requester's own namespace**.
+
+#### Validation Rules
+
+Both sides are validated at reconcile time:
+
+1. The referenced app must exist and be provisioned on the same BrokerService
+2. The address must exist in the referenced app's `addresses`
+3. The address must have a matching selector (`producerOfAppSelector` or `consumerOfAppSelector`)
+4. The CEL expression must evaluate to `true` for the requesting app
+5. Routing type (`pubSub`/`subscriptions`) must be consistent between owner and requester
+
+#### Sharing Patterns
+
+**Single named consumer:**
+
+```yaml
+addresses:
+  - address: work-queue
+    consumerOfAppSelector: "app.metadata.name == 'worker-app'"
+```
+
+**All apps in a namespace may consume:**
+
+```yaml
+addresses:
+  - address: events
+    consumerOfAppSelector: "app.metadata.namespace == 'team-b'"
+```
+
+**Bidirectional sharing with a specific app:**
+
+```yaml
+addresses:
+  - address: commands
+    producerOfAppSelector: "app.metadata.name == 'control-plane'"
+    consumerOfAppSelector: "app.metadata.name == 'control-plane'"
+```
+
+**Multiple consumers across namespaces:**
+
+```yaml
+addresses:
+  - address: notifications
+    pubSub: true
+    consumerOfAppSelector: >-
+      (app.metadata.name == 'dashboard' && app.metadata.namespace == 'team-a')
+      || app.metadata.namespace == 'team-b'
+```
+
+**Label-based sharing:**
+
+```yaml
+addresses:
+  - address: audit-events
+    consumerOfAppSelector: "has(app.metadata.labels.audit) && app.metadata.labels.audit == 'true'"
+```
 
 ### Pub/Sub Addresses
 
@@ -192,18 +275,18 @@ Matching between BrokerApp and BrokerService is bidirectional, requiring agreeme
 
 ### Step 1: BrokerApp Finds Candidates (Label Selector)
 
-The BrokerApp's `spec.selector` is a standard Kubernetes [label selector](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors). It supports both `matchLabels` and `matchExpressions`:
+The BrokerApp's `spec.serviceSelector` is a standard Kubernetes [label selector](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors). It supports both `matchLabels` and `matchExpressions`:
 
 ```yaml
 # Simple label matching
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       env: production
 
 # Set-based matching
 spec:
-  selector:
+  serviceSelector:
     matchExpressions:
       - key: tier
         operator: In
@@ -266,13 +349,13 @@ Start broad, then constrain. An app that only needs a production broker should s
 ```yaml
 # Good: selects on what matters to the app
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       env: production
 
 # Overly specific: locks the app to one service arrangement
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       env: production
       tier: shared
@@ -290,7 +373,7 @@ For multi-tenant or platform-style deployments, place BrokerServices in a dedica
 Namespace: broker-infra          Namespace: team-a           Namespace: team-b
 ┌──────────────────────┐         ┌─────────────────┐         ┌──────────────────┐
 │ BrokerService        │         │ BrokerApp       │         │ BrokerApp        │
-│   labels:            │  <────  │   selector:     │         │   selector:      │
+│   labels:            │  <────  │ serviceSelector:│         │ serviceSelector: │
 │     env: production  │         │     env: prod   │  ────>  │     env: prod    │
 │   appSelectorExpr:   │         └─────────────────┘         └──────────────────┘
 │     app.metadata.    │                 ✓ allowed                  ✓ allowed
@@ -332,12 +415,13 @@ metadata:
   name: order-service
   namespace: orders
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       env: production
       tier: shared
-  sharedAddresses:
+  addresses:
     - address: ORDERS.CREATED
+      producerOfAppSelector: "app.metadata.name == 'payment-service' && app.metadata.namespace == 'payments'"
     - address: ORDERS.SHIPPED
   capabilities:
     - producerOf:
@@ -351,7 +435,7 @@ metadata:
   name: payment-service
   namespace: payments
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       env: production
       tier: shared

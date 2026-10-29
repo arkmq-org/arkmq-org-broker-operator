@@ -29,18 +29,11 @@ type BrokerAppSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="ServiceSelector"
-	ServiceSelector *metav1.LabelSelector `json:"selector,omitempty"`
+	ServiceSelector *metav1.LabelSelector `json:"serviceSelector"`
 
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Addresses"
-	// Addresses with a lifecycle tied to this app, independent from addressRefs.
-	// These are private addresses that cannot be referenced by other apps.
+	// Addresses with a lifecycle tied to this app.
 	Addresses []AddressType `json:"addresses,omitempty"`
-
-	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Shared Addresses"
-	// SharedAddresses with a lifecycle tied to this app, independent from addressRefs.
-	// These are public addresses that can be referenced by other apps
-	// via appNamespace/appName in their capabilities addressRefs.
-	SharedAddresses []AddressType `json:"sharedAddresses,omitempty"`
 
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Messaging Capabilities"
 	Capabilities []AppCapabilityType `json:"capabilities,omitempty"`
@@ -49,7 +42,7 @@ type BrokerAppSpec struct {
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
-// AddressType defines a messaging address
+// AddressType defines a messaging address with optional sharing selectors
 type AddressType struct {
 	// Address is the address identifier (unique within a broker service)
 	Address string `json:"address"`
@@ -60,9 +53,21 @@ type AddressType struct {
 	PubSub *bool `json:"pubSub,omitempty"`
 
 	// Subscriptions declares subscription queue names for an address.
-	// Typical values will be of the form <client id>.<subscription nname>
+	// Typical values will be of the form <client id>.<subscription name>
 	// +optional
 	Subscriptions []string `json:"subscriptions,omitempty"`
+
+	// ProducerOfAppSelector is a CEL expression that selects which apps may produce to this address.
+	// When empty, no other apps may reference this address as a producer.
+	// Example: "app.metadata.name == 'order-processor'"
+	// +optional
+	ProducerOfAppSelector string `json:"producerOfAppSelector,omitempty"`
+
+	// ConsumerOfAppSelector is a CEL expression that selects which apps may consume from this address.
+	// When empty, no other apps may reference this address as a consumer.
+	// Example: "app.metadata.namespace == 'team-b'"
+	// +optional
+	ConsumerOfAppSelector string `json:"consumerOfAppSelector,omitempty"`
 }
 
 // AddressRef references an address for use in capabilities
@@ -70,10 +75,10 @@ type AddressRef struct {
 	// Address is the address identifier (required)
 	Address string `json:"address"`
 
-	// AppNamespace of owning app - for cross-app references  (optional)
+	// AppNamespace of owning app - for cross-app references (optional)
 	AppNamespace string `json:"appNamespace,omitempty"`
 
-	// AppName of owning app - for cross-app references  (optional)
+	// AppName of owning app - for cross-app references (optional)
 	AppName string `json:"appName,omitempty"`
 
 	// PubSub declares publish/subscribe (pubSub) semantics.

@@ -644,13 +644,6 @@ func (in *BrokerAppSpec) DeepCopyInto(out *BrokerAppSpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.SharedAddresses != nil {
-		in, out := &in.SharedAddresses, &out.SharedAddresses
-		*out = make([]AddressType, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
 	if in.Capabilities != nil {
 		in, out := &in.Capabilities, &out.Capabilities
 		*out = make([]AppCapabilityType, len(*in))

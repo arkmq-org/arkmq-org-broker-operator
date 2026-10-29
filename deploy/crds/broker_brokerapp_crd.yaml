@@ -40,14 +40,24 @@ spec:
           spec:
             properties:
               addresses:
-                description: |-
-                  Addresses with a lifecycle tied to this app, independent from addressRefs.
-                  These are private addresses that cannot be referenced by other apps.
+                description: Addresses with a lifecycle tied to this app.
                 items:
-                  description: AddressType defines a messaging address
+                  description: AddressType defines a messaging address with optional sharing selectors
                   properties:
                     address:
                       description: Address is the address identifier (unique within a broker service)
+                      type: string
+                    consumerOfAppSelector:
+                      description: |-
+                        ConsumerOfAppSelector is a CEL expression that selects which apps may consume from this address.
+                        When empty, no other apps may reference this address as a consumer.
+                        Example: "app.metadata.namespace == 'team-b'"
+                      type: string
+                    producerOfAppSelector:
+                      description: |-
+                        ProducerOfAppSelector is a CEL expression that selects which apps may produce to this address.
+                        When empty, no other apps may reference this address as a producer.
+                        Example: "app.metadata.name == 'order-processor'"
                       type: string
                     pubSub:
                       description: |-
@@ -57,7 +67,7 @@ spec:
                     subscriptions:
                       description: |-
                         Subscriptions declares subscription queue names for an address.
-                        Typical values will be of the form <client id>.<subscription nname>
+                        Typical values will be of the form <client id>.<subscription name>
                       items:
                         type: string
                       type: array
@@ -76,10 +86,10 @@ spec:
                             description: Address is the address identifier (required)
                             type: string
                           appName:
-                            description: AppName of owning app - for cross-app references  (optional)
+                            description: AppName of owning app - for cross-app references (optional)
                             type: string
                           appNamespace:
-                            description: AppNamespace of owning app - for cross-app references  (optional)
+                            description: AppNamespace of owning app - for cross-app references (optional)
                             type: string
                           pubSub:
                             description: |-
@@ -105,10 +115,10 @@ spec:
                             description: Address is the address identifier (required)
                             type: string
                           appName:
-                            description: AppName of owning app - for cross-app references  (optional)
+                            description: AppName of owning app - for cross-app references (optional)
                             type: string
                           appNamespace:
-                            description: AppNamespace of owning app - for cross-app references  (optional)
+                            description: AppNamespace of owning app - for cross-app references (optional)
                             type: string
                           pubSub:
                             description: |-
@@ -187,7 +197,7 @@ spec:
                       More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                     type: object
                 type: object
-              selector:
+              serviceSelector:
                 description: |-
                   A label selector is a label query over a set of resources. The result of matchLabels and
                   matchExpressions are ANDed. An empty label selector matches all objects. A null
@@ -234,33 +244,8 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
-              sharedAddresses:
-                description: |-
-                  SharedAddresses with a lifecycle tied to this app, independent from addressRefs.
-                  These are public addresses that can be referenced by other apps
-                  via appNamespace/appName in their capabilities addressRefs.
-                items:
-                  description: AddressType defines a messaging address
-                  properties:
-                    address:
-                      description: Address is the address identifier (unique within a broker service)
-                      type: string
-                    pubSub:
-                      description: |-
-                        PubSub declares publish/subscribe (pubSub) semantics.
-                        PubSub is necessary when an address needs to be declared pubSub without declaring Subscriptions.
-                      type: boolean
-                    subscriptions:
-                      description: |-
-                        Subscriptions declares subscription queue names for an address.
-                        Typical values will be of the form <client id>.<subscription nname>
-                      items:
-                        type: string
-                      type: array
-                  required:
-                  - address
-                  type: object
-                type: array
+            required:
+            - serviceSelector
             type: object
           status:
             properties:

@@ -8,17 +8,14 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func testMulticastRoutingForSubscriptions(useShared bool) {
+func testMulticastRoutingForSubscriptions() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
-	builder := NewBrokerApp("multicast-app", "test")
-	if useShared {
-		builder.WithSharedAddresses(NewAddressType("events").Build())
-	} else {
-		builder.WithAddresses(NewAddressType("events").Build())
-	}
-	app := builder.WithConsumerOf(NewAddressRef("events").WithSubscriptions("sub1").Build()).Build()
+	app := NewBrokerApp("multicast-app", "test").
+		WithAddresses(NewAddressType("events").Build()).
+		WithConsumerOf(NewAddressRef("events").WithSubscriptions("sub1").Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	Expect(err).NotTo(HaveOccurred())
@@ -31,17 +28,14 @@ func testMulticastRoutingForSubscriptions(useShared bool) {
 		"expected routingTypes=MULTICAST for subscription address")
 }
 
-func testAnycastRoutingForConsumerOf(useShared bool) {
+func testAnycastRoutingForConsumerOf() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
-	builder := NewBrokerApp("anycast-app", "test")
-	if useShared {
-		builder.WithSharedAddresses(NewAddressType("commands").Build())
-	} else {
-		builder.WithAddresses(NewAddressType("commands").Build())
-	}
-	app := builder.WithConsumerOf(NewAddressRef("commands").Build()).Build()
+	app := NewBrokerApp("anycast-app", "test").
+		WithAddresses(NewAddressType("commands").Build()).
+		WithConsumerOf(NewAddressRef("commands").Build()).
+		Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	Expect(err).NotTo(HaveOccurred())
@@ -54,20 +48,16 @@ func testAnycastRoutingForConsumerOf(useShared bool) {
 		"expected routingTypes=ANYCAST for consumerOf address")
 }
 
-func testConflictingRoutingTypesSameApp(useShared bool) {
+func testConflictingRoutingTypesSameApp() {
 	reconciler := BrokerServiceInstanceReconcilerForTest()
 	secret := CreateSecret("test-secret", "test")
 
-	builder := NewBrokerApp("conflict-app", "test")
-	if useShared {
-		builder.WithSharedAddresses(NewAddressType("mixed").Build())
-	} else {
-		builder.WithAddresses(NewAddressType("mixed").Build())
-	}
-	app := builder.WithConsumerOf(
-		NewAddressRef("mixed").Build(),                             // ANYCAST
-		NewAddressRef("mixed").WithSubscriptions("queue1").Build(), // MULTICAST
-	).Build()
+	app := NewBrokerApp("conflict-app", "test").
+		WithAddresses(NewAddressType("mixed").Build()).
+		WithConsumerOf(
+			NewAddressRef("mixed").Build(),                             // ANYCAST
+			NewAddressRef("mixed").WithSubscriptions("queue1").Build(), // MULTICAST
+		).Build()
 
 	err := reconciler.processCapabilities(secret, app)
 	Expect(err).To(HaveOccurred(), "processCapabilities should have failed with routing type conflict")
@@ -82,28 +72,16 @@ func testConflictingRoutingTypesSameApp(useShared bool) {
 
 var _ = Describe("brokerservice routing conflict", func() {
 
-	It("multicast routing for subscriptions shared", Label(unitLabel), func() {
-		testMulticastRoutingForSubscriptions(true)
+	It("multicast routing for subscriptions", Label(unitLabel), func() {
+		testMulticastRoutingForSubscriptions()
 	})
 
-	It("multicast routing for subscriptions private", Label(unitLabel), func() {
-		testMulticastRoutingForSubscriptions(false)
+	It("anycast routing for consumerOf", Label(unitLabel), func() {
+		testAnycastRoutingForConsumerOf()
 	})
 
-	It("anycast routing for consumerOf shared", Label(unitLabel), func() {
-		testAnycastRoutingForConsumerOf(true)
-	})
-
-	It("anycast routing for consumerOf private", Label(unitLabel), func() {
-		testAnycastRoutingForConsumerOf(false)
-	})
-
-	It("conflicting routing types same app shared", Label(unitLabel), func() {
-		testConflictingRoutingTypesSameApp(true)
-	})
-
-	It("conflicting routing types same app private", Label(unitLabel), func() {
-		testConflictingRoutingTypesSameApp(false)
+	It("conflicting routing types same app", Label(unitLabel), func() {
+		testConflictingRoutingTypesSameApp()
 	})
 
 	It("conflicting routing types multiple apps", Label(unitLabel), func() {
@@ -111,7 +89,7 @@ var _ = Describe("brokerservice routing conflict", func() {
 		secret := CreateSecret("test-secret", "test")
 
 		app1 := NewBrokerApp("producer-app", "test").
-			WithSharedAddresses(NewAddressType("shared-events").Build()).
+			WithAddresses(NewAddressType("shared-events").Build()).
 			WithProducerOf(NewAddressRef("shared-events").Build()).
 			WithConsumerOf(NewAddressRef("shared-events").WithSubscriptions("producer-sub").Build()).
 			Build()
@@ -151,7 +129,7 @@ var _ = Describe("brokerservice routing conflict", func() {
 		secret := CreateSecret("test-secret", "test")
 
 		app1 := NewBrokerApp("sub-app1", "test").
-			WithSharedAddresses(NewAddressType("topic").Build()).
+			WithAddresses(NewAddressType("topic").Build()).
 			WithConsumerOf(NewAddressRef("topic").WithSubscriptions("sub1").Build()).
 			Build()
 
@@ -188,7 +166,7 @@ var _ = Describe("brokerservice routing conflict", func() {
 		secret := CreateSecret("test-secret", "test")
 
 		app1 := NewBrokerApp("consumer-app1", "test").
-			WithSharedAddresses(NewAddressType("queue").Build()).
+			WithAddresses(NewAddressType("queue").Build()).
 			WithConsumerOf(NewAddressRef("queue").Build()).
 			Build()
 

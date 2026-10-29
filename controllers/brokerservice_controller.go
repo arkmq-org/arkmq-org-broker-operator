@@ -792,24 +792,22 @@ func (t *AddressTracker) track(address *broker.AddressRef) *AddressConfig {
 		t.names[address.Address] = entry
 	}
 
-	// If AppNamespace and AppName are empty, this app owns the address
-	if address.AppNamespace == "" && address.AppName == "" {
+	if address.AppName == "" {
 		entry.isOwned = true
 	}
 
 	return entry
 }
 
-func (t *AddressTracker) trackAddressType(addrType *broker.AddressType) *AddressConfig {
+func (t *AddressTracker) trackAddressType(addr *broker.AddressType) *AddressConfig {
 	localAddr := &broker.AddressRef{
-		Address: addrType.Address,
-		// AppNamespace and AppName empty = owned/local address
+		Address: addr.Address,
 	}
 	addressConfig := t.track(localAddr)
-	if isMulticastAddress(addrType.PubSub, addrType.Subscriptions) {
+	if isMulticastAddress(addr.PubSub, addr.Subscriptions) {
 		addressConfig.isMulticast = true
-		for _, subName := range addrType.Subscriptions {
-			fqqnEntry := t.track(&broker.AddressRef{Address: addrType.Address + FQQNSeparator + subName})
+		for _, subName := range addr.Subscriptions {
+			fqqnEntry := t.track(&broker.AddressRef{Address: addr.Address + FQQNSeparator + subName})
 			fqqnEntry.isMulticast = true
 		}
 	}
@@ -821,44 +819,29 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 
 	role := AppIdentity(app)
 
-	// First, track addresses declared in spec.addresses (private, owned by this app)
-	// This ensures addressConfigurations are generated even if the app has no capabilities
-	for _, addrType := range app.Spec.Addresses {
-		addressTracker.trackAddressType(&addrType)
+	for _, addr := range app.Spec.Addresses {
+		addressTracker.trackAddressType(&addr)
 	}
 
-	// Also track addresses declared in spec.sharedAddresses (public, owned by this app)
-	for _, addrType := range app.Spec.SharedAddresses {
-		addressTracker.trackAddressType(&addrType)
-	}
-
-	// Then, process capabilities to find inline addresses and capture roles
 	for _, capability := range app.Spec.Capabilities {
 
 		var entry *AddressConfig
 
-		// Process ProducerOf
 		for _, addressRef := range capability.ProducerOf {
 			entry = addressTracker.track(&addressRef)
 			entry.senderRoles[role] = role
 
-			// Handle pub/sub declaration (can be explicit via pubSub:true or inferred from subscriptions)
 			if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-				// pubSub=true (explicit) or has subscriptions means "this is a MULTICAST address"
-				// Validation already ensures subscriptions is empty (no queue names allowed for producers)
 				entry.isMulticast = true
 			}
 		}
 
-		// Process ConsumerOf
 		for _, addressRef := range capability.ConsumerOf {
 			entry = addressTracker.track(&addressRef)
 
 			if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-				// ANYCAST - direct queue consumption (no pubSub, no subscriptions)
 				entry.consumerRoles[role] = role
 
-				// Validate idempotency: check if address was already marked as MULTICAST
 				if entry.isOwned && entry.isMulticast {
 					return fmt.Errorf(
 						"address '%s' is referenced with both pubSub and non pubSub semantics. "+
@@ -866,10 +849,6 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 						addressRef.Address)
 				}
 			} else {
-				// MULTICAST - multicast queue-based consumption (pubSub=true or has subscriptions)
-				// Validation already ensures len > 0 (empty subscriptions not allowed for consumers)
-
-				// Validate idempotency: check if address was already used with ANYCAST
 				if entry.isOwned && len(entry.consumerRoles) > 0 && !entry.isMulticast {
 					return fmt.Errorf(
 						"address '%s' is referenced with both pubSub and non pubSub semantics. "+
@@ -879,13 +858,12 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 
 				entry.isMulticast = true
 
-				// Generate FQQN for each multicast queue
 				for _, queueName := range addressRef.Subscriptions {
 					fqqn := addressRef.Address + FQQNSeparator + queueName
 					queueEntry := addressTracker.track(&broker.AddressRef{
 						Address:      fqqn,
-						AppNamespace: addressRef.AppNamespace,
 						AppName:      addressRef.AppName,
+						AppNamespace: addressRef.AppNamespace,
 					})
 					queueEntry.subscriberRoles[role] = role
 					queueEntry.isMulticast = true
@@ -1026,7 +1004,6 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 
 	dedupMap := map[string]string{}
 	for _, capability := range app.Spec.Capabilities {
-
 		if len(capability.ConsumerOf) > 0 {
 			dedupMap[fmt.Sprintf("%s=%s\n", consumerRole(namespacedName), namespacedName)] = ""
 		}
