@@ -283,12 +283,14 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 	}
 
 	reqLogger.V(2).Info("Reconciler Processing...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation)
-	if err = processor.validateSpec(); err == nil {
-		if err = processor.verifyAppCert(); err == nil {
-			if err = processor.resolveBrokerService(); err == nil {
-				if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
-					if err = processor.processBindingSecret(); err == nil {
-						err = processor.SyncDesiredWithDeployed(processor.instance)
+	if err = processor.checkServiceAcceptance(); err == nil {
+		if err = processor.validateSpec(); err == nil {
+			if err = processor.verifyAppCert(); err == nil {
+				if err = processor.resolveBrokerService(); err == nil {
+					if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
+						if err = processor.processBindingSecret(); err == nil {
+							err = processor.SyncDesiredWithDeployed(processor.instance)
+						}
 					}
 				}
 			}
@@ -298,6 +300,13 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 	// Update status with conditions
 	statusErr := processor.processStatus(err)
 	reqLogger.V(2).Info("Reconciler Processed...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation, "error", err)
+
+	if processor.unbindingReason != "" && processor.status.Service != nil {
+		if statusErr != nil {
+			return ctrl.Result{}, fmt.Errorf("Failed to update status: error %v", statusErr)
+		}
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
 
 	if err != nil {
 		// Handle reconcile error based on type
@@ -384,8 +393,10 @@ func (reconciler *BrokerAppInstanceReconciler) resolveBrokerService() error {
 		}
 
 		if desiredService == nil {
-			reconciler.unbindingReason = "Bound service not found"
-		} else {
+			if reconciler.unbindingReason == "" {
+				reconciler.unbindingReason = "Bound service not found"
+			}
+		} else if reconciler.unbindingReason == "" {
 			reconciler.unbindingReason = reconciler.unbindingCheck(desiredService)
 		}
 
@@ -447,18 +458,55 @@ func serviceKey(service *broker.BrokerService) string {
 	return service.Namespace + ":" + service.Name
 }
 
-// unbindingCheck returns a non-empty reason string when the app should unbind
-// from the given service, or "" when the current binding is still valid.
-func (reconciler *BrokerAppInstanceReconciler) unbindingCheck(service *broker.BrokerService) string {
+// checkServiceAcceptance runs before validation for bound apps. It checks
+// whether the bound service still accepts this app using only spec-independent
+// criteria (deletion state and the service's appSelectorExpression).
+func (reconciler *BrokerAppInstanceReconciler) checkServiceAcceptance() error {
+	if reconciler.status.Service == nil {
+		return nil
+	}
+
 	if reconciler.instance.DeletionTimestamp != nil {
-		return "Deletion pending"
+		reconciler.unbindingReason = "Deletion pending"
+		reconciler.handleUnbinding(nil)
+		return nil
 	}
+
+	svcKey := types.NamespacedName{
+		Namespace: reconciler.status.Service.Namespace,
+		Name:      reconciler.status.Service.Name,
+	}
+	service := &broker.BrokerService{}
+	if err := reconciler.Get(context.TODO(), svcKey, service); err != nil {
+		if errors.IsNotFound(err) {
+			reconciler.unbindingReason = "Bound service not found"
+			reconciler.handleUnbinding(nil)
+			return nil
+		}
+		return NewTransientErrorWithCause(
+			broker.DeployedConditionCrudKindErrorReason,
+			"failed to get bound BrokerService",
+			err)
+	}
+
 	if service.DeletionTimestamp != nil {
-		return "Bound service is being deleted"
+		reconciler.unbindingReason = "Bound service is being deleted"
+		reconciler.handleUnbinding(service)
+		return nil
 	}
+
 	if matches, err := reconciler.matchesServiceSelector(service); !matches || err != nil {
-		return "Service selector mismatch"
+		reconciler.unbindingReason = "Service selector mismatch"
+		reconciler.handleUnbinding(service)
 	}
+	return nil
+}
+
+// unbindingCheck returns a non-empty reason string when the app should unbind
+// from the given service due to spec-dependent criteria, or "" when the
+// current binding is still valid. Spec-independent checks (deletion, selector
+// mismatch) are handled earlier by checkServiceAcceptance.
+func (reconciler *BrokerAppInstanceReconciler) unbindingCheck(service *broker.BrokerService) string {
 	if err := reconciler.checkAddressRefCapacity(service); err != nil {
 		return fmt.Sprintf("AddressRef dependencies no longer valid, %v", err)
 	}
@@ -1376,6 +1424,22 @@ func (reconciler *BrokerAppInstanceReconciler) setValidCondition(err error) {
 func (reconciler *BrokerAppInstanceReconciler) setDeployedCondition(err error) {
 	// If validation failed, check if we need to initialize Deployed condition
 	if _, isValidationErr := err.(*ValidationError); isValidationErr {
+		if reconciler.unbindingReason != "" {
+			message := reconciler.unbindingReason
+			if reconciler.status.Service != nil {
+				message = reconciler.pendingEmptyDetailMessage()
+			}
+			condition := metav1.Condition{
+				Type:               broker.DeployedConditionType,
+				Status:             metav1.ConditionFalse,
+				Reason:             broker.DeployedConditionUnbindingReason,
+				Message:            message,
+				ObservedGeneration: reconciler.instance.Generation,
+			}
+			meta.SetStatusCondition(&reconciler.status.Conditions, condition)
+			return
+		}
+
 		// Check if Deployed condition exists
 		existing := meta.FindStatusCondition(reconciler.status.Conditions, broker.DeployedConditionType)
 		if existing != nil {
