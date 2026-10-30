@@ -431,7 +431,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts
 				reconciler.log.Error(err, "failed to process acceptor for app", "app", app.Name)
 				break
 			}
-			appIdentities = append(appIdentities, AppIdentityWithGeneration(app))
+			appIdentities = append(appIdentities, reconciler.provisionedAppIdentity(app))
 			provisionedApps = append(provisionedApps, activeAppTrackers[i].app)
 			if app.Status.Service != nil && app.Status.Service.AssignedPort != UnassignedPort {
 				appPorts = append(appPorts, app.Status.Service.AssignedPort)
@@ -1006,6 +1006,11 @@ func (reconciler *BrokerServiceInstanceReconciler) processPendingEmpty(app *brok
 		return false, err
 	}
 	if len(pendingAddresses) > 0 {
+		if reconciler.isDrainConfigApplied(pendingAddresses) {
+			pendingAddresses = reconciler.filterDrainedAddresses(app, pendingAddresses)
+		}
+	}
+	if len(pendingAddresses) > 0 {
 		for _, da := range pendingAddresses {
 			addrType := broker.AddressType{
 				Address:       da.Address,
@@ -1395,6 +1400,25 @@ func AppIdentityWithGeneration(app *broker.BrokerApp) string {
 	return fmt.Sprintf("%s%d", AppIdentityPrefix(app), app.Generation)
 }
 
+// provisionedAppIdentity returns the identity string to use in the secret
+// annotation. During drain, it holds the generation at the previously
+// provisioned value so that ProvisionedApps only advances once all pending
+// addresses are fully drained.
+func (reconciler *BrokerServiceInstanceReconciler) provisionedAppIdentity(app *broker.BrokerApp) string {
+	if reconciler.pendingEmptyAddresses != nil {
+		role := AppIdentity(app)
+		if _, hasPending := reconciler.pendingEmptyAddresses[role]; hasPending {
+			prefix := AppIdentityPrefix(app)
+			for _, pa := range reconciler.instance.Status.ProvisionedApps {
+				if strings.HasPrefix(pa, prefix) {
+					return pa
+				}
+			}
+		}
+	}
+	return AppIdentityWithGeneration(app)
+}
+
 func FileAppIdentity(app *broker.BrokerApp) string {
 	return DashPrefixValue(app.Namespace, app.Name)
 }
@@ -1540,9 +1564,9 @@ func (reconciler *BrokerServiceInstanceReconciler) wasAppEverProvisioned(app *br
 }
 
 // detectDrainingAddresses compares the current spec addresses against the previously
-// deployed capabilities.json to find addresses that were removed. It checks Jolokia
-// to determine if removed addresses still have undrained messages. Returns only addresses
-// that still need draining.
+// deployed capabilities.json to find addresses that were removed. Each candidate is
+// annotated with whether its producers are still active in the deployed config.
+// The caller gates the Jolokia message-count check on isDrainConfigApplied.
 func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *broker.BrokerApp, currentTracker *AddressTracker, oldSecretData map[string][]byte) ([]DrainingAddressInfo, error) {
 	if !reconciler.wasAppEverProvisioned(app) {
 		return nil, nil
@@ -1573,7 +1597,9 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 	}
 
 	// Find addresses in old config that are no longer in current spec
-	appConsumerRole := consumerRole(AppIdentity(app))
+	appIdentity := AppIdentity(app)
+	appConsumerRole := consumerRole(appIdentity)
+	appProducerRole := producerRole(appIdentity)
 	var candidates []DrainingAddressInfo
 	for name, oldCfg := range oldCaps.AddressConfigurations {
 		if currentOwned[name] {
@@ -1583,6 +1609,9 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 		if addrRoles, ok := oldCaps.SecurityRoles[name]; ok {
 			if perms, ok := addrRoles[appConsumerRole]; ok && perms.Consume {
 				dai.HadConsumeRole = true
+			}
+			if perms, ok := addrRoles[appProducerRole]; ok && perms.Send {
+				dai.HasActiveProducers = true
 			}
 		}
 		// Extract subscription queue names from the old config
@@ -1597,16 +1626,31 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 		candidates = append(candidates, dai)
 	}
 
-	if len(candidates) == 0 {
-		return nil, nil
-	}
+	return candidates, nil
+}
 
-	// Check Jolokia for drain status
+// isDrainConfigApplied returns true when the deployed config has had producers
+// revoked for all candidates AND the broker has applied that config. This gates
+// the Jolokia message-count check so we only query counts after producers are
+// actually stopped on the broker.
+func (reconciler *BrokerServiceInstanceReconciler) isDrainConfigApplied(candidates []DrainingAddressInfo) bool {
+	for _, c := range candidates {
+		if c.HasActiveProducers {
+			return false
+		}
+	}
+	appsProvisioned := meta.FindStatusCondition(reconciler.instance.Status.Conditions, broker.AppsProvisionedConditionType)
+	return appsProvisioned != nil && appsProvisioned.Status == metav1.ConditionTrue
+}
+
+// filterDrainedAddresses checks Jolokia for message counts and returns only
+// addresses that still have pending messages.
+func (reconciler *BrokerServiceInstanceReconciler) filterDrainedAddresses(app *broker.BrokerApp, candidates []DrainingAddressInfo) []DrainingAddressInfo {
 	drainResults, err := reconciler.checkAddressDrainStatus(context.TODO(), candidates)
 	if err != nil {
 		reconciler.log.V(1).Info("Error checking address drain status, preserving all candidates",
 			"app", app.Name, "error", err)
-		return candidates, nil
+		return candidates
 	}
 
 	var undrained []DrainingAddressInfo
@@ -1621,14 +1665,15 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 			undrained = append(undrained, candidate)
 		}
 	}
-	return undrained, nil
+	return undrained
 }
 
 type DrainingAddressInfo struct {
-	Address        string           `json:"address"`
-	Subscriptions  []string         `json:"subscriptions,omitempty"`
-	HadConsumeRole bool             `json:"-"`
-	MessageCounts  map[string]int64 `json:"-"`
+	Address            string           `json:"address"`
+	Subscriptions      []string         `json:"subscriptions,omitempty"`
+	HadConsumeRole     bool             `json:"-"`
+	HasActiveProducers bool             `json:"-"`
+	MessageCounts      map[string]int64 `json:"-"`
 }
 
 type addressDrainResult struct {

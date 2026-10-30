@@ -333,6 +333,8 @@ status:
         ORDERS.NEW::ORDERS.NEW: 42
 ```
 
+While addresses are pending empty, the app's generation in `provisionedApps` stays at the value from before the removal. It advances to the current generation only once all pending addresses are drained. This lets external observers distinguish between a fully-applied generation and one still waiting for messages to be consumed.
+
 On the BrokerApp side, the `Deployed` condition message includes the addresses that are pending empty:
 
 ```

@@ -7566,7 +7566,10 @@ spec:
           app is being deleted, and remain until all messages have been consumed.
         displayName: Pending Empty
         path: pendingEmpty
-      - description: BrokerApps that have been applied to the service, each as <namespace>/<name>@<generation>
+      - description: |-
+          BrokerApps that have been applied to the service, each as <namespace>/<name>@<generation>.
+          During drain, the generation reflects the last fully-applied state and advances
+          only once all pending addresses are empty.
         displayName: Provisioned Applications
         path: provisionedApps
       version: v1beta2
