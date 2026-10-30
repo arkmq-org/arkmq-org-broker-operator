@@ -1001,7 +1001,11 @@ func (reconciler *BrokerServiceInstanceReconciler) processPendingEmpty(app *brok
 		}
 	}
 
-	if pendingAddresses := reconciler.detectDrainingAddresses(app, tracker, oldSecretData); len(pendingAddresses) > 0 {
+	pendingAddresses, err := reconciler.detectDrainingAddresses(app, tracker, oldSecretData)
+	if err != nil {
+		return false, err
+	}
+	if len(pendingAddresses) > 0 {
 		for _, da := range pendingAddresses {
 			addrType := broker.AddressType{
 				Address:       da.Address,
@@ -1539,26 +1543,24 @@ func (reconciler *BrokerServiceInstanceReconciler) wasAppEverProvisioned(app *br
 // deployed capabilities.json to find addresses that were removed. It checks Jolokia
 // to determine if removed addresses still have undrained messages. Returns only addresses
 // that still need draining.
-func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *broker.BrokerApp, currentTracker *AddressTracker, oldSecretData map[string][]byte) []DrainingAddressInfo {
+func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *broker.BrokerApp, currentTracker *AddressTracker, oldSecretData map[string][]byte) ([]DrainingAddressInfo, error) {
 	if !reconciler.wasAppEverProvisioned(app) {
-		return nil
+		return nil, nil
 	}
 
 	capKey := AppIdentityPrefixed(app, "capabilities.json")
 	oldCapData, exists := oldSecretData[capKey]
 	if !exists || len(oldCapData) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	var oldCaps brokerproperties.CapabilitiesJSON
 	if err := json.Unmarshal(oldCapData, &oldCaps); err != nil {
-		reconciler.log.V(1).Info("Failed to unmarshal old capabilities, skipping drain detection",
-			"app", app.Name, "error", err)
-		return nil
+		return nil, fmt.Errorf("failed to unmarshal old capabilities for app %s: %v", app.Name, err)
 	}
 
 	if len(oldCaps.AddressConfigurations) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Build set of currently owned addresses (exclude FQQN entries from the
@@ -1596,7 +1598,7 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 	}
 
 	if len(candidates) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Check Jolokia for drain status
@@ -1604,7 +1606,7 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 	if err != nil {
 		reconciler.log.V(1).Info("Error checking address drain status, preserving all candidates",
 			"app", app.Name, "error", err)
-		return candidates
+		return candidates, nil
 	}
 
 	var undrained []DrainingAddressInfo
@@ -1619,7 +1621,7 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 			undrained = append(undrained, candidate)
 		}
 	}
-	return undrained
+	return undrained, nil
 }
 
 type DrainingAddressInfo struct {
