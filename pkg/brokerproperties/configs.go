@@ -36,6 +36,7 @@ type RolePermissions struct {
 type QueueConfig struct {
 	RoutingType string `json:"routingType"`
 	Address     string `json:"address,omitempty"`
+	Enabled     *bool  `json:"enabled,omitempty"`
 }
 
 type AddressConfiguration struct {
