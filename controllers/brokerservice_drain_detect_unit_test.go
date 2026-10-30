@@ -19,7 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	mgmt "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/artemis"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/jolokia"
@@ -27,6 +27,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -42,7 +44,7 @@ func buildMockQueueCountResponse(queues []mgmt.QueueMessageCount) map[string]int
 
 var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 
-	buildOldSecretData := func(app *v1beta2.BrokerApp, addresses ...string) map[string][]byte {
+	buildOldSecretData := func(app *broker.BrokerApp, addresses ...string) map[string][]byte {
 		caps := &brokerproperties.CapabilitiesJSON{
 			AddressConfigurations: make(map[string]*brokerproperties.AddressConfiguration),
 		}
@@ -89,7 +91,6 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		oldSecretData := buildOldSecretData(app, "orders")
 		emptyTracker := newAddressTracker()
 
-		// Jolokia is unavailable so all candidates are preserved as draining
 		result, err := reconciler.detectDrainingAddresses(app, emptyTracker, oldSecretData)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).NotTo(BeNil(), "should detect draining addresses when app was provisioned")
@@ -138,7 +139,6 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		oldSecretData := buildOldSecretData(app, "orders")
 		emptyTracker := newAddressTracker()
 
-		// Jolokia is unavailable so all candidates are preserved as draining
 		result, err := reconciler.detectDrainingAddresses(app, emptyTracker, oldSecretData)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).NotTo(BeNil(), "should detect drain when app was provisioned at any prior generation")
@@ -182,10 +182,10 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		oldSecretData := map[string][]byte{capKey: oldData}
 
 		// Current spec: notifications removed, orders remains
-		app.Spec.Capabilities = []v1beta2.AppCapabilityType{
+		app.Spec.Capabilities = []broker.AppCapabilityType{
 			{
-				ProducerOf: []v1beta2.AddressRef{{Address: "orders"}},
-				ConsumerOf: []v1beta2.AddressRef{{Address: "orders"}},
+				ProducerOf: []broker.AddressRef{{Address: "orders"}},
+				ConsumerOf: []broker.AddressRef{{Address: "orders"}},
 			},
 		}
 
@@ -288,6 +288,157 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		Expect(result).To(HaveLen(1))
 		Expect(result[0].Address).To(Equal("events"))
 		Expect(result[0].Subscriptions).To(ConsistOf("client-a.events", "client-b.events"))
+	})
+
+	It("sets HasActiveProducers when sender role is present in old config", Label(unitLabel), func() {
+		ns := "default"
+		appName := "producer-check-app"
+
+		app := NewBrokerApp(appName, ns).Build()
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{
+			AppIdentityWithGeneration(app),
+		}
+
+		appIdentity := AppIdentity(app)
+		oldCaps := &brokerproperties.CapabilitiesJSON{
+			AddressConfigurations: map[string]*brokerproperties.AddressConfiguration{
+				"orders": {RoutingTypes: brokerproperties.RoutingTypeAnycast},
+			},
+			SecurityRoles: map[string]map[string]*brokerproperties.RolePermissions{
+				"orders": {
+					producerRole(appIdentity): {Send: true},
+					consumerRole(appIdentity): {Consume: true},
+				},
+			},
+		}
+		data, err := json.Marshal(oldCaps)
+		Expect(err).NotTo(HaveOccurred())
+		capKey := AppIdentityPrefixed(app, "capabilities.json")
+		oldSecretData := map[string][]byte{capKey: data}
+
+		result, err := reconciler.detectDrainingAddresses(app, newAddressTracker(), oldSecretData)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(HaveLen(1))
+		Expect(result[0].HasActiveProducers).To(BeTrue(), "should flag active producers from deployed config")
+	})
+
+	It("clears HasActiveProducers when sender role was already revoked", Label(unitLabel), func() {
+		ns := "default"
+		appName := "revoked-producer-app"
+
+		app := NewBrokerApp(appName, ns).Build()
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{
+			AppIdentityWithGeneration(app),
+		}
+
+		appIdentity := AppIdentity(app)
+		oldCaps := &brokerproperties.CapabilitiesJSON{
+			AddressConfigurations: map[string]*brokerproperties.AddressConfiguration{
+				"orders": {RoutingTypes: brokerproperties.RoutingTypeAnycast},
+			},
+			SecurityRoles: map[string]map[string]*brokerproperties.RolePermissions{
+				"orders": {
+					consumerRole(appIdentity): {Consume: true},
+				},
+			},
+		}
+		data, err := json.Marshal(oldCaps)
+		Expect(err).NotTo(HaveOccurred())
+		capKey := AppIdentityPrefixed(app, "capabilities.json")
+		oldSecretData := map[string][]byte{capKey: data}
+
+		result, err := reconciler.detectDrainingAddresses(app, newAddressTracker(), oldSecretData)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(HaveLen(1))
+		Expect(result[0].HasActiveProducers).To(BeFalse(), "should not flag producers when sender role was already revoked")
+	})
+})
+
+var _ = Describe("isDrainConfigApplied unit", Label(unitLabel), func() {
+
+	It("returns false when any candidate has active producers", Label(unitLabel), func() {
+		ns := "default"
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+
+		candidates := []DrainingAddressInfo{
+			{Address: "orders", HasActiveProducers: true},
+		}
+		Expect(reconciler.isDrainConfigApplied(candidates)).To(BeFalse(),
+			"should not allow Jolokia check when producers are still active")
+	})
+
+	It("returns false when AppsProvisioned is not synced", Label(unitLabel), func() {
+		ns := "default"
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+
+		candidates := []DrainingAddressInfo{
+			{Address: "orders", HasActiveProducers: false},
+		}
+		Expect(reconciler.isDrainConfigApplied(candidates)).To(BeFalse(),
+			"should not allow Jolokia check when AppsProvisioned condition is missing")
+	})
+
+	It("returns true when no active producers and AppsProvisioned is synced", Label(unitLabel), func() {
+		ns := "default"
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+
+		meta.SetStatusCondition(&reconciler.instance.Status.Conditions, metav1.Condition{
+			Type:   broker.AppsProvisionedConditionType,
+			Status: metav1.ConditionTrue,
+			Reason: broker.AppsProvisionedConditionSyncedReason,
+		})
+
+		candidates := []DrainingAddressInfo{
+			{Address: "orders", HasActiveProducers: false},
+		}
+		Expect(reconciler.isDrainConfigApplied(candidates)).To(BeTrue(),
+			"should allow Jolokia check when producers revoked and config applied")
+	})
+})
+
+var _ = Describe("provisionedAppIdentity unit", Label(unitLabel), func() {
+
+	It("returns current generation when app has no pending addresses", Label(unitLabel), func() {
+		ns := "default"
+		app := NewBrokerApp("myapp", ns).Build()
+		app.Generation = 5
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+
+		Expect(reconciler.provisionedAppIdentity(app)).To(Equal(AppIdentityWithGeneration(app)))
+	})
+
+	It("returns held generation when app has pending addresses", Label(unitLabel), func() {
+		ns := "default"
+		app := NewBrokerApp("myapp", ns).Build()
+		app.Generation = 7
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.instance.Status.ProvisionedApps = []string{ns + "/myapp@5"}
+		reconciler.pendingEmptyAddresses = map[string]map[string]bool{
+			AppIdentity(app): {"orders": true},
+		}
+
+		Expect(reconciler.provisionedAppIdentity(app)).To(Equal(ns+"/myapp@5"),
+			"should hold generation at previously provisioned value during drain")
+	})
+
+	It("falls back to current generation on first detection", Label(unitLabel), func() {
+		ns := "default"
+		app := NewBrokerApp("myapp", ns).Build()
+		app.Generation = 3
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.pendingEmptyAddresses = map[string]map[string]bool{
+			AppIdentity(app): {"orders": true},
+		}
+
+		Expect(reconciler.provisionedAppIdentity(app)).To(Equal(AppIdentityWithGeneration(app)),
+			"should use current generation when no previous provisioned entry exists")
 	})
 })
 

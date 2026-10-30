@@ -80,7 +80,9 @@ type BrokerServiceStatus struct {
 	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Conditions",xDescriptors="urn:alm:descriptor:io.kubernetes.conditions"
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,2,rep,name=conditions"`
 
-	// BrokerApps that have been applied to the service, each as <namespace>/<name>@<generation>
+	// BrokerApps that have been applied to the service, each as <namespace>/<name>@<generation>.
+	// During drain, the generation reflects the last fully-applied state and advances
+	// only once all pending addresses are empty.
 	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Provisioned Applications"
 	ProvisionedApps []string `json:"provisionedApps,omitempty"`
 
