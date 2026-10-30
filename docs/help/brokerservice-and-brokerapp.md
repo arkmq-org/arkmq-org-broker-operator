@@ -59,7 +59,7 @@ The BrokerService reports four conditions:
 | `AppsProvisioned` | All bound BrokerApps have been configured on the broker |
 | `Ready` | The service is fully operational |
 
-The status also lists `provisionedApps` (apps successfully configured) and `rejectedApps` (apps that failed validation, with reasons).
+The status also lists `provisionedApps` (apps successfully configured on the broker) and `pendingEmpty` (apps with addresses awaiting message consumption before removal — see [Data Protection](#data-protection)).
 
 ## BrokerApp
 
@@ -303,6 +303,56 @@ Namespace: broker-infra          Namespace: team-a           Namespace: team-b
 ### Port Assignment
 
 Each BrokerApp bound to a service receives a unique port, starting at 61616. The port is recorded in `status.service.assignedPort` and in the binding secret. Applications should read connection details from the binding secret rather than hardcoding ports.
+
+## Data Protection
+
+When a BrokerApp or BrokerService is deleted — or when an app's addresses change — messages already on the broker need to be consumed before resources are removed. The operator uses a Kubernetes finalizer (`broker.arkmq.org/addresses-pending-empty`) to coordinate this.
+
+### How It Works
+
+The finalizer is added automatically when an app has owned addresses. It is removed once all those addresses are empty (message count reaches zero). No user action is needed.
+
+**When an app's addresses are removed or its service binding changes:**
+The removed addresses are kept on the broker and marked as pending empty. The app stays bound to the service until consumers have received all remaining messages. Once empty, the finalizer is removed and the binding is cleared on the next reconcile.
+
+**When a BrokerApp is deleted:**
+The finalizer blocks deletion until all owned addresses are empty. Consumers can continue to read from the addresses during this time. Once all messages are consumed, the finalizer is removed and the app is garbage collected.
+
+**When a BrokerService is deleted:**
+The service receives the same finalizer when any bound app has owned content. The service remains until every bound app's addresses are empty and their finalizers are removed. While waiting, the service's `Ready` condition is set to `False` with reason `AddressesPendingEmpty`.
+
+### Observing Progress
+
+The BrokerService status includes a `pendingEmpty` field that lists which apps still have messages to consume and the per-queue message counts:
+
+```yaml
+status:
+  pendingEmpty:
+    - app: orders/order-service@3
+      messages:
+        ORDERS.NEW::ORDERS.NEW: 42
+```
+
+While addresses are pending empty, the app's generation in `provisionedApps` stays at the value from before the removal. It advances to the current generation only once all pending addresses are drained. This lets external observers distinguish between a fully-applied generation and one still waiting for messages to be consumed.
+
+On the BrokerApp side, the `Deployed` condition message includes the addresses that are pending empty:
+
+```
+Deployed: False
+Reason:   Unbinding
+Message:  addresses pending empty: ORDERS.NEW::ORDERS.NEW
+```
+
+### Forced Deletion
+
+If you need to bypass the finalizer (for example, in a non-production environment where message loss is acceptable), the `hack/clear-finalizers.sh` script removes finalizers from all BrokerApp and BrokerService resources:
+
+```bash
+./hack/clear-finalizers.sh          # dry run — lists finalizers without changing anything
+./hack/clear-finalizers.sh --apply  # removes all finalizers, unblocking deletion
+```
+
+Resources will then be garbage collected immediately, and any remaining messages will be lost.
 
 ## Complete Example
 

@@ -47,7 +47,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/ptr"
 
-	brokerv1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/monitoring"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/ingresses"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
@@ -139,17 +139,17 @@ var _ = Describe("broker-service mqtt", func() {
 				}
 			})
 
-			crd := brokerv1beta2.BrokerService{
+			crd := broker.BrokerService{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "ActiveMQArtemisService",
-					APIVersion: brokerv1beta2.GroupVersion.Identifier(),
+					APIVersion: broker.GroupVersion.Identifier(),
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      serviceName,
 					Namespace: defaultNamespace,
 					Labels:    map[string]string{"forMQTT": "true"},
 				},
-				Spec: brokerv1beta2.BrokerServiceSpec{},
+				Spec: broker.BrokerServiceSpec{},
 			}
 
 			crd.Spec.Resources = corev1.ResourceRequirements{
@@ -163,28 +163,28 @@ var _ = Describe("broker-service mqtt", func() {
 
 			By("deploying app")
 			appName := "mqtt-app"
-			app := brokerv1beta2.BrokerApp{
+			app := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "ActiveMQArtemisApp",
-					APIVersion: brokerv1beta2.GroupVersion.Identifier(),
+					APIVersion: broker.GroupVersion.Identifier(),
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      appName,
 					Namespace: defaultNamespace,
 				},
-				Spec: brokerv1beta2.BrokerAppSpec{
+				Spec: broker.BrokerAppSpec{
 
 					ServiceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
 							"forMQTT": "true",
 						}},
 
-					Capabilities: []brokerv1beta2.AppCapabilityType{
+					Capabilities: []broker.AppCapabilityType{
 						{
 							// lets add a ProducerOf via an update
 							//ProducerOf: []brokerv1beta2.AddressRef{{Address: "mytopic"}, {Address: "mytopic/A"}, {Address: "mytopic/B"}},
 
-							ConsumerOf: []brokerv1beta2.AddressRef{
+							ConsumerOf: []broker.AddressRef{
 								{
 									Address:       "mytopic",
 									Subscriptions: []string{"my-client.mytopic"},
@@ -216,7 +216,7 @@ var _ = Describe("broker-service mqtt", func() {
 
 			By("verify app status")
 			appKey := types.NamespacedName{Name: app.Name, Namespace: crd.Namespace}
-			createdApp := &brokerv1beta2.BrokerApp{}
+			createdApp := &broker.BrokerApp{}
 
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, appKey, createdApp)).Should(Succeed())
@@ -224,7 +224,7 @@ var _ = Describe("broker-service mqtt", func() {
 				if verbose {
 					fmt.Printf("App STATUS: %v\n\n", createdApp.Status.Conditions)
 				}
-				g.Expect(meta.IsStatusConditionTrue(createdApp.Status.Conditions, brokerv1beta2.ReadyConditionType)).Should(BeTrue())
+				g.Expect(meta.IsStatusConditionTrue(createdApp.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
@@ -313,8 +313,8 @@ var _ = Describe("broker-service mqtt", func() {
 			By("updating app to add producer capability")
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, appKey, createdApp)).Should(Succeed())
-				createdApp.Spec.Capabilities = append(createdApp.Spec.Capabilities, brokerv1beta2.AppCapabilityType{
-					ProducerOf: []brokerv1beta2.AddressRef{{Address: "mytopic"}, {Address: "mytopic/A"}, {Address: "mytopic/B"}},
+				createdApp.Spec.Capabilities = append(createdApp.Spec.Capabilities, broker.AppCapabilityType{
+					ProducerOf: []broker.AddressRef{{Address: "mytopic"}, {Address: "mytopic/A"}, {Address: "mytopic/B"}},
 				})
 				g.Expect(k8sClient.Update(ctx, createdApp)).Should(Succeed())
 
@@ -326,7 +326,7 @@ var _ = Describe("broker-service mqtt", func() {
 				if verbose {
 					fmt.Printf("App STATUS: %v\n\n", createdApp.Status.Conditions)
 				}
-				readyCond := meta.FindStatusCondition(createdApp.Status.Conditions, brokerv1beta2.ReadyConditionType)
+				readyCond := meta.FindStatusCondition(createdApp.Status.Conditions, broker.ReadyConditionType)
 				g.Expect(readyCond).ShouldNot(BeNil())
 				g.Expect(readyCond.Status).Should(Equal(metav1.ConditionTrue))
 				g.Expect(readyCond.ObservedGeneration).Should(Equal(createdApp.Generation))
@@ -386,6 +386,10 @@ var _ = Describe("broker-service mqtt", func() {
 			By("tidy up")
 			Expect(k8sClient.Delete(ctx, &crd)).Should(Succeed())
 
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+
 			UninstallCert(appCertName, defaultNamespace)
 			UninstallCert(sharedOperandCertName, defaultNamespace)
 		})
@@ -393,7 +397,7 @@ var _ = Describe("broker-service mqtt", func() {
 
 	Context("multi-tenant metrics isolation", func() {
 
-		It("each app sees only its own queue metrics", func() {
+		It("each app sees only its own queue metrics", Label("verySlow"), func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -426,17 +430,17 @@ var _ = Describe("broker-service mqtt", func() {
 				}
 			})
 
-			crd := brokerv1beta2.BrokerService{
+			crd := broker.BrokerService{
 				TypeMeta: metav1.TypeMeta{
 					Kind:       "ActiveMQArtemisService",
-					APIVersion: brokerv1beta2.GroupVersion.Identifier(),
+					APIVersion: broker.GroupVersion.Identifier(),
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      serviceName,
 					Namespace: defaultNamespace,
 					Labels:    map[string]string{"forMQTTMultiTenant": "true"},
 				},
-				Spec: brokerv1beta2.BrokerServiceSpec{
+				Spec: broker.BrokerServiceSpec{
 					AppSelectorExpression: fmt.Sprintf(`app.metadata.namespace in ["%s", "%s"]`, defaultNamespace, otherNamespace),
 				},
 			}
@@ -452,23 +456,23 @@ var _ = Describe("broker-service mqtt", func() {
 			alphaIngressHost := "alpha-" + serviceName + "-" + defaultNamespace + "." + defaultTestIngressDomain
 			betaIngressHost := "beta-" + serviceName + "-" + defaultNamespace + "." + defaultTestIngressDomain
 
-			newApp := func(name, namespace, topic, subscription string) brokerv1beta2.BrokerApp {
-				return brokerv1beta2.BrokerApp{
+			newApp := func(name, namespace, topic, subscription string) broker.BrokerApp {
+				return broker.BrokerApp{
 					TypeMeta: metav1.TypeMeta{
 						Kind:       "ActiveMQArtemisApp",
-						APIVersion: brokerv1beta2.GroupVersion.Identifier(),
+						APIVersion: broker.GroupVersion.Identifier(),
 					},
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      name,
 						Namespace: namespace,
 					},
-					Spec: brokerv1beta2.BrokerAppSpec{
+					Spec: broker.BrokerAppSpec{
 						ServiceSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"forMQTTMultiTenant": "true"},
 						},
-						Capabilities: []brokerv1beta2.AppCapabilityType{{
-							ProducerOf: []brokerv1beta2.AddressRef{{Address: topic}},
-							ConsumerOf: []brokerv1beta2.AddressRef{{
+						Capabilities: []broker.AppCapabilityType{{
+							ProducerOf: []broker.AddressRef{{Address: topic}},
+							ConsumerOf: []broker.AddressRef{{
 								Address:       topic,
 								Subscriptions: []string{subscription},
 							}},
@@ -484,14 +488,14 @@ var _ = Describe("broker-service mqtt", func() {
 			// series belong to alpha alone, beta reading them needs access to
 			// alpha's namespace
 			const sharedQueue = "SHARED.Q"
-			appAlpha.Spec.SharedAddresses = []brokerv1beta2.AddressType{{Address: sharedQueue}}
+			appAlpha.Spec.SharedAddresses = []broker.AddressType{{Address: sharedQueue}}
 			appAlpha.Spec.Capabilities[0].ProducerOf = append(appAlpha.Spec.Capabilities[0].ProducerOf,
-				brokerv1beta2.AddressRef{Address: sharedQueue})
+				broker.AddressRef{Address: sharedQueue})
 			appBeta.Spec.Capabilities[0].ConsumerOf = append(appBeta.Spec.Capabilities[0].ConsumerOf,
-				brokerv1beta2.AddressRef{Address: sharedQueue, AppName: appAlpha.Name, AppNamespace: appAlpha.Namespace})
+				broker.AddressRef{Address: sharedQueue, AppName: appAlpha.Name, AppNamespace: appAlpha.Namespace})
 
 			By("installing per-app client certs, each in its app's namespace")
-			for _, app := range []*brokerv1beta2.BrokerApp{&appAlpha, &appBeta} {
+			for _, app := range []*broker.BrokerApp{&appAlpha, &appBeta} {
 				certName := app.Name + common.AppCertSecretSuffix
 				InstallCert(certName, app.Namespace, func(candidate *cmv1.Certificate) {
 					candidate.Spec.SecretName = certName
@@ -518,22 +522,22 @@ var _ = Describe("broker-service mqtt", func() {
 			By("deploying app-alpha and waiting for Ready before app-beta (serializes port assignment)")
 			Expect(k8sClient.Create(ctx, &appAlpha)).Should(Succeed())
 			Eventually(func(g Gomega) {
-				app := &brokerv1beta2.BrokerApp{}
+				app := &broker.BrokerApp{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appAlpha.Name, Namespace: defaultNamespace}, app)).Should(Succeed())
-				g.Expect(meta.IsStatusConditionTrue(app.Status.Conditions, brokerv1beta2.ReadyConditionType)).Should(BeTrue())
+				g.Expect(meta.IsStatusConditionTrue(app.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("deploying app-beta (produces/consumes on beta-topic)")
 			Expect(k8sClient.Create(ctx, &appBeta)).Should(Succeed())
 			Eventually(func(g Gomega) {
-				app := &brokerv1beta2.BrokerApp{}
+				app := &broker.BrokerApp{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appBeta.Name, Namespace: appBeta.Namespace}, app)).Should(Succeed())
-				g.Expect(meta.IsStatusConditionTrue(app.Status.Conditions, brokerv1beta2.ReadyConditionType)).Should(BeTrue())
+				g.Expect(meta.IsStatusConditionTrue(app.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("the service listing both apps by namespace and name, the one across namespaces included")
 			Eventually(func(g Gomega) {
-				service := &brokerv1beta2.BrokerService{}
+				service := &broker.BrokerService{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, service)).Should(Succeed())
 				g.Expect(service.Status.ProvisionedApps).Should(ConsistOf(
 					HavePrefix(appAlpha.Namespace+"/"+appAlpha.Name+"@"),
@@ -542,12 +546,12 @@ var _ = Describe("broker-service mqtt", func() {
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("reading assigned ports from app status")
-			alphaApp := &brokerv1beta2.BrokerApp{}
+			alphaApp := &broker.BrokerApp{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appAlpha.Name, Namespace: defaultNamespace}, alphaApp)).Should(Succeed())
 			alphaPort := alphaApp.Status.Service.AssignedPort
 			fmt.Printf("app-alpha assigned port: %d\n", alphaPort)
 
-			betaApp := &brokerv1beta2.BrokerApp{}
+			betaApp := &broker.BrokerApp{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appBeta.Name, Namespace: appBeta.Namespace}, betaApp)).Should(Succeed())
 			betaPort := betaApp.Status.Service.AssignedPort
 			fmt.Printf("app-beta assigned port: %d\n", betaPort)
@@ -593,7 +597,7 @@ var _ = Describe("broker-service mqtt", func() {
 			// reports "not Authorized". There is no condition to wait on for the
 			// reload, so retry until it accepts us -- a fixed delay is a fluke
 			// away from failing on a slower machine, which is how this broke.
-			connectMqtt := func(app *brokerv1beta2.BrokerApp, clientID, ingressHost, topic string) (*autopaho.ConnectionManager, *bool) {
+			connectMqtt := func(app *broker.BrokerApp, clientID, ingressHost, topic string) (*autopaho.ConnectionManager, *bool) {
 				appName := app.Name
 				certSecret, err := secrets.RetriveSecret(
 					types.NamespacedName{Namespace: app.Namespace, Name: appName + common.AppCertSecretSuffix},
@@ -789,7 +793,7 @@ var _ = Describe("broker-service mqtt", func() {
 				{Name: appBeta.Name, Namespace: appBeta.Namespace},
 			} {
 				Eventually(func() bool {
-					return errors.IsNotFound(k8sClient.Get(ctx, key, &brokerv1beta2.BrokerApp{}))
+					return errors.IsNotFound(k8sClient.Get(ctx, key, &broker.BrokerApp{}))
 				}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
 			}
 
@@ -798,7 +802,7 @@ var _ = Describe("broker-service mqtt", func() {
 			Eventually(func() bool {
 				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{
 					Name: crd.Name, Namespace: crd.Namespace,
-				}, &brokerv1beta2.BrokerService{}))
+				}, &broker.BrokerService{}))
 			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
 
 			UninstallCert(appAlpha.Name+common.AppCertSecretSuffix, defaultNamespace)

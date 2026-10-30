@@ -312,6 +312,11 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			By("cleanup")
 			Expect(k8sClient.Delete(ctx, createdApp2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdCrd)).Should(Succeed())
+
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, serviceKey, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+
 			UninstallCert(app1CertName, defaultNamespace)
 			UninstallCert(app2CertName, defaultNamespace)
 			UninstallCert(sharedOperandCertName, defaultNamespace)
@@ -515,6 +520,15 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			Expect(k8sClient.Delete(ctx, createdApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdService1)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdService2)).Should(Succeed())
+
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, service1Key, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, service2Key, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+
 			UninstallCert(appCertName, defaultNamespace)
 			UninstallCert(service1Name+"-"+common.DefaultOperandCertSecretName, defaultNamespace)
 			UninstallCert(service2Name+"-"+common.DefaultOperandCertSecretName, defaultNamespace)
@@ -1069,11 +1083,19 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			Expect(k8sClient.Delete(ctx, createdApp2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdApp3)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdService)).Should(Succeed())
+
+			By("Wating for drain before whacking certs that bound communication")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, serviceKey, createdService)).NotTo(BeNil())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
 			UninstallCert(app1CertName, defaultNamespace)
+			UninstallCert(app1.Name+common.AppCertSecretSuffix, defaultNamespace)
 			UninstallCert(app2CertName, otherNamespace)
+			UninstallCert(app2.Name+common.AppCertSecretSuffix, otherNamespace)
 			UninstallCert(app3CertName, defaultNamespace)
-			UninstallCert(certName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
+			UninstallCert(app3.Name+common.AppCertSecretSuffix, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 	})
 
@@ -1374,6 +1396,12 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			Expect(k8sClient.Delete(ctx, createdApp1)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdApp2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdService)).Should(Succeed())
+
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, serviceKey, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+
 			UninstallCert(app1CertName, defaultNamespace)
 			UninstallCert(app2CertName, defaultNamespace)
 			UninstallCert(certName, defaultNamespace)

@@ -7560,12 +7560,18 @@ spec:
         path: conditions
         x-descriptors:
         - urn:alm:descriptor:io.kubernetes.conditions
-      - description: BrokerApps that have been applied to the service, each as <namespace>/<name>@<generation>
+      - description: |-
+          PendingEmpty lists apps with addresses pending empty before removal.
+          Entries appear when addresses are removed from an app's spec or when an
+          app is being deleted, and remain until all messages have been consumed.
+        displayName: Pending Empty
+        path: pendingEmpty
+      - description: |-
+          BrokerApps that have been applied to the service, each as <namespace>/<name>@<generation>.
+          During drain, the generation reflects the last fully-applied state and advances
+          only once all pending addresses are empty.
         displayName: Provisioned Applications
         path: provisionedApps
-      - description: List of BrokerApps that were rejected during provisioning validation
-        displayName: Rejected Applications
-        path: rejectedApps
       version: v1beta2
   description: ArkMQ Broker Operator manages the Apache Artemis messaging broker on
     Kubernetes

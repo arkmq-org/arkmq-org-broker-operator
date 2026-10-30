@@ -25,7 +25,7 @@ var _ = Describe("brokerapp watch propagation", func() {
 					{
 						Type:   broker.DeployedConditionType,
 						Status: v1.ConditionTrue,
-						Reason: broker.DeployedConditionProvisionedReason,
+						Reason: broker.DeployedConditionBoundReason,
 					},
 				},
 			},
@@ -51,7 +51,7 @@ var _ = Describe("brokerapp watch propagation", func() {
 					{
 						Type:   broker.DeployedConditionType,
 						Status: v1.ConditionTrue,
-						Reason: broker.DeployedConditionProvisionedReason,
+						Reason: broker.DeployedConditionBoundReason,
 					},
 				},
 			},
@@ -77,7 +77,7 @@ var _ = Describe("brokerapp watch propagation", func() {
 					{
 						Type:   broker.DeployedConditionType,
 						Status: v1.ConditionFalse,
-						Reason: broker.DeployedConditionProvisioningPendingReason,
+						Reason: broker.DeployedConditionBindingReason,
 					},
 				},
 			},
@@ -105,7 +105,7 @@ var _ = Describe("brokerapp watch propagation", func() {
 					{
 						Type:   broker.DeployedConditionType,
 						Status: v1.ConditionTrue,
-						Reason: broker.DeployedConditionProvisionedReason,
+						Reason: broker.DeployedConditionBoundReason,
 					},
 				},
 			},
@@ -141,7 +141,7 @@ var _ = Describe("brokerapp watch propagation", func() {
 					{
 						Type:   broker.DeployedConditionType,
 						Status: v1.ConditionTrue,
-						Reason: broker.DeployedConditionProvisionedReason,
+						Reason: broker.DeployedConditionBoundReason,
 					},
 				},
 			},
@@ -188,7 +188,7 @@ var _ = Describe("brokerapp watch propagation", func() {
 					{
 						Type:   broker.DeployedConditionType,
 						Status: v1.ConditionFalse,
-						Reason: broker.DeployedConditionProvisioningPendingReason,
+						Reason: broker.DeployedConditionBindingReason,
 					},
 				},
 			},

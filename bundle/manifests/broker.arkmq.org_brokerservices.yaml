@@ -335,33 +335,42 @@ spec:
                   - type
                   type: object
                 type: array
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the most recent generation observed for this BrokerService.
+                  It corresponds to the BrokerService's generation, which is updated on mutation by the API Server.
+                format: int64
+                type: integer
+              pendingEmpty:
+                description: |-
+                  PendingEmpty lists apps with addresses pending empty before removal.
+                  Entries appear when addresses are removed from an app's spec or when an
+                  app is being deleted, and remain until all messages have been consumed.
+                items:
+                  properties:
+                    app:
+                      description: App is the identity of the BrokerApp that owns
+                        the addresses pending empty
+                      type: string
+                    messages:
+                      additionalProperties:
+                        format: int64
+                        type: integer
+                      description: |-
+                        Messages maps each fully qualified queue name (address::queue) to its
+                        pending message count. Entries are removed once the count reaches zero.
+                      type: object
+                  required:
+                  - app
+                  type: object
+                type: array
               provisionedApps:
-                description: BrokerApps that have been applied to the service, each
-                  as <namespace>/<name>@<generation>
+                description: |-
+                  BrokerApps that have been applied to the service, each as <namespace>/<name>@<generation>.
+                  During drain, the generation reflects the last fully-applied state and advances
+                  only once all pending addresses are empty.
                 items:
                   type: string
-                type: array
-              rejectedApps:
-                description: List of BrokerApps that were rejected during provisioning
-                  validation
-                items:
-                  description: RejectedApp represents a BrokerApp that was rejected
-                    during provisioning validation
-                  properties:
-                    name:
-                      description: Name of the rejected app
-                      type: string
-                    namespace:
-                      description: Namespace of the rejected app
-                      type: string
-                    reason:
-                      description: Reason why the app was rejected
-                      type: string
-                  required:
-                  - name
-                  - namespace
-                  - reason
-                  type: object
                 type: array
             type: object
         type: object

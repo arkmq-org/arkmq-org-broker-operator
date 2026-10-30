@@ -43,6 +43,7 @@ func (j *JolokiaError) Error() string {
 
 type IJolokia interface {
 	Read(path string) (*ResponseData, error)
+	ReadMap(path string) (map[string]interface{}, error)
 	Exec(path, postJsonString string) (*ResponseData, error)
 	ExecWithClient(httpClient *http.Client, path, postJsonString string) (*ResponseData, error)
 	GetProtocol() string
@@ -154,7 +155,9 @@ func (j *Jolokia) Read(_path string) (*ResponseData, error) {
 			respError = err
 			break
 		}
-		defer res.Body.Close()
+		defer func() {
+			_ = res.Body.Close()
+		}()
 
 		if !isResponseSuccessful(res.StatusCode) {
 			return nil, &JolokiaError{
@@ -185,6 +188,49 @@ func (j *Jolokia) Read(_path string) (*ResponseData, error) {
 	return jdata, respError
 }
 
+func (j *Jolokia) ReadMap(_path string) (map[string]interface{}, error) {
+
+	url := j.protocol + "://" + j.user + ":" + j.password + "@" + j.jolokiaURL + "/read/" + _path
+
+	jolokiaClient := j.getClient()
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "arkmq-org-broker-management")
+	res, err := jolokiaClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = res.Body.Close()
+	}()
+
+	if !isResponseSuccessful(res.StatusCode) {
+		return nil, &JolokiaError{
+			HttpCode: res.StatusCode,
+			Message:  "error: " + res.Status,
+		}
+	}
+
+	result, rawData, err := decodeResponseData(res)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckResponse(res, result); err != nil {
+		return nil, err
+	}
+
+	if v, ok := rawData["value"]; ok && v != nil {
+		if m, ok := v.(map[string]interface{}); ok {
+			return m, nil
+		}
+	}
+
+	return nil, nil
+}
+
 func (j *Jolokia) Exec(_path string, _postJsonString string) (*ResponseData, error) {
 	return j.ExecWithClient(j.getClient(), _path, _postJsonString)
 }
@@ -210,8 +256,9 @@ func (j *Jolokia) ExecWithClient(jolokiaClient *http.Client, _path string, _post
 			execErr = err
 			break
 		}
-
-		defer res.Body.Close()
+		defer func() {
+			_ = res.Body.Close()
+		}()
 
 		//decoding
 		result, _, err := decodeResponseData(res)

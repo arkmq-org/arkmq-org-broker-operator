@@ -202,8 +202,8 @@ var _ = Describe("brokerapp resolve service", func() {
 			},
 			services:               []broker.BrokerService{},
 			expectedServiceName:    "",
-			expectedBinding:        "test:service1",
-			expectedError:          false,
+			expectedBinding:        "",
+			expectedError:          true,
 			expectedValidCondition: metav1.ConditionTrue,
 		},
 	}
