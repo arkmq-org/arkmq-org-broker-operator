@@ -159,6 +159,11 @@ func (b *BrokerServiceBuilder) WithDeployedCondition(status metav1.ConditionStat
 	return b
 }
 
+func (b *BrokerServiceBuilder) WithAppSelectorExpression(expression string) *BrokerServiceBuilder {
+	b.service.Spec.AppSelectorExpression = expression
+	return b
+}
+
 func (b *BrokerServiceBuilder) Build() *v1beta2.BrokerService {
 	return b.service
 }

@@ -265,6 +265,179 @@ var _ = Describe("brokerapp unbinding unit", func() {
 		})
 	})
 
+	Context("pre-validation service acceptance check", func() {
+
+		It("unbinds a spec-invalid app when the service selector rejects it", Label(unitLabel), func() {
+			ns := "default"
+			svcName := "my-broker-service"
+			appName := "invalid-app"
+
+			svc := NewBrokerService(svcName, ns).
+				WithAppSelectorExpression(`app.metadata.name == "nobody"`).
+				Build()
+			app := NewBrokerApp(appName, ns).Build()
+
+			env := NewTestEnvironment(ns, svc, app)
+			r := env.Reconciler
+			cl := env.Client
+
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+
+			// First reconcile: app gets bound (default selector accepts same-namespace)
+			svc.Spec.AppSelectorExpression = ""
+			Expect(cl.Update(context.TODO(), svc)).To(Succeed())
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedApp := &v1beta2.BrokerApp{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedApp)).To(Succeed())
+			Expect(updatedApp.Status.Service).NotTo(BeNil(), "app should be bound after first reconcile")
+
+			// Invalidate the app's spec and tighten the service selector
+			updatedApp.Spec.ServiceSelector = &metav1.LabelSelector{}
+			Expect(cl.Update(context.TODO(), updatedApp)).To(Succeed())
+
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, svc)).To(Succeed())
+			svc.Spec.AppSelectorExpression = `app.metadata.name == "nobody"`
+			Expect(cl.Update(context.TODO(), svc)).To(Succeed())
+
+			// Reconcile: spec is invalid BUT pre-validation check detects selector mismatch
+			result, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero(), "no requeue needed when binding was cleared immediately")
+
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedApp)).To(Succeed())
+			Expect(updatedApp.Status.Service).To(BeNil(), "binding should be cleared despite invalid spec")
+
+			validCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCond).NotTo(BeNil())
+			Expect(validCond.Status).To(Equal(metav1.ConditionFalse), "spec should still be marked invalid")
+		})
+
+		It("keeps binding when spec is invalid but service still accepts the app", Label(unitLabel), func() {
+			ns := "default"
+			svcName := "my-broker-service"
+			appName := "invalid-but-accepted"
+
+			svc := NewBrokerService(svcName, ns).Build()
+			app := NewBrokerApp(appName, ns).Build()
+
+			env := NewTestEnvironment(ns, svc, app)
+			r := env.Reconciler
+			cl := env.Client
+
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+
+			// First reconcile: app gets bound
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedApp := &v1beta2.BrokerApp{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedApp)).To(Succeed())
+			Expect(updatedApp.Status.Service).NotTo(BeNil())
+
+			// Invalidate the app's spec but keep service selector accepting
+			updatedApp.Spec.ServiceSelector = &metav1.LabelSelector{}
+			Expect(cl.Update(context.TODO(), updatedApp)).To(Succeed())
+
+			// Reconcile: spec invalid, but service still accepts — binding preserved
+			_, err = r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedApp)).To(Succeed())
+			Expect(updatedApp.Status.Service).NotTo(BeNil(), "binding should be preserved when service still accepts the app")
+		})
+
+		It("requeues when spec-invalid app is rejected but drain finalizer holds binding", Label(unitLabel), func() {
+			ns := "default"
+			svcName := "my-broker-service"
+			appName := "draining-invalid"
+
+			svc := NewBrokerService(svcName, ns).Build()
+			app := NewBrokerApp(appName, ns).
+				WithAddresses(NewAddressType("orders").Build()).
+				WithProducerOf(NewAddressRef("orders").Build()).
+				Build()
+
+			env := NewTestEnvironment(ns, svc, app)
+			r := env.Reconciler
+			cl := env.Client
+
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+
+			// First reconcile: app gets bound
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedApp := &v1beta2.BrokerApp{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedApp)).To(Succeed())
+			Expect(updatedApp.Status.Service).NotTo(BeNil())
+
+			// Add drain finalizer, invalidate spec, tighten service selector
+			controllerutil.AddFinalizer(updatedApp, v1beta2.AddressesPendingEmptyFinalizer)
+			updatedApp.Spec.ServiceSelector = &metav1.LabelSelector{}
+			Expect(cl.Update(context.TODO(), updatedApp)).To(Succeed())
+
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, svc)).To(Succeed())
+			svc.Spec.AppSelectorExpression = `app.metadata.name == "nobody"`
+			Expect(cl.Update(context.TODO(), svc)).To(Succeed())
+
+			// Reconcile: drain holds binding, should requeue
+			result, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).NotTo(BeZero(), "should requeue while drain finalizer holds binding")
+
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedApp)).To(Succeed())
+			Expect(updatedApp.Status.Service).NotTo(BeNil(), "binding preserved while drain finalizer exists")
+
+			deployedCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
+			Expect(deployedCond).NotTo(BeNil())
+			Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionUnbindingReason),
+				"Deployed condition should signal unbinding so service can drain")
+		})
+
+		It("unbinds a spec-invalid app when the bound service is deleted", Label(unitLabel), func() {
+			ns := "default"
+			svcName := "deleting-service"
+			appName := "invalid-app"
+
+			svc := NewBrokerService(svcName, ns).Build()
+			app := NewBrokerApp(appName, ns).Build()
+
+			env := NewTestEnvironment(ns, svc, app)
+			r := env.Reconciler
+			cl := env.Client
+
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+
+			// First reconcile: app gets bound
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedApp := &v1beta2.BrokerApp{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedApp)).To(Succeed())
+			Expect(updatedApp.Status.Service).NotTo(BeNil())
+
+			// Invalidate the app's spec
+			updatedApp.Spec.ServiceSelector = &metav1.LabelSelector{}
+			Expect(cl.Update(context.TODO(), updatedApp)).To(Succeed())
+
+			// Delete the service (with a finalizer so it stays around for the Get)
+			updatedSvc := &v1beta2.BrokerService{}
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, updatedSvc)).To(Succeed())
+			controllerutil.AddFinalizer(updatedSvc, v1beta2.AddressesPendingEmptyFinalizer)
+			Expect(cl.Update(context.TODO(), updatedSvc)).To(Succeed())
+			Expect(cl.Delete(context.TODO(), updatedSvc)).To(Succeed())
+
+			// Reconcile: pre-validation check detects deleted service
+			_, err = r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedApp)).To(Succeed())
+			Expect(updatedApp.Status.Service).To(BeNil(), "binding should be cleared when service is deleted despite invalid spec")
+		})
+	})
+
 	Context("deletion with drain finalizer reflects service state", func() {
 
 		It("deployed condition shows drain progress during deletion", Label(unitLabel), func() {
