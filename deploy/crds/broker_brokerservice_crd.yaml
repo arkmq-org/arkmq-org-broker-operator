@@ -353,7 +353,10 @@ spec:
                   type: object
                 type: array
               provisionedApps:
-                description: BrokerApps that have been applied to the service, each as <namespace>/<name>@<generation>
+                description: |-
+                  BrokerApps that have been applied to the service, each as <namespace>/<name>@<generation>.
+                  During drain, the generation reflects the last fully-applied state and advances
+                  only once all pending addresses are empty.
                 items:
                   type: string
                 type: array
