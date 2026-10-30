@@ -394,7 +394,11 @@ var _ = Describe("brokerapp capacity", func() {
 							Namespace: "test",
 						},
 						Spec: brokerv1beta2.BrokerAppSpec{
-							SharedAddresses: []brokerv1beta2.AddressType{NewAddressType("shared-queue").Build()},
+							Addresses: []brokerv1beta2.AddressType{
+								NewAddressType("shared-queue").
+									WithProducerOfAppSelector("app.metadata.name == 'new-app'").
+									Build(),
+							},
 							Capabilities: []brokerv1beta2.AppCapabilityType{
 								{
 									ConsumerOf: []brokerv1beta2.AddressRef{
@@ -465,7 +469,11 @@ var _ = Describe("brokerapp capacity", func() {
 							Namespace: "test",
 						},
 						Spec: brokerv1beta2.BrokerAppSpec{
-							SharedAddresses: []brokerv1beta2.AddressType{NewAddressType("shared").WithPubSub(true).Build()},
+							Addresses: []brokerv1beta2.AddressType{
+								NewAddressType("shared").WithPubSub(true).
+									WithProducerOfAppSelector("app.metadata.name == 'new-app'").
+									Build(),
+							},
 							Capabilities: []brokerv1beta2.AppCapabilityType{
 								{
 									ConsumerOf: []brokerv1beta2.AddressRef{
@@ -537,7 +545,11 @@ var _ = Describe("brokerapp capacity", func() {
 							Namespace: "test",
 						},
 						Spec: brokerv1beta2.BrokerAppSpec{
-							SharedAddresses: []brokerv1beta2.AddressType{NewAddressType("shared").Build()},
+							Addresses: []brokerv1beta2.AddressType{
+								NewAddressType("shared").
+									WithProducerOfAppSelector("app.metadata.name == 'new-app'").
+									Build(),
+							},
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
 									corev1.ResourceMemory: resource.MustParse("512Mi"),

@@ -108,7 +108,7 @@ var _ = Describe("addressref subscriptions", func() {
 		secret := CreateSecret("test-secret", "test")
 
 		app := NewBrokerApp("producer-app", "test").
-			WithSharedAddresses(NewAddressType("events").WithSubscriptions("sub1").Build()).
+			WithAddresses(NewAddressType("events").WithSubscriptions("sub1").Build()).
 			WithProducerOf(v1beta2.AddressRef{Address: "events", PubSub: &[]bool{true}[0]}).Build()
 
 		err := reconciler.processCapabilities(secret, app)

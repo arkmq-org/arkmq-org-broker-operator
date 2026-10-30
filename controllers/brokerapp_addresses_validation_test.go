@@ -22,48 +22,8 @@ import (
 
 var _ = Describe("brokerapp addresses validation", func() {
 
-	Context("validateAddressesDisjoint", func() {
-		It("rejects duplicate address in both Addresses and SharedAddresses", Label(unitLabel), func() {
-			appWithDuplicate := &v1beta2.BrokerApp{
-				Spec: v1beta2.BrokerAppSpec{
-					Addresses:       []v1beta2.AddressType{NewAddressType("queue1").Build()},
-					SharedAddresses: []v1beta2.AddressType{NewAddressType("queue1").Build()},
-				},
-			}
-
-			reconciler := &BrokerAppInstanceReconciler{
-				instance: appWithDuplicate,
-			}
-
-			err := reconciler.validateAddressesDisjoint()
-
-			Expect(err).To(HaveOccurred())
-
-			validErr, ok := err.(*ValidationError)
-			Expect(ok).To(BeTrue(), "expected ValidationError")
-			Expect(validErr.ConditionReason()).To(Equal(v1beta2.ValidConditionAddressTypeError))
-			Expect(validErr.Message).To(ContainSubstring("cannot be both private and public"))
-			Expect(validErr.Message).To(ContainSubstring("queue1"))
-		})
-
-		It("allows disjoint addresses", Label(unitLabel), func() {
-			appDisjoint := &v1beta2.BrokerApp{
-				Spec: v1beta2.BrokerAppSpec{
-					Addresses:       []v1beta2.AddressType{NewAddressType("private1").Build()},
-					SharedAddresses: []v1beta2.AddressType{NewAddressType("public1").Build()},
-				},
-			}
-
-			reconciler := &BrokerAppInstanceReconciler{
-				instance: appDisjoint,
-			}
-
-			err := reconciler.validateAddressesDisjoint()
-
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("allows empty SharedAddresses", Label(unitLabel), func() {
+	Context("addresses field", func() {
+		It("allows addresses with no references (private)", Label(unitLabel), func() {
 			app := &v1beta2.BrokerApp{
 				Spec: v1beta2.BrokerAppSpec{
 					Addresses: []v1beta2.AddressType{NewAddressType("private1").Build()},
@@ -74,15 +34,18 @@ var _ = Describe("brokerapp addresses validation", func() {
 				instance: app,
 			}
 
-			err := reconciler.validateAddressesDisjoint()
-
+			err := reconciler.validateAddressCapabilityConsistency()
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("allows empty Addresses", Label(unitLabel), func() {
+		It("allows addresses with sharing selectors (shared)", Label(unitLabel), func() {
 			app := &v1beta2.BrokerApp{
 				Spec: v1beta2.BrokerAppSpec{
-					SharedAddresses: []v1beta2.AddressType{NewAddressType("public1").Build()},
+					Addresses: []v1beta2.AddressType{
+						NewAddressType("shared1").
+							WithConsumerOfAppSelector("app.metadata.name == 'other-app'").
+							Build(),
+					},
 				},
 			}
 
@@ -90,8 +53,7 @@ var _ = Describe("brokerapp addresses validation", func() {
 				instance: app,
 			}
 
-			err := reconciler.validateAddressesDisjoint()
-
+			err := reconciler.validateAddressCapabilityConsistency()
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})

@@ -886,7 +886,7 @@ metadata:
   name: first-app
   namespace: broker-tutorial
 spec:
-  selector:
+  serviceSelector:
     matchLabels:
       forWorkQueue: "true"
   capabilities:

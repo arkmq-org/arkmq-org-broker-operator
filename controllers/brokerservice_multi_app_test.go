@@ -628,7 +628,11 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 							corev1.ResourceMemory: resource.MustParse("512Mi"),
 						},
 					},
-					SharedAddresses: []broker.AddressType{{Address: "shared.address", PubSub: &[]bool{true}[0]}},
+					Addresses: []broker.AddressType{{
+						Address:               "shared.address",
+						PubSub:                &[]bool{true}[0],
+						ConsumerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", otherNamespace),
+					}},
 					Capabilities: []broker.AppCapabilityType{
 						{
 							ConsumerOf: []broker.AddressRef{
