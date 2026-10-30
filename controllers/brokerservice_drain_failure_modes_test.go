@@ -664,7 +664,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 			"broker accepted messages after the operator had declared the app empty and deleted it")
 	})
 
-	PIt("F2b unprovisions an app the service's selector stops matching even if its spec turned invalid", func() {
+	It("unprovisions an app the service's selector stops matching even if its spec turned invalid", func() {
 		if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 			return
 		}
@@ -693,7 +693,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		verifyProvisioned(ctx, serviceName, tenantName)
 		verifyProvisioned(ctx, serviceName, controlName)
 
-		By("the tenant makes its own spec invalid, with spec-only rights")
+		By("the tenant makes its own spec invalid")
 		Eventually(func(g Gomega) {
 			current := &broker.BrokerApp{}
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&tenant), current)).Should(Succeed())
