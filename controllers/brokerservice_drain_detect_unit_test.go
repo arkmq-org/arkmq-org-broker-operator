@@ -324,6 +324,150 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		Expect(result[0].HasActiveProducers).To(BeTrue(), "should flag active producers from deployed config")
 	})
 
+	It("detects removed subscription on a retained multicast address", Label(unitLabel), func() {
+		ns := "default"
+		appName := "sub-removal-app"
+
+		app := NewBrokerApp(appName, ns).
+			WithConsumerOf(NewAddressRef("events").WithSubscriptions("kept.events").Build()).
+			WithProducerOf(NewAddressRef("events").Build()).
+			Build()
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{
+			AppIdentityWithGeneration(app),
+		}
+
+		appIdentity := AppIdentity(app)
+		oldCaps := &brokerproperties.CapabilitiesJSON{
+			AddressConfigurations: map[string]*brokerproperties.AddressConfiguration{
+				"events": {
+					RoutingTypes: brokerproperties.RoutingTypeMulticast,
+					QueueConfigs: map[string]*brokerproperties.QueueConfig{
+						"kept.events":    {RoutingType: brokerproperties.RoutingTypeMulticast, Address: "events"},
+						"removed.events": {RoutingType: brokerproperties.RoutingTypeMulticast, Address: "events"},
+					},
+				},
+			},
+			SecurityRoles: map[string]map[string]*brokerproperties.RolePermissions{
+				"events": {
+					producerRole(appIdentity): {Send: true},
+					consumerRole(appIdentity): {Consume: true},
+				},
+			},
+		}
+		data, err := json.Marshal(oldCaps)
+		Expect(err).NotTo(HaveOccurred())
+		capKey := AppIdentityPrefixed(app, "capabilities.json")
+		oldSecretData := map[string][]byte{capKey: data}
+
+		tracker, err := reconciler.buildAddressTracker(app)
+		Expect(err).NotTo(HaveOccurred())
+
+		result, err := reconciler.detectDrainingAddresses(app, tracker, oldSecretData)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(HaveLen(1))
+		Expect(result[0].Address).To(Equal("events"))
+		Expect(result[0].IsRetained).To(BeTrue(), "address is still in the spec")
+		Expect(result[0].Subscriptions).To(ConsistOf("removed.events"))
+	})
+
+	It("does not set HasActiveProducers for retained address even when producer role exists", Label(unitLabel), func() {
+		ns := "default"
+		appName := "retained-producer-app"
+
+		app := NewBrokerApp(appName, ns).
+			WithConsumerOf(NewAddressRef("events").WithSubscriptions("kept.events").Build()).
+			WithProducerOf(NewAddressRef("events").Build()).
+			Build()
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{
+			AppIdentityWithGeneration(app),
+		}
+		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
+			{App: AppIdentity(app), Messages: map[string]int64{"events::removed.events": 5}},
+		}
+
+		appIdentity := AppIdentity(app)
+		oldCaps := &brokerproperties.CapabilitiesJSON{
+			AddressConfigurations: map[string]*brokerproperties.AddressConfiguration{
+				"events": {
+					RoutingTypes: brokerproperties.RoutingTypeMulticast,
+					QueueConfigs: map[string]*brokerproperties.QueueConfig{
+						"kept.events":    {RoutingType: brokerproperties.RoutingTypeMulticast, Address: "events"},
+						"removed.events": {RoutingType: brokerproperties.RoutingTypeMulticast, Address: "events"},
+					},
+				},
+			},
+			SecurityRoles: map[string]map[string]*brokerproperties.RolePermissions{
+				"events": {
+					producerRole(appIdentity): {Send: true},
+					consumerRole(appIdentity): {Consume: true},
+				},
+			},
+		}
+		data, err := json.Marshal(oldCaps)
+		Expect(err).NotTo(HaveOccurred())
+		capKey := AppIdentityPrefixed(app, "capabilities.json")
+		oldSecretData := map[string][]byte{capKey: data}
+
+		tracker, err := reconciler.buildAddressTracker(app)
+		Expect(err).NotTo(HaveOccurred())
+
+		result, err := reconciler.detectDrainingAddresses(app, tracker, oldSecretData)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(HaveLen(1))
+		Expect(result[0].HasActiveProducers).To(BeFalse(),
+			"retained address should not flag active producers — enabled=false handles it")
+	})
+
+	It("sets HasActiveProducers on first detection of retained subscription drain", Label(unitLabel), func() {
+		ns := "default"
+		appName := "first-detect-app"
+
+		app := NewBrokerApp(appName, ns).
+			WithConsumerOf(NewAddressRef("events").WithSubscriptions("kept.events").Build()).
+			WithProducerOf(NewAddressRef("events").Build()).
+			Build()
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{
+			AppIdentityWithGeneration(app),
+		}
+
+		appIdentity := AppIdentity(app)
+		oldCaps := &brokerproperties.CapabilitiesJSON{
+			AddressConfigurations: map[string]*brokerproperties.AddressConfiguration{
+				"events": {
+					RoutingTypes: brokerproperties.RoutingTypeMulticast,
+					QueueConfigs: map[string]*brokerproperties.QueueConfig{
+						"kept.events":    {RoutingType: brokerproperties.RoutingTypeMulticast, Address: "events"},
+						"removed.events": {RoutingType: brokerproperties.RoutingTypeMulticast, Address: "events"},
+					},
+				},
+			},
+			SecurityRoles: map[string]map[string]*brokerproperties.RolePermissions{
+				"events": {
+					producerRole(appIdentity): {Send: true},
+				},
+			},
+		}
+		data, err := json.Marshal(oldCaps)
+		Expect(err).NotTo(HaveOccurred())
+		capKey := AppIdentityPrefixed(app, "capabilities.json")
+		oldSecretData := map[string][]byte{capKey: data}
+
+		tracker, err := reconciler.buildAddressTracker(app)
+		Expect(err).NotTo(HaveOccurred())
+
+		result, err := reconciler.detectDrainingAddresses(app, tracker, oldSecretData)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(HaveLen(1))
+		Expect(result[0].HasActiveProducers).To(BeTrue(),
+			"first detection should gate Jolokia until enabled=false config is deployed")
+	})
+
 	It("clears HasActiveProducers when sender role was already revoked", Label(unitLabel), func() {
 		ns := "default"
 		appName := "revoked-producer-app"
@@ -660,6 +804,180 @@ var _ = Describe("cross-app drain unit", Label(unitLabel), func() {
 		}
 		Expect(hasConsumeForOrders).Should(BeTrue(),
 			"cross-app consumer should keep consume permission when owner is draining (helps drain)")
+	})
+
+	It("stores FQQNs in pendingEmptyAddresses for retained subscription drains", Label(unitLabel), func() {
+		ns := "default"
+
+		app := NewBrokerApp("sub-drain-app", ns).
+			WithAddresses(NewAddressType("events").WithSubscriptions("kept.events").WithPubSub(true).Build()).
+			WithProducerOf(NewAddressRef("events").Build()).
+			WithConsumerOf(NewAddressRef("events").WithSubscriptions("kept.events").Build()).
+			Build()
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{
+			AppIdentityWithGeneration(app),
+		}
+		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
+			{App: AppIdentity(app), Messages: map[string]int64{"events::removed.events": 3}},
+		}
+		Expect(reconciler.Client.Create(context.TODO(), app)).To(Succeed())
+
+		oldCaps := &brokerproperties.CapabilitiesJSON{
+			AddressConfigurations: map[string]*brokerproperties.AddressConfiguration{
+				"events": {
+					RoutingTypes: brokerproperties.RoutingTypeMulticast,
+					QueueConfigs: map[string]*brokerproperties.QueueConfig{
+						"kept.events":    {RoutingType: brokerproperties.RoutingTypeMulticast, Address: "events"},
+						"removed.events": {RoutingType: brokerproperties.RoutingTypeMulticast, Address: "events"},
+					},
+				},
+			},
+		}
+		oldData, err := json.Marshal(oldCaps)
+		Expect(err).NotTo(HaveOccurred())
+		capKey := AppIdentityPrefixed(app, "capabilities.json")
+		oldSecretData := map[string][]byte{capKey: oldData}
+
+		tracker, buildErr := reconciler.buildAddressTracker(app)
+		Expect(buildErr).NotTo(HaveOccurred())
+		_, drainErr := reconciler.processPendingEmpty(app, tracker, oldSecretData)
+		Expect(drainErr).NotTo(HaveOccurred())
+
+		role := AppIdentity(app)
+		Expect(reconciler.pendingEmptyAddresses).To(HaveKey(role))
+		Expect(reconciler.pendingEmptyAddresses[role]).To(HaveKey("events::removed.events"),
+			"retained subscription drain should store FQQN, not bare address")
+		Expect(reconciler.pendingEmptyAddresses[role]).ShouldNot(HaveKey("events"),
+			"retained subscription drain should not store bare address name")
+	})
+
+	It("cross-app producer keeps send permission when owner has retained subscription drain", Label(unitLabel), func() {
+		ns := "default"
+
+		ownerApp := NewBrokerApp("owner-app", ns).
+			WithAddresses(NewAddressType("events").WithSubscriptions("kept.events").WithPubSub(true).Build()).
+			WithProducerOf(NewAddressRef("events").Build()).
+			WithConsumerOf(NewAddressRef("events").WithSubscriptions("kept.events").Build()).
+			Build()
+
+		producerApp := NewBrokerApp("cross-producer", ns).
+			WithProducerOf(NewAddressRef("events").WithAppRef(ns, "owner-app").Build()).
+			Build()
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{
+			AppIdentityWithGeneration(ownerApp),
+			AppIdentityWithGeneration(producerApp),
+		}
+		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
+			{App: AppIdentity(ownerApp), Messages: map[string]int64{"events::removed.events": 3}},
+		}
+		Expect(reconciler.Client.Create(context.TODO(), ownerApp)).To(Succeed())
+		Expect(reconciler.Client.Create(context.TODO(), producerApp)).To(Succeed())
+
+		oldCaps := &brokerproperties.CapabilitiesJSON{
+			AddressConfigurations: map[string]*brokerproperties.AddressConfiguration{
+				"events": {
+					RoutingTypes: brokerproperties.RoutingTypeMulticast,
+					QueueConfigs: map[string]*brokerproperties.QueueConfig{
+						"kept.events":    {RoutingType: brokerproperties.RoutingTypeMulticast, Address: "events"},
+						"removed.events": {RoutingType: brokerproperties.RoutingTypeMulticast, Address: "events"},
+					},
+				},
+			},
+		}
+		oldData, err := json.Marshal(oldCaps)
+		Expect(err).NotTo(HaveOccurred())
+		ownerCapKey := AppIdentityPrefixed(ownerApp, "capabilities.json")
+		oldSecretData := map[string][]byte{ownerCapKey: oldData}
+
+		ownerTracker, _ := reconciler.buildAddressTracker(ownerApp)
+		_, drainErr := reconciler.processPendingEmpty(ownerApp, ownerTracker, oldSecretData)
+		Expect(drainErr).NotTo(HaveOccurred())
+
+		producerTracker, _ := reconciler.buildAddressTracker(producerApp)
+		activeApps := map[string]bool{
+			AppIdentity(ownerApp):    true,
+			AppIdentity(producerApp): true,
+		}
+		reconciler.filterCrossAppRoles(producerApp, producerTracker, activeApps)
+
+		producerCapKey := AppIdentityPrefixed(producerApp, "capabilities.json")
+		producerSecret := &corev1.Secret{}
+		producerSecret.Data = make(map[string][]byte)
+		Expect(reconciler.processCapabilities(producerSecret, producerApp, producerTracker)).To(Succeed())
+
+		var producerCaps brokerproperties.CapabilitiesJSON
+		Expect(json.Unmarshal(producerSecret.Data[producerCapKey], &producerCaps)).To(Succeed())
+
+		hasSend := false
+		if eventsRoles, ok := producerCaps.SecurityRoles["events"]; ok {
+			for _, perms := range eventsRoles {
+				if perms.Send {
+					hasSend = true
+				}
+			}
+		}
+		Expect(hasSend).Should(BeTrue(),
+			"cross-app producer should keep send when owner has a retained subscription drain")
+	})
+
+	It("processCapabilities sets enabled=false on draining subscription queue", Label(unitLabel), func() {
+		ns := "default"
+
+		app := NewBrokerApp("enabled-test-app", ns).
+			WithAddresses(NewAddressType("events").WithSubscriptions("kept.events").WithPubSub(true).Build()).
+			WithConsumerOf(NewAddressRef("events").WithSubscriptions("kept.events").Build()).
+			Build()
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{
+			AppIdentityWithGeneration(app),
+		}
+		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
+			{App: AppIdentity(app), Messages: map[string]int64{"events::removed.events": 5}},
+		}
+		Expect(reconciler.Client.Create(context.TODO(), app)).To(Succeed())
+
+		oldCaps := &brokerproperties.CapabilitiesJSON{
+			AddressConfigurations: map[string]*brokerproperties.AddressConfiguration{
+				"events": {
+					RoutingTypes: brokerproperties.RoutingTypeMulticast,
+					QueueConfigs: map[string]*brokerproperties.QueueConfig{
+						"kept.events":    {RoutingType: brokerproperties.RoutingTypeMulticast, Address: "events"},
+						"removed.events": {RoutingType: brokerproperties.RoutingTypeMulticast, Address: "events"},
+					},
+				},
+			},
+		}
+		oldData, err := json.Marshal(oldCaps)
+		Expect(err).NotTo(HaveOccurred())
+		capKey := AppIdentityPrefixed(app, "capabilities.json")
+		oldSecretData := map[string][]byte{capKey: oldData}
+
+		tracker, buildErr := reconciler.buildAddressTracker(app)
+		Expect(buildErr).NotTo(HaveOccurred())
+		_, drainErr := reconciler.processPendingEmpty(app, tracker, oldSecretData)
+		Expect(drainErr).NotTo(HaveOccurred())
+
+		secret := &corev1.Secret{}
+		secret.Data = make(map[string][]byte)
+		Expect(reconciler.processCapabilities(secret, app, tracker)).To(Succeed())
+
+		var caps brokerproperties.CapabilitiesJSON
+		Expect(json.Unmarshal(secret.Data[capKey], &caps)).To(Succeed())
+
+		Expect(caps.AddressConfigurations).To(HaveKey("events"))
+		eventsCfg := caps.AddressConfigurations["events"]
+		Expect(eventsCfg.QueueConfigs).To(HaveKey("kept.events"))
+		Expect(eventsCfg.QueueConfigs).To(HaveKey("removed.events"))
+
+		Expect(*eventsCfg.QueueConfigs["kept.events"].Enabled).To(BeTrue(),
+			"active subscription should have enabled=true")
+		Expect(*eventsCfg.QueueConfigs["removed.events"].Enabled).To(BeFalse(),
+			"draining subscription should have enabled=false")
 	})
 
 	It("should not filter locally owned address even when cross-app owner is draining", Label(unitLabel), func() {

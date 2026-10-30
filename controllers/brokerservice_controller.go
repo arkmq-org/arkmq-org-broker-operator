@@ -868,6 +868,7 @@ type AddressConfig struct {
 	isOwned bool
 
 	isMulticast bool
+	isDraining  bool
 }
 
 type AddressTracker struct {
@@ -1020,6 +1021,9 @@ func (reconciler *BrokerServiceInstanceReconciler) processPendingEmpty(app *brok
 				fqqn := da.Address + FQQNSeparator + subName
 				if qe, exists := tracker.names[fqqn]; exists {
 					qe.subscriberRoles[role] = role
+					if da.IsRetained {
+						qe.isDraining = true
+					}
 				}
 			}
 		}
@@ -1030,15 +1034,27 @@ func (reconciler *BrokerServiceInstanceReconciler) processPendingEmpty(app *brok
 			reconciler.pendingEmptyAddresses[role] = make(map[string]bool)
 		}
 		for _, da := range pendingAddresses {
-			reconciler.pendingEmptyAddresses[role][da.Address] = true
+			if da.IsRetained {
+				for _, subName := range da.Subscriptions {
+					reconciler.pendingEmptyAddresses[role][da.Address+FQQNSeparator+subName] = true
+				}
+			} else {
+				reconciler.pendingEmptyAddresses[role][da.Address] = true
+			}
 		}
 		appStatus := broker.PendingEmptyAddressStatus{
 			App:      role,
 			Messages: make(map[string]int64),
 		}
 		for _, da := range pendingAddresses {
-			for fqqn, count := range da.MessageCounts {
-				appStatus.Messages[fqqn] = count
+			if len(da.MessageCounts) > 0 {
+				for fqqn, count := range da.MessageCounts {
+					appStatus.Messages[fqqn] = count
+				}
+			} else if da.IsRetained {
+				for _, subName := range da.Subscriptions {
+					appStatus.Messages[da.Address+FQQNSeparator+subName] = 0
+				}
 			}
 		}
 		reconciler.status.PendingEmpty = append(reconciler.status.PendingEmpty, appStatus)
@@ -1177,6 +1193,8 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 			qc := addrCfg.EnsureQueueConfig(queueKey)
 			qc.RoutingType = brokerproperties.RoutingTypeAnycast
 			qc.Address = addressKey
+			enabled := true
+			qc.Enabled = &enabled
 			grantQueueMetrics(queueKey)
 			hasQueues = true
 		}
@@ -1185,6 +1203,8 @@ func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *c
 			qc := addrCfg.EnsureQueueConfig(queueKey)
 			qc.RoutingType = brokerproperties.RoutingTypeMulticast
 			qc.Address = addressKey
+			enabled := !addr.isDraining
+			qc.Enabled = &enabled
 			grantQueueMetrics(queueKey)
 			hasQueues = true
 		}
@@ -1557,6 +1577,26 @@ func (reconciler *BrokerServiceInstanceReconciler) wasAppEverProvisioned(app *br
 	return false
 }
 
+// isSubscriptionDrainProvisioned checks whether the enabled=false config for
+// removed subscriptions has been deployed by verifying the subscription FQQNs
+// are already tracked in the instance's PendingEmpty status from a previous
+// reconcile. The AppsProvisioned condition (which compares the secret resource
+// version with the broker's applied version) then gates the Jolokia check.
+func (reconciler *BrokerServiceInstanceReconciler) isSubscriptionDrainProvisioned(appIdentity string, addressName string, subscriptions []string) bool {
+	for _, pe := range reconciler.instance.Status.PendingEmpty {
+		if pe.App == appIdentity {
+			for _, sub := range subscriptions {
+				fqqn := addressName + FQQNSeparator + sub
+				if _, tracked := pe.Messages[fqqn]; !tracked {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // detectDrainingAddresses compares the current spec addresses against the previously
 // deployed capabilities.json to find addresses that were removed. Each candidate is
 // annotated with whether its producers are still active in the deployed config.
@@ -1590,33 +1630,47 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 		}
 	}
 
-	// Find addresses in old config that are no longer in current spec
+	// Find addresses or subscriptions in old config that are no longer in current spec
 	appIdentity := AppIdentity(app)
 	appConsumerRole := consumerRole(appIdentity)
 	appProducerRole := producerRole(appIdentity)
 	var candidates []DrainingAddressInfo
 	for name, oldCfg := range oldCaps.AddressConfigurations {
-		if currentOwned[name] {
-			continue
-		}
-		dai := DrainingAddressInfo{Address: name}
+		isRetained := currentOwned[name]
+
+		dai := DrainingAddressInfo{Address: name, IsRetained: isRetained}
 		if addrRoles, ok := oldCaps.SecurityRoles[name]; ok {
 			if perms, ok := addrRoles[appConsumerRole]; ok && perms.Consume {
 				dai.HadConsumeRole = true
 			}
-			if perms, ok := addrRoles[appProducerRole]; ok && perms.Send {
-				dai.HasActiveProducers = true
+			if !isRetained {
+				if perms, ok := addrRoles[appProducerRole]; ok && perms.Send {
+					dai.HasActiveProducers = true
+				}
 			}
 		}
-		// Extract subscription queue names from the old config
+
 		if oldCfg.RoutingTypes == brokerproperties.RoutingTypeMulticast && oldCfg.QueueConfigs != nil {
 			for queueName, qc := range oldCfg.QueueConfigs {
-				if qc.RoutingType == brokerproperties.RoutingTypeMulticast && queueName != name {
+				if qc.RoutingType != brokerproperties.RoutingTypeMulticast || queueName == name {
+					continue
+				}
+				fqqn := name + FQQNSeparator + queueName
+				if _, exists := currentTracker.names[fqqn]; !exists {
 					dai.Subscriptions = append(dai.Subscriptions, queueName)
 				}
 			}
 			sort.Strings(dai.Subscriptions)
 		}
+
+		if isRetained && len(dai.Subscriptions) == 0 {
+			continue
+		}
+
+		if isRetained && !reconciler.isSubscriptionDrainProvisioned(appIdentity, name, dai.Subscriptions) {
+			dai.HasActiveProducers = true
+		}
+
 		candidates = append(candidates, dai)
 	}
 
@@ -1667,6 +1721,7 @@ type DrainingAddressInfo struct {
 	Subscriptions      []string         `json:"subscriptions,omitempty"`
 	HadConsumeRole     bool             `json:"-"`
 	HasActiveProducers bool             `json:"-"`
+	IsRetained         bool             `json:"-"`
 	MessageCounts      map[string]int64 `json:"-"`
 }
 

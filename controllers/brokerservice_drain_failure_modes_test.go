@@ -724,7 +724,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 	})
 
-	PIt("F3b keeps a removed subscription pending until its messages are consumed", func() {
+	It("keeps a removed subscription pending until its messages are consumed", func() {
 		if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 			return
 		}
@@ -768,6 +768,10 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		Eventually(func(g Gomega) {
 			current := &broker.BrokerService{}
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
+
+			if verbose {
+				fmt.Printf("\n Service Status: %v\n", current.Status)
+			}
 			var pending map[string]int64
 			for _, pe := range current.Status.PendingEmpty {
 				if pe.App == AppIdentity(&app) {
@@ -781,6 +785,153 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 
 		By("the removed subscriber can still drain its messages")
 		mqttConsume(ctx, ep, "fm-b", "orders", 5)
+	})
+
+	It("retained subscription keeps receiving while a sibling subscription is draining", Label("slow"), func() {
+		if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+			return
+		}
+
+		ctx := context.Background()
+		serviceName := NextSpecResourceName()
+		labels := map[string]string{"test": "fm-f3c"}
+		appName := NextSpecResourceName()
+		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
+		DeferCleanup(CleanupAppCerts, appName, defaultNamespace)
+		service := setupService(ctx, serviceName, labels)
+		DeferCleanup(forceRemove, ctx, &service)
+
+		app := setupApp(ctx, appName, labels, broker.BrokerAppSpec{
+			Capabilities: []broker.AppCapabilityType{{
+				ProducerOf: []broker.AddressRef{{Address: "events"}},
+				ConsumerOf: []broker.AddressRef{{
+					Address:       "events",
+					Subscriptions: []string{"kept.events", "removed.events"},
+				}},
+			}},
+		})
+		DeferCleanup(forceRemove, ctx, &app)
+		verifyProvisioned(ctx, serviceName, appName)
+		ep := setupMqttEndpoint(ctx, serviceName, appName)
+		DeferCleanup(cleanupMqttEndpoint, ep)
+
+		By("creating durable subscribers and seeding messages")
+		mqttSubscribe(ctx, ep, "kept", "events")
+		mqttSubscribe(ctx, ep, "removed", "events")
+		mqttProduce(ctx, ep, "events", 3)
+
+		By("starting a background producer that sends 1 message per second")
+		producerCtx, stopProducer := context.WithCancel(ctx)
+		var produced int32
+		go func() {
+			defer GinkgoRecover()
+			for {
+				select {
+				case <-producerCtx.Done():
+					return
+				case <-time.After(1 * time.Second):
+					conn, err := autopaho.NewConnection(producerCtx, autopaho.ClientConfig{
+						ServerUrls: []*url.URL{ep.serverURL},
+						TlsCfg:     ep.tlsConfig,
+						KeepAlive:  30,
+						ClientConfig: paho.ClientConfig{
+							ClientID: "continuous-producer",
+						},
+					})
+					if err != nil {
+						continue
+					}
+					connCtx, connCancel := context.WithTimeout(producerCtx, 10*time.Second)
+					if err := conn.AwaitConnection(connCtx); err != nil {
+						connCancel()
+						continue
+					}
+					connCancel()
+					_, err = conn.Publish(producerCtx, &paho.Publish{
+						Topic:   "events",
+						QoS:     1,
+						Payload: []byte(fmt.Sprintf("continuous-%d", atomic.AddInt32(&produced, 1))),
+					})
+					_ = conn.Disconnect(producerCtx)
+					if err != nil {
+						continue
+					}
+				}
+			}
+		}()
+		DeferCleanup(func() { stopProducer() })
+
+		By("removing subscription removed.events from the spec")
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerApp{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&app), current)).Should(Succeed())
+			current.Spec.Capabilities[0].ConsumerOf[0].Subscriptions = []string{"kept.events"}
+			g.Expect(k8sClient.Update(ctx, current)).Should(Succeed())
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		By("waiting for the removed subscription to appear in pending empty")
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
+
+			if verbose {
+				fmt.Printf("\n Service Status: %v\n", current.Status)
+			}
+			var pending map[string]int64
+			for _, pe := range current.Status.PendingEmpty {
+				if pe.App == AppIdentity(&app) {
+					pending = pe.Messages
+				}
+			}
+			g.Expect(pending).Should(HaveKey("events::removed.events"),
+				"removed subscription should be tracked as pending empty, status.pendingEmpty=%+v",
+				current.Status.PendingEmpty)
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		By("verifying the retained subscription keeps receiving messages from the continuous producer")
+		beforeCount := atomic.LoadInt32(&produced)
+		time.Sleep(5 * time.Second)
+		afterCount := atomic.LoadInt32(&produced)
+		Expect(afterCount).Should(BeNumerically(">", beforeCount),
+			"continuous producer should still be sending")
+
+		mqttConsume(ctx, ep, "kept", "events", int(afterCount)+3)
+
+		By("verifying removed.events is not growing — enabled=false stops new message routing")
+		Consistently(func(g Gomega) {
+			current := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
+			for _, pe := range current.Status.PendingEmpty {
+				if pe.App == AppIdentity(&app) {
+					count, ok := pe.Messages["events::removed.events"]
+					if ok {
+						if verbose {
+							fmt.Printf("\n BrokerService PendingEmpty: %v\n", current.Status.PendingEmpty)
+						}
+						g.Expect(count).Should(BeNumerically("<=", int64(15)),
+							"removed subscription should not receive continuous messages, got %d", count)
+					}
+				}
+			}
+		}, 20*time.Second, 2*time.Second).Should(Succeed())
+
+		stopProducer()
+
+		By("consuming all messages from removed.events to complete the drain")
+		mqttConsume(ctx, ep, "removed", "events", 3)
+
+		By("verifying removed.events is cleared from pending empty")
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
+			for _, pe := range current.Status.PendingEmpty {
+				if pe.App == AppIdentity(&app) {
+					g.Expect(pe.Messages).ShouldNot(HaveKey("events::removed.events"),
+						"removed subscription should be cleared after drain, status.pendingEmpty=%+v",
+						current.Status.PendingEmpty)
+				}
+			}
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 	})
 
 	PIt("F4 keeps the broker and its messages through a foreground cascade delete", func() {
