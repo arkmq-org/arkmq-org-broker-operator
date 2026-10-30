@@ -68,7 +68,8 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		oldSecretData := buildOldSecretData(app, "orders")
 		emptyTracker := newAddressTracker()
 
-		result := reconciler.detectDrainingAddresses(app, emptyTracker, oldSecretData)
+		result, err := reconciler.detectDrainingAddresses(app, emptyTracker, oldSecretData)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(BeNil(), "should skip drain when app was never provisioned")
 	})
 
@@ -89,7 +90,8 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		emptyTracker := newAddressTracker()
 
 		// Jolokia is unavailable so all candidates are preserved as draining
-		result := reconciler.detectDrainingAddresses(app, emptyTracker, oldSecretData)
+		result, err := reconciler.detectDrainingAddresses(app, emptyTracker, oldSecretData)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(result).NotTo(BeNil(), "should detect draining addresses when app was provisioned")
 		Expect(result).To(HaveLen(1))
 		Expect(result[0].Address).To(Equal("orders"))
@@ -113,7 +115,8 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		oldSecretData := buildOldSecretData(app, "orders")
 		emptyTracker := newAddressTracker()
 
-		result := reconciler.detectDrainingAddresses(app, emptyTracker, oldSecretData)
+		result, err := reconciler.detectDrainingAddresses(app, emptyTracker, oldSecretData)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(BeNil(), "should skip drain when only a different app was provisioned")
 	})
 
@@ -136,7 +139,8 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		emptyTracker := newAddressTracker()
 
 		// Jolokia is unavailable so all candidates are preserved as draining
-		result := reconciler.detectDrainingAddresses(app, emptyTracker, oldSecretData)
+		result, err := reconciler.detectDrainingAddresses(app, emptyTracker, oldSecretData)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(result).NotTo(BeNil(), "should detect drain when app was provisioned at any prior generation")
 	})
 
@@ -244,7 +248,8 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		tracker, err := reconciler.buildAddressTracker(app)
 		Expect(err).NotTo(HaveOccurred())
 
-		result := reconciler.detectDrainingAddresses(app, tracker, oldSecretData)
+		result, err := reconciler.detectDrainingAddresses(app, tracker, oldSecretData)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(HaveLen(1), "only removed address should be flagged")
 		Expect(result[0].Address).To(Equal("notifications"))
 	})
@@ -278,7 +283,8 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 
 		emptyTracker := newAddressTracker()
 
-		result := reconciler.detectDrainingAddresses(app, emptyTracker, oldSecretData)
+		result, err := reconciler.detectDrainingAddresses(app, emptyTracker, oldSecretData)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(HaveLen(1))
 		Expect(result[0].Address).To(Equal("events"))
 		Expect(result[0].Subscriptions).To(ConsistOf("client-a.events", "client-b.events"))
