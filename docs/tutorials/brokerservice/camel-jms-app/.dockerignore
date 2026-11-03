@@ -1,7 +1,0 @@
-# Exclude build output and IDE files — keep source for multi-stage build
-target/
-.idea/
-*.ipr
-*.iml
-*.iws
-.DS_Store
