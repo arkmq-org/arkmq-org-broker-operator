@@ -1328,7 +1328,7 @@ func (reconciler *BrokerAppInstanceReconciler) processStatus(reconcilerError err
 	// Update status if changed
 	if !reflect.DeepEqual(reconciler.instance.Status, *reconciler.status) {
 		reconciler.instance.Status = *reconciler.status
-		return resources.UpdateStatus(reconciler.Client, reconciler.instance)
+		return resources.UpdateStatusWithLog(reconciler.log, reconciler.Client, reconciler.instance)
 	}
 
 	return nil

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -15,15 +16,18 @@ import (
 )
 
 func Create(owner v1.Object, client client.Client, scheme *runtime.Scheme, clientObject client.Object) error {
-	reqLogger := ctrl.Log.WithName("k8s_actions").WithValues("Name", clientObject.GetName(), "Namespace", clientObject.GetNamespace())
+	return CreateWithLog(ctrl.Log.WithName("k8s_actions"), owner, client, scheme, clientObject)
+}
+
+func CreateWithLog(log logr.Logger, owner v1.Object, client client.Client, scheme *runtime.Scheme, clientObject client.Object) error {
+	reqLogger := log.WithValues("Name", clientObject.GetName(), "Namespace", clientObject.GetNamespace())
 	objectTypeString := reflect.TypeOf(clientObject.(runtime.Object)).String()
 	reqLogger.V(1).Info("Creating new " + objectTypeString)
 
-	SetOwnerAndController(owner, clientObject)
+	SetOwnerAndControllerWithLog(reqLogger, owner, clientObject)
 
 	var err error
 	if err = client.Create(context.TODO(), clientObject); err != nil {
-		// Add error detail for use later
 		reqLogger.Error(err, "Failed to create new "+objectTypeString)
 	} else {
 		reqLogger.V(1).Info("Created new " + objectTypeString)
@@ -36,7 +40,11 @@ func Create(owner v1.Object, client client.Client, scheme *runtime.Scheme, clien
 }
 
 func SetOwnerAndController(owner v1.Object, clientObject client.Object) {
-	reqLogger := ctrl.Log.WithName("k8s_actions").WithValues("Name", clientObject.GetName(), "Namespace", clientObject.GetNamespace())
+	SetOwnerAndControllerWithLog(ctrl.Log.WithName("k8s_actions"), owner, clientObject)
+}
+
+func SetOwnerAndControllerWithLog(log logr.Logger, owner v1.Object, clientObject client.Object) {
+	reqLogger := log.WithValues("Name", clientObject.GetName(), "Namespace", clientObject.GetNamespace())
 
 	gvk := owner.(runtime.Object).GetObjectKind().GroupVersionKind()
 	isController := true
@@ -52,7 +60,11 @@ func SetOwnerAndController(owner v1.Object, clientObject client.Object) {
 }
 
 func Retrieve(namespacedName types.NamespacedName, client client.Client, objectDefinition client.Object) error {
-	reqLogger := ctrl.Log.WithName("k8s_actions").WithValues("Name", namespacedName.Name)
+	return RetrieveWithLog(ctrl.Log.WithName("k8s_actions"), namespacedName, client, objectDefinition)
+}
+
+func RetrieveWithLog(log logr.Logger, namespacedName types.NamespacedName, client client.Client, objectDefinition client.Object) error {
+	reqLogger := log.WithValues("Name", namespacedName.Name)
 	objectTypeString := reflect.TypeOf(objectDefinition.(runtime.Object)).String()
 	reqLogger.V(1).Info("Retrieving " + objectTypeString)
 
@@ -60,8 +72,12 @@ func Retrieve(namespacedName types.NamespacedName, client client.Client, objectD
 }
 
 func Update(client client.Client, clientObject client.Object) error {
+	return UpdateWithLog(ctrl.Log.WithName("k8s_actions"), client, clientObject)
+}
 
-	reqLogger := ctrl.Log.WithName("k8s_actions").WithValues("Name", clientObject.GetName(), "Namespace", clientObject.GetNamespace())
+func UpdateWithLog(log logr.Logger, client client.Client, clientObject client.Object) error {
+
+	reqLogger := log.WithValues("Name", clientObject.GetName(), "Namespace", clientObject.GetNamespace())
 	objectTypeString := reflect.TypeOf(clientObject.(runtime.Object)).String()
 	reqLogger.V(1).Info("Updating "+objectTypeString, "resource version", clientObject.GetResourceVersion(), "gen", clientObject.GetGeneration(), "obj", clientObject)
 
@@ -76,7 +92,7 @@ func Update(client client.Client, clientObject client.Object) error {
 				// TODO: limit to just stateful set type
 				// "StatefulSet.apps is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'template', 'updateStrategy' and 'minReadySeconds' are forbidden"}
 				reqLogger.V(1).Info("Deleting on failed updating "+objectTypeString, "obj", clientObject, "Forbidden", err)
-				err = Delete(client, clientObject)
+				err = DeleteWithLog(reqLogger, client, clientObject)
 			} else if statusError.ErrStatus.Status == v1.StatusFailure &&
 				statusError.ErrStatus.Code == http.StatusConflict &&
 				statusError.ErrStatus.Reason == v1.StatusReasonConflict {
@@ -97,7 +113,11 @@ func Update(client client.Client, clientObject client.Object) error {
 }
 
 func UpdateStatus(client client.Client, clientObject client.Object) error {
-	reqLogger := ctrl.Log.WithName("k8s_actions").WithValues("Name", clientObject.GetName(), "Namespace", clientObject.GetNamespace())
+	return UpdateStatusWithLog(ctrl.Log.WithName("k8s_actions"), client, clientObject)
+}
+
+func UpdateStatusWithLog(log logr.Logger, client client.Client, clientObject client.Object) error {
+	reqLogger := log.WithValues("Name", clientObject.GetName(), "Namespace", clientObject.GetNamespace())
 	objectTypeString := reflect.TypeOf(clientObject.(runtime.Object)).String()
 	reqLogger.V(1).Info("Updating status "+objectTypeString, "obj", clientObject)
 
@@ -113,8 +133,12 @@ func UpdateStatus(client client.Client, clientObject client.Object) error {
 }
 
 func Delete(client client.Client, clientObject client.Object) error {
+	return DeleteWithLog(ctrl.Log.WithName("k8s_actions"), client, clientObject)
+}
 
-	reqLogger := ctrl.Log.WithName("k8s_actions").WithValues("Name", clientObject.GetName(), "Namespace", clientObject.GetNamespace())
+func DeleteWithLog(log logr.Logger, client client.Client, clientObject client.Object) error {
+
+	reqLogger := log.WithValues("Name", clientObject.GetName(), "Namespace", clientObject.GetNamespace())
 	objectTypeString := reflect.TypeOf(clientObject.(runtime.Object)).String()
 	reqLogger.V(2).Info("Deleting " + objectTypeString)
 
