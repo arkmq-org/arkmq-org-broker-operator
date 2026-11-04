@@ -669,7 +669,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 
 	if !reflect.DeepEqual(reconciler.instance.Status, *reconciler.status) {
 		reconciler.instance.Status = *reconciler.status
-		err = resources.UpdateStatus(reconciler.Client, reconciler.instance)
+		err = resources.UpdateStatusWithLog(reconciler.log, reconciler.Client, reconciler.instance)
 	}
 
 	servicemetrics.UpdateServiceMetrics(
