@@ -18,6 +18,7 @@ import (
 	"github.com/RHsyseng/operator-utils/pkg/resource/compare"
 	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources"
 	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources/containers"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources/httproutes"
 	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources/ingresses"
 	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources/persistentvolumeclaims"
 	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources/pods"
@@ -25,6 +26,7 @@ import (
 	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources/secrets"
 	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources/serviceports"
 	ss "github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources/statefulsets"
+	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/resources/tlsroutes"
 	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/certutil"
 	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/cr2jinja2"
@@ -55,6 +57,7 @@ import (
 
 	routev1 "github.com/openshift/api/route/v1"
 	netv1 "k8s.io/api/networking/v1"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -92,11 +95,15 @@ const (
 	ServiceTypePostfix       = "svc"
 	RouteTypePostfix         = "rte"
 	IngressTypePostfix       = "ing"
+	TLSRouteTypePostfix      = "tlsrte"
+	HTTPRouteTypePostfix     = "httprte"
 	RemoveKeySpecialValue    = "-"
 	javaArgsAppendEnvVarName = "JAVA_ARGS_APPEND"
 	debugArgsEnvVarName      = "DEBUG_ARGS"
 	javaOptsEnvVarName       = "JAVA_OPTS"
 	jdkJavaOptionsEnvVarName = "JDK_JAVA_OPTIONS"
+
+	PrometheusConfigFileName = "_prometheus_exporter_config"
 
 	ScaleDownConfigTrigger        = "HAPolicyConfiguration.scaleDownConfiguration.enabled=false"
 	ScaleDownConfigTriggerOn      = "HAPolicyConfiguration.scaleDownConfiguration.enabled=true"
@@ -118,26 +125,28 @@ var defApplyRule string = "merge_all"
 var yacfgProfileVersion = version.YacfgProfileVersionFromFullVersion[version.GetDefaultVersion()]
 
 type ActiveMQArtemisReconcilerImpl struct {
-	requestedResources map[reflect.Type]map[string]rtclient.Object
-	deployed           map[reflect.Type][]rtclient.Object
-	log                logr.Logger
-	customResource     *brokerv1beta1.ActiveMQArtemis
-	scheme             *runtime.Scheme
-	isOnOpenShift      bool
-	jolokiaEndpoints   []*jolokia_client.JkInfo
-	cachedBrokerStatus map[string]any
-	matchedTemplates   map[int]bool
+	requestedResources    map[reflect.Type]map[string]rtclient.Object
+	deployed              map[reflect.Type][]rtclient.Object
+	log                   logr.Logger
+	customResource        *brokerv1beta1.ActiveMQArtemis
+	scheme                *runtime.Scheme
+	isOnOpenShift         bool
+	isGatewayAPIAvailable bool
+	jolokiaEndpoints      []*jolokia_client.JkInfo
+	cachedBrokerStatus    map[string]any
+	matchedTemplates      map[int]bool
 }
 
 func NewActiveMQArtemisReconcilerImpl(customResource *brokerv1beta1.ActiveMQArtemis, parent *ActiveMQArtemisReconciler) *ActiveMQArtemisReconcilerImpl {
 	return &ActiveMQArtemisReconcilerImpl{
-		log:                parent.log,
-		customResource:     customResource,
-		scheme:             parent.Scheme,
-		requestedResources: make(map[reflect.Type]map[string]rtclient.Object),
-		isOnOpenShift:      parent.isOnOpenShift,
-		cachedBrokerStatus: make(map[string]any),
-		matchedTemplates:   make(map[int]bool),
+		log:                   parent.log,
+		customResource:        customResource,
+		scheme:                parent.Scheme,
+		requestedResources:    make(map[reflect.Type]map[string]rtclient.Object),
+		isOnOpenShift:         parent.isOnOpenShift,
+		isGatewayAPIAvailable: parent.isGatewayAPIAvailable,
+		cachedBrokerStatus:    make(map[string]any),
+		matchedTemplates:      make(map[int]bool),
 	}
 }
 
@@ -1049,7 +1058,7 @@ func (reconciler *ActiveMQArtemisReconcilerImpl) configureAcceptorsExposure(cust
 			reconciler.trackDesired(serviceDefinition)
 
 			if acceptor.Expose {
-				exposureDefinition := reconciler.ExposureDefinitionForCR(customResource, namespacedName, serviceRoutelabels, acceptor.SSLEnabled, acceptor.IngressHost, ordinalString, acceptor.Name, acceptor.ExposeMode)
+				exposureDefinition := reconciler.ExposureDefinitionForCR(customResource, namespacedName, serviceRoutelabels, acceptor.SSLEnabled, acceptor.IngressHost, ordinalString, acceptor.Name, acceptor.ExposeMode, acceptor.Port, acceptor.Gateway)
 				reconciler.trackDesired(exposureDefinition)
 			}
 		}
@@ -1065,12 +1074,17 @@ func (reconciler *ActiveMQArtemisReconcilerImpl) ServiceDefinitionForCR(serviceN
 	return svc.NewServiceDefinitionForCR(serviceName, client, nameSuffix, portNumber, selectorLabels, labels, serviceDefinition)
 }
 
-func (reconciler *ActiveMQArtemisReconcilerImpl) ExposureDefinitionForCR(customResource *brokerv1beta1.ActiveMQArtemis, namespacedName types.NamespacedName, labels map[string]string, passthroughTLS bool, ingressHost string, ordinalString string, itemName string, exposeMode *brokerv1beta1.ExposeMode) rtclient.Object {
+func (reconciler *ActiveMQArtemisReconcilerImpl) ExposureDefinitionForCR(customResource *brokerv1beta1.ActiveMQArtemis, namespacedName types.NamespacedName, labels map[string]string, passthroughTLS bool, ingressHost string, ordinalString string, itemName string, exposeMode *brokerv1beta1.ExposeMode, port int32, gateway *brokerv1beta1.GatewayConfig) rtclient.Object {
 
 	targetPortName := itemName + "-" + ordinalString
 	targetServiceName := customResource.Name + "-" + targetPortName + "-" + ServiceTypePostfix
 
 	exposeWithRoute := (exposeMode == nil && reconciler.isOnOpenShift) || (exposeMode != nil && *exposeMode == brokerv1beta1.ExposeModes.Route)
+	exposeWithGateway := exposeMode != nil && *exposeMode == brokerv1beta1.ExposeModes.Gateway
+
+	if exposeWithGateway {
+		return reconciler.gatewayRouteForExposure(customResource, namespacedName, labels, passthroughTLS, ingressHost, ordinalString, itemName, targetServiceName, port, gateway)
+	}
 
 	if exposeWithRoute {
 		reconciler.log.V(1).Info("creating route for "+targetPortName, "service", targetServiceName)
@@ -1093,6 +1107,34 @@ func (reconciler *ActiveMQArtemisReconcilerImpl) ExposureDefinitionForCR(customR
 		brokerHost := formatTemplatedString(customResource, ingressHost, ordinalString, itemName, IngressTypePostfix)
 		return ingresses.NewIngressForCRWithSSL(existing, namespacedName, labels, targetServiceName, targetPortName, passthroughTLS, customResource.Spec.IngressDomain, brokerHost, reconciler.isOnOpenShift)
 	}
+}
+
+// gatewayRouteForExposure builds the Gateway API route object for an acceptor,
+// connector or console exposed with exposeMode=gateway. It picks TLSRoute when
+// SSL is enabled (passthrough) and HTTPRoute otherwise.
+func (reconciler *ActiveMQArtemisReconcilerImpl) gatewayRouteForExposure(customResource *brokerv1beta1.ActiveMQArtemis, namespacedName types.NamespacedName, labels map[string]string, sslEnabled bool, ingressHost string, ordinalString string, itemName string, targetServiceName string, port int32, gateway *brokerv1beta1.GatewayConfig) rtclient.Object {
+
+	if sslEnabled {
+		routeName := targetServiceName + "-" + TLSRouteTypePostfix
+		brokerHost := formatTemplatedString(customResource, ingressHost, ordinalString, itemName, TLSRouteTypePostfix)
+		reconciler.log.V(1).Info("creating TLSRoute", "service", targetServiceName, "host", brokerHost)
+
+		var existing *gatewayv1.TLSRoute
+		if obj := reconciler.cloneOfDeployed(reflect.TypeOf(gatewayv1.TLSRoute{}), routeName); obj != nil {
+			existing = obj.(*gatewayv1.TLSRoute)
+		}
+		return tlsroutes.NewTLSRouteForCR(existing, namespacedName, labels, routeName, targetServiceName, port, brokerHost, gateway)
+	}
+
+	routeName := targetServiceName + "-" + HTTPRouteTypePostfix
+	brokerHost := formatTemplatedString(customResource, ingressHost, ordinalString, itemName, HTTPRouteTypePostfix)
+	reconciler.log.V(1).Info("creating HTTPRoute", "service", targetServiceName, "host", brokerHost)
+
+	var existing *gatewayv1.HTTPRoute
+	if obj := reconciler.cloneOfDeployed(reflect.TypeOf(gatewayv1.HTTPRoute{}), routeName); obj != nil {
+		existing = obj.(*gatewayv1.HTTPRoute)
+	}
+	return httproutes.NewHTTPRouteForCR(existing, namespacedName, labels, routeName, targetServiceName, port, brokerHost, gateway)
 }
 
 func (reconciler *ActiveMQArtemisReconcilerImpl) trackDesired(desired rtclient.Object) {
@@ -1228,6 +1270,14 @@ func extractResType(desired rtclient.Object) string {
 		{
 			return RouteTypePostfix
 		}
+	case *gatewayv1.TLSRoute:
+		{
+			return TLSRouteTypePostfix
+		}
+	case *gatewayv1.HTTPRoute:
+		{
+			return HTTPRouteTypePostfix
+		}
 	}
 	return "undefined-res-type"
 }
@@ -1243,7 +1293,7 @@ func extractOrdinal(desired rtclient.Object) string {
 			}
 
 		}
-	case *netv1.Ingress, *routev1.Route:
+	case *netv1.Ingress, *routev1.Route, *gatewayv1.TLSRoute, *gatewayv1.HTTPRoute:
 		{
 			podName, found := desired.GetLabels()[PodNameLabelKey]
 			if found {
@@ -1331,7 +1381,7 @@ func (reconciler *ActiveMQArtemisReconcilerImpl) configureConnectorsExposure(cus
 
 			if connector.Expose {
 
-				exposureDefinition := reconciler.ExposureDefinitionForCR(customResource, namespacedName, serviceRoutelabels, connector.SSLEnabled, connector.IngressHost, ordinalString, connector.Name, connector.ExposeMode)
+				exposureDefinition := reconciler.ExposureDefinitionForCR(customResource, namespacedName, serviceRoutelabels, connector.SSLEnabled, connector.IngressHost, ordinalString, connector.Name, connector.ExposeMode, connector.Port, connector.Gateway)
 
 				reconciler.trackDesired(exposureDefinition)
 			}
@@ -1379,8 +1429,13 @@ func (reconciler *ActiveMQArtemisReconcilerImpl) configureConsoleExposure(custom
 			reconciler.trackDesired(serviceDefinition)
 
 			exposeWithRoute := (console.ExposeMode == nil && reconciler.isOnOpenShift) || (console.ExposeMode != nil && *console.ExposeMode == brokerv1beta1.ExposeModes.Route)
+			exposeWithGateway := console.ExposeMode != nil && *console.ExposeMode == brokerv1beta1.ExposeModes.Gateway
 
-			if exposeWithRoute {
+			switch {
+			case exposeWithGateway:
+				gwRoute := reconciler.gatewayRouteForExposure(customResource, namespacedName, serviceRoutelabels, console.SSLEnabled, customResource.Spec.Console.IngressHost, ordinalString, consoleName, targetServiceName, portNumber, console.Gateway)
+				reconciler.trackDesired(gwRoute)
+			case exposeWithRoute:
 				reconciler.log.V(2).Info("routeDefinition for " + targetPortName)
 				var existing *routev1.Route = nil
 				obj := reconciler.cloneOfDeployed(reflect.TypeOf(routev1.Route{}), targetServiceName+"-"+RouteTypePostfix)
@@ -1391,7 +1446,7 @@ func (reconciler *ActiveMQArtemisReconcilerImpl) configureConsoleExposure(custom
 				routeDefinition := routes.NewRouteDefinitionForCR(existing, namespacedName, serviceRoutelabels, targetServiceName, targetPortName, console.SSLEnabled, customResource.Spec.IngressDomain, brokerHost)
 				reconciler.trackDesired(routeDefinition)
 
-			} else {
+			default:
 				reconciler.log.V(2).Info("ingress for " + targetPortName)
 				var existing *netv1.Ingress = nil
 				obj := reconciler.cloneOfDeployed(reflect.TypeOf(netv1.Ingress{}), targetServiceName+"-"+IngressTypePostfix)
@@ -1580,7 +1635,7 @@ func (reconciler *ActiveMQArtemisReconcilerImpl) CurrentDeployedResources(custom
 		reconciler.checkExistingPersistentVolumes(customResource, client)
 	}
 
-	reconciler.deployed, err = common.GetDeployedResources(customResource, client, reconciler.isOnOpenShift)
+	reconciler.deployed, err = common.GetDeployedResources(customResource, client, reconciler.isOnOpenShift, reconciler.isGatewayAPIAvailable)
 	if err != nil {
 		reqLogger.Error(err, "error getting deployed resources")
 		return
@@ -1918,7 +1973,7 @@ var orderedTypes *([]reflect.Type)
 
 func getOrderedTypeList() []reflect.Type {
 	if orderedTypes == nil {
-		types := make([]reflect.Type, 7)
+		types := make([]reflect.Type, 9)
 
 		// we want to create/update in this order
 		types[0] = reflect.TypeOf(corev1.Secret{})
@@ -1927,7 +1982,9 @@ func getOrderedTypeList() []reflect.Type {
 		types[3] = reflect.TypeOf(corev1.Service{})
 		types[4] = reflect.TypeOf(netv1.Ingress{})
 		types[5] = reflect.TypeOf(routev1.Route{})
-		types[6] = reflect.TypeOf(policyv1.PodDisruptionBudget{})
+		types[6] = reflect.TypeOf(gatewayv1.TLSRoute{})
+		types[7] = reflect.TypeOf(gatewayv1.HTTPRoute{})
+		types[8] = reflect.TypeOf(policyv1.PodDisruptionBudget{})
 		orderedTypes = &types
 	}
 	return *orderedTypes
@@ -2375,7 +2432,7 @@ func (reconciler *ActiveMQArtemisReconcilerImpl) PodTemplateSpecForCR(customReso
 		fmt.Fprintf(prometheus_config, "    name: artemis_total_produced_message_count\n")
 		fmt.Fprintf(prometheus_config, "    type: COUNTER\n")
 
-		brokerPropertiesMapData["_prometheus_exporter.yaml"] = prometheus_config.Bytes()
+		brokerPropertiesMapData[PrometheusConfigFileName] = prometheus_config.Bytes()
 
 		// Apply control plane overrides if they exist
 		if err := applyControlPlaneOverrides(customResource, client, brokerPropertiesMapData); err != nil {
@@ -2392,7 +2449,7 @@ func (reconciler *ActiveMQArtemisReconcilerImpl) PodTemplateSpecForCR(customReso
 		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, fmt.Sprintf("-javaagent:/opt/agents/jolokia.jar=host=$HOSTNAME,config=%s/_jolokia.config", mountPathRoot))
 
 		// install prometheus agent
-		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, fmt.Sprintf("-javaagent:/opt/agents/prometheus.jar=$HOSTNAME:8888:%s/_prometheus_exporter.yaml", mountPathRoot))
+		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, fmt.Sprintf("-javaagent:/opt/agents/prometheus.jar=$HOSTNAME:8888:%s/%s", mountPathRoot, PrometheusConfigFileName))
 
 		// non boot jar isolation classpath
 		additionalSystemPropsForRestricted = append(additionalSystemPropsForRestricted, "-classpath /opt/amq/lib/*:/opt/amq/lib/extra/*")

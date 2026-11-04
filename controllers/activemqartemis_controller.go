@@ -46,6 +46,7 @@ import (
 	"github.com/go-logr/logr"
 	routev1 "github.com/openshift/api/route/v1"
 	"github.com/pkg/errors"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	brokerv1beta1 "github.com/arkmq-org/activemq-artemis-operator/v2/api/v1beta1"
 	"github.com/arkmq-org/activemq-artemis-operator/v2/pkg/utils/common"
@@ -108,18 +109,20 @@ func (r *ActiveMQArtemisReconciler) AddBrokerConfigHandler(namespacedName types.
 // ActiveMQArtemisReconciler reconciles a ActiveMQArtemis object
 type ActiveMQArtemisReconciler struct {
 	rtclient.Client
-	Scheme        *runtime.Scheme
-	events        chan event.GenericEvent
-	log           logr.Logger
-	isOnOpenShift bool
+	Scheme                *runtime.Scheme
+	events                chan event.GenericEvent
+	log                   logr.Logger
+	isOnOpenShift         bool
+	isGatewayAPIAvailable bool
 }
 
-func NewActiveMQArtemisReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShift bool) *ActiveMQArtemisReconciler {
+func NewActiveMQArtemisReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShift bool, gatewayAPIAvailable bool) *ActiveMQArtemisReconciler {
 	return &ActiveMQArtemisReconciler{
-		isOnOpenShift: isOpenShift,
-		Client:        cluster.GetClient(),
-		Scheme:        cluster.GetScheme(),
-		log:           logger,
+		isOnOpenShift:         isOpenShift,
+		isGatewayAPIAvailable: gatewayAPIAvailable,
+		Client:                cluster.GetClient(),
+		Scheme:                cluster.GetScheme(),
+		log:                   logger,
 	}
 }
 
@@ -134,6 +137,7 @@ func NewActiveMQArtemisReconciler(cluster cluster.Cluster, logger logr.Logger, i
 //+kubebuilder:rbac:groups=apps,namespace=activemq-artemis-operator,resources=deployments;daemonsets;replicasets;statefulsets,verbs=get;list;watch;create;delete;update
 //+kubebuilder:rbac:groups=networking.k8s.io,namespace=activemq-artemis-operator,resources=ingresses,verbs=get;list;watch;create;delete;update
 //+kubebuilder:rbac:groups=route.openshift.io,namespace=activemq-artemis-operator,resources=routes;routes/custom-host;routes/status,verbs=get;list;watch;create;delete;update
+//+kubebuilder:rbac:groups=gateway.networking.k8s.io,namespace=activemq-artemis-operator,resources=httproutes;tlsroutes,verbs=get;list;watch;create;delete;update
 //+kubebuilder:rbac:groups=monitoring.coreos.com,namespace=activemq-artemis-operator,resources=servicemonitors,verbs=get;create
 //+kubebuilder:rbac:groups=apps,namespace=activemq-artemis-operator,resources=deployments/finalizers,verbs=update
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,namespace=activemq-artemis-operator,resources=roles;rolebindings,verbs=create;get;delete
@@ -424,7 +428,52 @@ func (r *ActiveMQArtemisReconcilerImpl) validateExposeModes(customResource *brok
 		}, false
 	}
 
+	for _, acceptor := range customResource.Spec.Acceptors {
+		if cond := validateGatewayExposure(acceptor.Expose, acceptor.ExposeMode, acceptor.Gateway, acceptor.IngressHost, r.isGatewayAPIAvailable, fmt.Sprintf(".Spec.Acceptors %q", acceptor.Name)); cond != nil {
+			return cond, false
+		}
+	}
+	for _, connector := range customResource.Spec.Connectors {
+		if cond := validateGatewayExposure(connector.Expose, connector.ExposeMode, connector.Gateway, connector.IngressHost, r.isGatewayAPIAvailable, fmt.Sprintf(".Spec.Connectors %q", connector.Name)); cond != nil {
+			return cond, false
+		}
+	}
+	if cond := validateGatewayExposure(console.Expose, console.ExposeMode, console.Gateway, console.IngressHost, r.isGatewayAPIAvailable, ".Spec.Console"); cond != nil {
+		return cond, false
+	}
+
 	return nil, false
+}
+
+func validateGatewayExposure(expose bool, exposeMode *brokerv1beta1.ExposeMode, gateway *brokerv1beta1.GatewayConfig, ingressHost string, gatewayAPIAvailable bool, fieldPath string) *metav1.Condition {
+	if !expose || exposeMode == nil || *exposeMode != brokerv1beta1.ExposeModes.Gateway {
+		return nil
+	}
+	if !gatewayAPIAvailable {
+		return &metav1.Condition{
+			Type:    brokerv1beta1.ValidConditionType,
+			Status:  metav1.ConditionFalse,
+			Reason:  brokerv1beta1.ValidConditionFailedInvalidExposeMode,
+			Message: fmt.Sprintf("%s has expose mode gateway but the gateway-api httproutes/tlsroutes resources are not served by the cluster", fieldPath),
+		}
+	}
+	if gateway == nil || gateway.ParentRef.Name == "" {
+		return &metav1.Condition{
+			Type:    brokerv1beta1.ValidConditionType,
+			Status:  metav1.ConditionFalse,
+			Reason:  brokerv1beta1.ValidConditionFailedInvalidExposeMode,
+			Message: fmt.Sprintf("%s has expose mode gateway but no gateway.parentRef.name provided", fieldPath),
+		}
+	}
+	if ingressHost == "" {
+		return &metav1.Condition{
+			Type:    brokerv1beta1.ValidConditionType,
+			Status:  metav1.ConditionFalse,
+			Reason:  brokerv1beta1.ValidConditionFailedInvalidIngressSettings,
+			Message: fmt.Sprintf("%s has expose mode gateway but no ingressHost provided (gateway routes require an explicit hostname; use template variables like $(ITEM_NAME)-$(BROKER_ORDINAL).$(INGRESS_DOMAIN))", fieldPath),
+		}
+	}
+	return nil
 }
 
 func (r *ActiveMQArtemisReconcilerImpl) validateEnvVars(customResource *brokerv1beta1.ActiveMQArtemis) (*metav1.Condition, bool) {
@@ -818,13 +867,16 @@ func (r *ActiveMQArtemisReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		builder.Owns(&routev1.Route{})
 	}
 
+	if r.isGatewayAPIAvailable {
+		builder.Owns(&gatewayv1.TLSRoute{}).Owns(&gatewayv1.HTTPRoute{})
+	}
+
 	var err error
 	controller, err := builder.Build(r)
 	if err == nil {
 		r.events = make(chan event.GenericEvent)
 		err = controller.Watch(
-			&source.Channel{Source: r.events},
-			&handler.EnqueueRequestForObject{},
+			source.Channel(r.events, &handler.EnqueueRequestForObject{}),
 		)
 	}
 	return err
