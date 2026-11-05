@@ -57,6 +57,7 @@ import (
 
 type BrokerServiceReconciler struct {
 	*ReconcilerLoop
+	brokerTLS *brokerproperties.BrokerTLSSpec
 }
 
 type BrokerServiceInstanceReconciler struct {
@@ -71,6 +72,11 @@ func NewBrokerServiceReconciler(client client.Client, scheme *runtime.Scheme, co
 	}
 	reconciler.ReconcilerLoopType = &reconciler
 	return &reconciler
+}
+
+func (r *BrokerServiceReconciler) WithBrokerTLS(tls *brokerproperties.BrokerTLSSpec) *BrokerServiceReconciler {
+	r.brokerTLS = tls
+	return r
 }
 
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices,verbs=get;list;watch;create;update;patch;delete
@@ -99,7 +105,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 	}
 
 	processor := BrokerServiceInstanceReconciler{
-		BrokerServiceReconciler: &BrokerServiceReconciler{ReconcilerLoop: localLoop},
+		BrokerServiceReconciler: &BrokerServiceReconciler{ReconcilerLoop: localLoop, brokerTLS: reconciler.brokerTLS},
 		instance:                instance,
 		status:                  instance.Status.DeepCopy(),
 	}
@@ -268,6 +274,12 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 		selectors.LabelBrokerPeerIndex: "0",
 	}
 	desired.Spec.Env = reconciler.instance.Spec.Env
+	if jvmArg := reconciler.brokerTLS.ServerProtocolsJVMArg(); jvmArg != "" {
+		desired.Spec.Env = append(desired.Spec.Env, corev1.EnvVar{
+			Name:  "JAVA_ARGS_APPEND",
+			Value: jvmArg,
+		})
+	}
 	desired.Spec.Resources = reconciler.instance.Spec.Resources
 
 	if reconciler.instance.Spec.Image != nil {
@@ -1031,21 +1043,29 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 	name := fmt.Sprintf("%d", port)
 	secretsBase := path.Join(common.SecretPathBase, AppPropertiesSecretName(reconciler.instance.Name))
 
+	var enabledCiphers, enabledProtocols string
+	if reconciler.brokerTLS != nil {
+		enabledCiphers = reconciler.brokerTLS.Ciphers
+		enabledProtocols = reconciler.brokerTLS.Protocols
+	}
+
 	acceptorJSON := &brokerproperties.AcceptorJSON{
 		AcceptorConfigurations: map[string]*brokerproperties.AcceptorConfiguration{
 			name: {
 				FactoryClassName: brokerproperties.NettyAcceptorFactory,
 				Params: brokerproperties.AcceptorParams{
-					SecurityDomain: realmName,
-					Host:           "${HOSTNAME}",
-					Port:           port,
-					SslEnabled:     true,
-					NeedClientAuth: true,
-					SaslMechanisms: brokerproperties.SaslExternal,
-					KeyStoreType:   brokerproperties.KeyStoreTypePEMCFG,
-					KeyStorePath:   path.Join(secretsBase, pemCfgkey),
-					TrustStoreType: brokerproperties.TrustStoreTypePEMCA,
-					TrustStorePath: trustStorePath,
+					SecurityDomain:      realmName,
+					Host:                "${HOSTNAME}",
+					Port:                port,
+					SslEnabled:          true,
+					NeedClientAuth:      true,
+					SaslMechanisms:      brokerproperties.SaslExternal,
+					KeyStoreType:        brokerproperties.KeyStoreTypePEMCFG,
+					KeyStorePath:        path.Join(secretsBase, pemCfgkey),
+					TrustStoreType:      brokerproperties.TrustStoreTypePEMCA,
+					TrustStorePath:      trustStorePath,
+					EnabledCipherSuites: enabledCiphers,
+					EnabledProtocols:    enabledProtocols,
 				},
 			},
 		},

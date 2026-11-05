@@ -1092,6 +1092,8 @@ func BeforeEachSpec() {
 		return
 	}
 
+	common.ResetOperatorCertCache()
+
 	specCount++
 
 	//Print running spec
