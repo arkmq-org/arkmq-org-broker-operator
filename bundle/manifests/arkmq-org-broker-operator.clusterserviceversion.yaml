@@ -275,8 +275,7 @@ metadata:
             "name": "ex-broker"
           },
           "spec": {
-            "image": "placeholder",
-            "persistenceEnabled": false
+            "image": "placeholder"
           },
           "status": {
             "conditions": []
@@ -6770,11 +6769,6 @@ spec:
         path: image
         x-descriptors:
         - urn:alm:descriptor:com.tectonic.ui:text
-      - description: If true, use a persistent volume via PVC for journal storage.
-        displayName: Persistence Enabled
-        path: persistenceEnabled
-        x-descriptors:
-        - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
       - description: Optional list of key=value properties that are applied to the
           broker configuration bean.
         displayName: Broker Properties
@@ -6849,6 +6843,15 @@ spec:
         path: env
       - displayName: Broker image
         path: image
+      - description: |-
+          JournalStorageClass is the name of the StorageClass to use when
+          provisioning the persistent volume for broker journal storage. Only used
+          when resources.limits[arkmq.org/journal-storage] is set. If empty, the
+          cluster default StorageClass is used.
+        displayName: Journal Storage Class
+        path: journalStorageClass
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:text
       - displayName: Resources
         path: resources
       statusDescriptors:

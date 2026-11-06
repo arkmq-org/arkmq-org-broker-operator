@@ -21,6 +21,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// ResourceJournalStorage is the resource key used in BrokerService
+// resources.limits to request a persistent volume for the broker journal.
+// Using a domain-prefixed key avoids conflict with standard Kubernetes
+// container resource keys.
+const ResourceJournalStorage corev1.ResourceName = "arkmq.org/journal-storage"
+
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
@@ -34,6 +40,14 @@ type BrokerServiceSpec struct {
 
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Broker image"
 	Image *string `json:"image,omitempty"`
+
+	// JournalStorageClass is the name of the StorageClass to use when
+	// provisioning the persistent volume for broker journal storage. Only used
+	// when resources.limits[arkmq.org/journal-storage] is set. If empty, the
+	// cluster default StorageClass is used.
+	// +optional
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Journal Storage Class",xDescriptors={"urn:alm:descriptor:com.tectonic.ui:text"}
+	JournalStorageClass string `json:"journalStorageClass,omitempty"`
 
 	// AppSelectorExpression is a CEL expression that determines which BrokerApps
 	// can deploy to this service.

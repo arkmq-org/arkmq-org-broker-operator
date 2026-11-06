@@ -27,7 +27,7 @@ var _ = Describe("MakeVolumes", func() {
 	})
 
 	It("mirrors the broker call site: persistent=true, one extra volume, one EPVC — asserts claim names and ordering", func() {
-		// Matches: brokervolumes.MakeVolumes(customResource.Name, customResource.Spec.PersistenceEnabled,
+		// Matches: brokervolumes.MakeVolumes(customResource.Name, customResource.Spec.Storage.Size != "",
 		//   customResource.Spec.ExtraVolumes, customResource.Spec.ExtraVolumeClaimTemplates)
 		extra := corev1.Volume{
 			Name: "cfg-vol",
