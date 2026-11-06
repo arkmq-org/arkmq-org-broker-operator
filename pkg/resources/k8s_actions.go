@@ -30,7 +30,7 @@ func CreateWithLog(log logr.Logger, owner v1.Object, client client.Client, schem
 	if err = client.Create(context.TODO(), clientObject); err != nil {
 		reqLogger.Error(err, "Failed to create new "+objectTypeString)
 	} else {
-		reqLogger.V(1).Info("Created new " + objectTypeString)
+		reqLogger.V(2).Info("Created new "+objectTypeString, "obj", clientObject)
 	}
 
 	if err != nil {
@@ -44,6 +44,9 @@ func SetOwnerAndController(owner v1.Object, clientObject client.Object) {
 }
 
 func SetOwnerAndControllerWithLog(log logr.Logger, owner v1.Object, clientObject client.Object) {
+	if owner == nil {
+		return
+	}
 	reqLogger := log.WithValues("Name", clientObject.GetName(), "Namespace", clientObject.GetNamespace())
 
 	gvk := owner.(runtime.Object).GetObjectKind().GroupVersionKind()

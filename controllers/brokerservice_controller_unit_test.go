@@ -216,54 +216,6 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		Expect(hasKeyContaining(secretS2.Data, appName)).To(BeTrue(), "S2 secret should contain app config after move")
 	})
 
-	It("error propagation", Label(unitLabel), func() {
-		scheme := NewServiceUnitTestScheme()
-
-		s1Name := "service1"
-		ns := "default"
-		s1 := &v1beta2.BrokerService{
-			ObjectMeta: metav1.ObjectMeta{Name: s1Name, Namespace: ns, UID: types.UID("uid-s1")},
-		}
-
-		interceptorFuncs := interceptor.Funcs{
-			List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-				if _, ok := list.(*corev1.SecretList); ok {
-					return fmt.Errorf("simulated list error")
-				}
-				return client.List(ctx, list, opts...)
-			},
-		}
-
-		builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(WithCerts(s1)...).WithStatusSubresource(s1).WithInterceptorFuncs(interceptorFuncs)
-		builder.WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
-			app := rawObj.(*v1beta2.BrokerApp)
-			if app.Status.Service != nil {
-				return []string{app.Status.Service.Key()}
-			}
-			return nil
-		})
-		cl := builder.Build()
-
-		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
-
-		reqS1 := ctrl.Request{NamespacedName: types.NamespacedName{Name: s1Name, Namespace: ns}}
-		_, err := r.Reconcile(context.TODO(), reqS1)
-
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("simulated list error"))
-
-		err = cl.Get(context.TODO(), reqS1.NamespacedName, s1)
-		Expect(err).To(BeNil())
-
-		Expect(meta.IsStatusConditionPresentAndEqual(s1.Status.Conditions, v1beta2.DeployedConditionType, metav1.ConditionUnknown)).To(BeTrue())
-		Expect(meta.IsStatusConditionFalse(s1.Status.Conditions, v1beta2.ReadyConditionType)).To(BeTrue())
-
-		validCond := meta.FindStatusCondition(s1.Status.Conditions, v1beta2.ValidConditionType)
-		Expect(validCond).NotTo(BeNil())
-		Expect(validCond.Status).To(Equal(metav1.ConditionTrue))
-		Expect(validCond.Reason).To(Equal(v1beta2.ValidConditionSuccessReason))
-	})
-
 	It("status update failure", Label(unitLabel), func() {
 		scheme := NewServiceUnitTestScheme()
 
@@ -1082,11 +1034,11 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		}
 
 		interceptorFuncs := interceptor.Funcs{
-			List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-				if _, ok := list.(*corev1.SecretList); ok {
-					return fmt.Errorf("simulated API list error")
+			Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*corev1.Secret); ok {
+					return fmt.Errorf("simulated API get Secret error")
 				}
-				return client.List(ctx, list, opts...)
+				return client.Get(ctx, key, obj, opts...)
 			},
 		}
 
@@ -1609,5 +1561,81 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 
 		Expect(queueOwners([]v1beta2.BrokerApp{second, first}, logr.Discard())).To(Equal(queueOwners([]v1beta2.BrokerApp{first, second}, logr.Discard())))
 		Expect(queueOwners([]v1beta2.BrokerApp{second, first}, logr.Discard())["SHARED"].OwnerApp).To(Equal("first"))
+	})
+
+	It("creates resources without owner references", Label(unitLabel), func() {
+		scheme := NewServiceUnitTestScheme()
+
+		ns := "default"
+		svcName := "no-owner-svc"
+		appName := "no-owner-app"
+
+		common.SetOperatorCASecretName("op_ca")
+		DeferCleanup(common.UnsetOperatorCASecretName)
+
+		common.SetOperatorNameSpace(ns)
+		DeferCleanup(common.UnsetOperatorNameSpace)
+
+		namespace := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: ns},
+		}
+
+		oc := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "op_ca", Namespace: ns},
+			Data:       map[string][]byte{"ca.pem": []byte("test")},
+		}
+
+		svc := &v1beta2.BrokerService{
+			ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns, UID: types.UID("uid-svc")},
+		}
+
+		app := &v1beta2.BrokerApp{
+			ObjectMeta: metav1.ObjectMeta{Name: appName, Namespace: ns, UID: types.UID("uid-app")},
+			Spec: v1beta2.BrokerAppSpec{
+				Addresses:    []v1beta2.AddressType{{Address: "orders"}},
+				Capabilities: []v1beta2.AppCapabilityType{{ProducerOf: []v1beta2.AddressRef{{Address: "orders"}}}},
+			},
+			Status: v1beta2.BrokerAppStatus{
+				Service: &v1beta2.BrokerServiceBindingStatus{
+					Name: svcName, Namespace: ns, Secret: "binding-secret", AssignedPort: 61616,
+				},
+			},
+		}
+
+		builder := fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(WithCerts(namespace, oc, svc, app)...).
+			WithStatusSubresource(svc, app, &v1beta2.Broker{})
+		builder.WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
+			a := rawObj.(*v1beta2.BrokerApp)
+			if a.Status.Service != nil {
+				return []string{a.Status.Service.Key()}
+			}
+			return nil
+		})
+		cl := builder.Build()
+
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+		_, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		appSecret := &corev1.Secret{}
+		err = cl.Get(context.TODO(), types.NamespacedName{Name: AppPropertiesSecretName(svcName), Namespace: ns}, appSecret)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(appSecret.GetOwnerReferences()).To(BeEmpty(),
+			"app properties secret should have no owner references")
+
+		brokerCR := &v1beta2.Broker{}
+		err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, brokerCR)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(brokerCR.GetOwnerReferences()).To(BeEmpty(),
+			"broker CR should have no owner references")
+
+		k8sService := &corev1.Service{}
+		err = cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, k8sService)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sService.GetOwnerReferences()).To(BeEmpty(),
+			"k8s service should have no owner references")
 	})
 })

@@ -64,6 +64,7 @@ var _ = Describe("service monitor unit", func() {
 		Expect(serviceMonitor.Spec.Endpoints[0].Port).To(Equal(monitoring.PortName))
 		Expect(service.Spec.Ports).To(ContainElement(corev1.ServicePort{
 			Name:       monitoring.PortName,
+			Protocol:   "TCP",
 			Port:       monitoring.Port,
 			TargetPort: intstr.FromInt32(monitoring.Port),
 		}))

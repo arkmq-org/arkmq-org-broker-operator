@@ -272,6 +272,9 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 
 	reqLogger.V(2).Info("Reconciler Processing...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation)
 	if err = processor.checkServiceAcceptance(); err == nil {
+		if processor.unbindingReason != "" {
+			processor.handleUnbinding(nil)
+		}
 		if err = processor.validateSpec(); err == nil {
 			if err = processor.verifyAppCert(); err == nil {
 				if err = processor.resolveBrokerService(); err == nil {
@@ -383,13 +386,13 @@ func (reconciler *BrokerAppInstanceReconciler) resolveBrokerService() error {
 		if desiredService == nil {
 			if reconciler.unbindingReason == "" {
 				reconciler.unbindingReason = "Bound service not found"
+				desiredService, needsServiceAssignment = reconciler.handleUnbinding(desiredService)
 			}
 		} else if reconciler.unbindingReason == "" {
-			reconciler.unbindingReason = reconciler.unbindingCheck(desiredService)
-		}
-
-		if reconciler.unbindingReason != "" {
-			desiredService, needsServiceAssignment = reconciler.handleUnbinding(desiredService)
+			if reason := reconciler.unbindingCheck(desiredService); reason != "" {
+				reconciler.unbindingReason = reason
+				desiredService, needsServiceAssignment = reconciler.handleUnbinding(desiredService)
+			}
 		}
 
 	} else {
@@ -456,7 +459,6 @@ func (reconciler *BrokerAppInstanceReconciler) checkServiceAcceptance() error {
 
 	if reconciler.instance.DeletionTimestamp != nil {
 		reconciler.unbindingReason = "Deletion pending"
-		reconciler.handleUnbinding(nil)
 		return nil
 	}
 
@@ -468,7 +470,6 @@ func (reconciler *BrokerAppInstanceReconciler) checkServiceAcceptance() error {
 	if err := reconciler.Get(context.TODO(), svcKey, service); err != nil {
 		if errors.IsNotFound(err) {
 			reconciler.unbindingReason = "Bound service not found"
-			reconciler.handleUnbinding(nil)
 			return nil
 		}
 		return NewTransientErrorWithCause(
@@ -479,13 +480,11 @@ func (reconciler *BrokerAppInstanceReconciler) checkServiceAcceptance() error {
 
 	if service.DeletionTimestamp != nil {
 		reconciler.unbindingReason = "Bound service is being deleted"
-		reconciler.handleUnbinding(service)
 		return nil
 	}
 
 	if matches, err := reconciler.matchesServiceSelector(service); !matches || err != nil {
 		reconciler.unbindingReason = "Service selector mismatch"
-		reconciler.handleUnbinding(service)
 	}
 	return nil
 }
@@ -1109,135 +1108,100 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressRefCapacity(service *
 	return nil
 }
 
-func (reconciler *BrokerAppInstanceReconciler) verifyCapabilityAddressType() (err error) {
+func validateAddressRef(ref broker.AddressRef, role string, index int) error {
+	if ref.Address == "" {
+		return fmt.Errorf("Spec.Capability.%s[%d].address must be specified", role, index)
+	}
+	if strings.Contains(ref.Address, FQQNSeparator) {
+		return fmt.Errorf("Spec.Capability.%s[%d].address should not use FQQN format (no '::'). Use plain address name", role, index)
+	}
+	if (ref.AppNamespace != "") != (ref.AppName != "") {
+		return fmt.Errorf("Spec.Capability.%s[%d]: appNamespace and appName must both be set (for cross-app reference) or both empty (for local reference)", role, index)
+	}
+	if ref.PubSub != nil && !*ref.PubSub && len(ref.Subscriptions) > 0 {
+		return fmt.Errorf("Spec.Capability.%s[%d]: pubSub cannot be false when subscriptions are specified", role, index)
+	}
+	return nil
+}
 
+func validateProducerOfRef(ref broker.AddressRef, index int) error {
+	if err := validateAddressRef(ref, "ProducerOf", index); err != nil {
+		return err
+	}
+	if isMulticastAddress(ref.PubSub, ref.Subscriptions) && len(ref.Subscriptions) > 0 {
+		return fmt.Errorf("Spec.Capability.ProducerOf[%d]: subscriptions cannot contain queue names (producers don't create queues). Use empty array or omit", index)
+	}
+	return nil
+}
+
+func validateConsumerOfRef(ref broker.AddressRef, index int) error {
+	if err := validateAddressRef(ref, "ConsumerOf", index); err != nil {
+		return err
+	}
+	if isMulticastAddress(ref.PubSub, ref.Subscriptions) {
+		if len(ref.Subscriptions) == 0 {
+			return fmt.Errorf("Spec.Capability.ConsumerOf[%d]: pubSub consumers must specify at least one subscription queue name", index)
+		}
+		for subIdx, queueName := range ref.Subscriptions {
+			if queueName == "" {
+				return fmt.Errorf("Spec.Capability.ConsumerOf[%d].subscriptions[%d]: queue name cannot be empty", index, subIdx)
+			}
+			if strings.Contains(queueName, FQQNSeparator) {
+				return fmt.Errorf("Spec.Capability.ConsumerOf[%d].subscriptions[%d]: queue name should not use FQQN format (no '::')", index, subIdx)
+			}
+		}
+	}
+	return nil
+}
+
+func validateCapabilityRoutingConsistency(capability broker.AppCapabilityType) error {
+	addressRoutingTypes := make(map[string]bool)
+
+	for _, ref := range capability.ProducerOf {
+		if ref.AppNamespace == "" && ref.AppName == "" {
+			if isMulticastAddress(ref.PubSub, ref.Subscriptions) {
+				if prevType, exists := addressRoutingTypes[ref.Address]; exists && !prevType {
+					return fmt.Errorf(
+						"address '%s' is referenced with both pubSub and non pubSub semantics in the same capability. "+
+							"Shared addresses must use consistent semantics",
+						ref.Address)
+				}
+				addressRoutingTypes[ref.Address] = true
+			}
+		}
+	}
+
+	for _, ref := range capability.ConsumerOf {
+		if ref.AppNamespace == "" && ref.AppName == "" {
+			isMulticast := isMulticastAddress(ref.PubSub, ref.Subscriptions)
+			if prevType, exists := addressRoutingTypes[ref.Address]; exists && prevType != isMulticast {
+				return fmt.Errorf(
+					"address '%s' is referenced with both pubSub and non pubSub semantics in the same capability. "+
+						"Shared addresses must use consistent semantics",
+					ref.Address)
+			}
+			addressRoutingTypes[ref.Address] = isMulticast
+		}
+	}
+
+	return nil
+}
+
+func (reconciler *BrokerAppInstanceReconciler) verifyCapabilityAddressType() error {
 	for _, capability := range reconciler.instance.Spec.Capabilities {
-		for index, addressRef := range capability.ProducerOf {
-			if addressRef.Address == "" {
-				err = fmt.Errorf("Spec.Capability.ProducerOf[%d].address must be specified", index)
-				break
-			}
-
-			if strings.Contains(addressRef.Address, FQQNSeparator) {
-				err = fmt.Errorf("Spec.Capability.ProducerOf[%d].address should not use FQQN format (no '::'). Use plain address name", index)
-				break
-			}
-
-			if addressRef.AppName == "" && addressRef.AppNamespace != "" {
-				err = fmt.Errorf("Spec.Capability.ProducerOf[%d]: appName is required when appNamespace is set", index)
-				break
-			}
-
-			if addressRef.PubSub != nil && !*addressRef.PubSub && len(addressRef.Subscriptions) > 0 {
-				err = fmt.Errorf("Spec.Capability.ProducerOf[%d]: pubSub cannot be false when subscriptions are specified", index)
-				break
-			}
-
-			if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-				if len(addressRef.Subscriptions) > 0 {
-					err = fmt.Errorf("Spec.Capability.ProducerOf[%d]: subscriptions cannot contain queue names (producers don't create queues). Use empty array or omit", index)
-					break
-				}
+		for i, ref := range capability.ProducerOf {
+			if err := validateProducerOfRef(ref, i); err != nil {
+				return NewValidationError(broker.ValidConditionAddressTypeError, "%v", err)
 			}
 		}
-		if err != nil {
-			break
-		}
-
-		for index, addressRef := range capability.ConsumerOf {
-			if addressRef.Address == "" {
-				err = fmt.Errorf("Spec.Capability.ConsumerOf[%d].address must be specified", index)
-				break
-			}
-
-			if strings.Contains(addressRef.Address, FQQNSeparator) {
-				err = fmt.Errorf("Spec.Capability.ConsumerOf[%d].address should not use FQQN format (no '::'). Use plain address name", index)
-				break
-			}
-
-			if addressRef.AppName == "" && addressRef.AppNamespace != "" {
-				err = fmt.Errorf("Spec.Capability.ConsumerOf[%d]: appName is required when appNamespace is set", index)
-				break
-			}
-
-			if addressRef.PubSub != nil && !*addressRef.PubSub && len(addressRef.Subscriptions) > 0 {
-				err = fmt.Errorf("Spec.Capability.ConsumerOf[%d]: pubSub cannot be false when subscriptions are specified", index)
-				break
-			}
-
-			if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-				if len(addressRef.Subscriptions) == 0 {
-					err = fmt.Errorf("Spec.Capability.ConsumerOf[%d]: pubSub consumers must specify at least one subscription queue name", index)
-					break
-				}
-
-				for subIdx, queueName := range addressRef.Subscriptions {
-					if queueName == "" {
-						err = fmt.Errorf("Spec.Capability.ConsumerOf[%d].subscriptions[%d]: queue name cannot be empty", index, subIdx)
-						break
-					}
-
-					if strings.Contains(queueName, FQQNSeparator) {
-						err = fmt.Errorf("Spec.Capability.ConsumerOf[%d].subscriptions[%d]: queue name should not use FQQN format (no '::')", index, subIdx)
-						break
-					}
-				}
-				if err != nil {
-					break
-				}
+		for i, ref := range capability.ConsumerOf {
+			if err := validateConsumerOfRef(ref, i); err != nil {
+				return NewValidationError(broker.ValidConditionAddressTypeError, "%v", err)
 			}
 		}
-		if err != nil {
-			break
+		if err := validateCapabilityRoutingConsistency(capability); err != nil {
+			return NewValidationError(broker.ValidConditionAddressTypeError, "%v", err)
 		}
-	}
-
-	if err == nil {
-		addressRoutingTypes := make(map[string]bool)
-
-		for _, capability := range reconciler.instance.Spec.Capabilities {
-			for _, addressRef := range capability.ProducerOf {
-				if addressRef.AppName == "" {
-					if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-						if prevType, exists := addressRoutingTypes[addressRef.Address]; exists && !prevType {
-							err = fmt.Errorf(
-								"address '%s' is referenced with both pubSub and non pubSub semantics in the same capability. "+
-									"Shared addresses must use consistent semantics",
-								addressRef.Address)
-							break
-						}
-						addressRoutingTypes[addressRef.Address] = true
-					}
-				}
-			}
-			if err != nil {
-				break
-			}
-
-			for _, addressRef := range capability.ConsumerOf {
-				if addressRef.AppName == "" {
-					isMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
-
-					if prevType, exists := addressRoutingTypes[addressRef.Address]; exists {
-						if prevType != isMulticast {
-							err = fmt.Errorf(
-								"address '%s' is referenced with both pubSub and non pubSub semantics in the same capability. "+
-									"Shared addresses must use consistent semantics",
-								addressRef.Address)
-							break
-						}
-					}
-					addressRoutingTypes[addressRef.Address] = isMulticast
-				}
-			}
-			if err != nil {
-				break
-			}
-		}
-	}
-
-	if err != nil {
-		return NewValidationError(broker.ValidConditionAddressTypeError, "%v", err)
 	}
 	return nil
 }

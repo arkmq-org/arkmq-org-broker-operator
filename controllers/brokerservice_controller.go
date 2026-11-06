@@ -29,6 +29,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/monitoring"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/appselector"
 	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
@@ -55,6 +56,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -67,6 +69,34 @@ type BrokerServiceInstanceReconciler struct {
 	instance              *broker.BrokerService
 	status                *broker.BrokerServiceStatus
 	pendingEmptyAddresses map[string]map[string]bool
+}
+
+func (reconciler BrokerServiceInstanceReconciler) InitDeployedByNamedKind() error {
+	reconciler.deployed = make(map[reflect.Type][]client.Object)
+	key := client.ObjectKeyFromObject(reconciler.instance)
+	for _, obj := range reconciler.getOrderedResources() {
+		key.Name = obj.GetName()
+		t := reflect.TypeOf(obj).Elem()
+		if err := reconciler.Get(context.TODO(), key, obj); err != nil {
+			if !errors.IsNotFound(err) {
+				return err
+			}
+		} else {
+			reconciler.deployed[t] = append(reconciler.deployed[t], obj)
+			reconciler.log.V(2).Info("Deployed", "Type", t, "Name", obj.GetName())
+		}
+	}
+	return nil
+}
+
+// we need to preserve all of our dependents to remain functional pending empty
+func (reconciler BrokerServiceInstanceReconciler) processFinalizers() bool {
+	instanceHasFinalizer := controllerutil.ContainsFinalizer(reconciler.instance, v1beta2.AddressesPendingEmptyFinalizer)
+	if !instanceHasFinalizer {
+		// delete all our desired
+		reconciler.desired = nil
+	}
+	return !instanceHasFinalizer
 }
 
 func NewBrokerServiceReconciler(client client.Client, scheme *runtime.Scheme, config *rest.Config, logger logr.Logger) *BrokerServiceReconciler {
@@ -89,7 +119,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 	reqLogger := reconciler.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "BrokerService")
 
 	instance := &broker.BrokerService{}
-	var err = reconciler.Get(context.TODO(), request.NamespacedName, instance)
+	var err = reconciler.Get(ctx, request.NamespacedName, instance)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			servicemetrics.DeleteServiceMetrics(request.Name, request.Namespace)
@@ -98,7 +128,8 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 		return ctrl.Result{}, err
 	}
 
-	if handled, err := reconciler.handlePendingEmptyFinalizer(ctx, instance); handled {
+	// protect our deletion till we know all apps have finalized
+	if err := reconciler.addPendingEmptyFinalizer(ctx, instance); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -117,9 +148,19 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 
 	// Validate spec first, before doing any work
 	if err = processor.validateSpec(); err == nil {
-		if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
+		if err = processor.InitDeployedByNamedKind(); err == nil {
 			if err = processor.processSpec(); err == nil {
-				err = processor.SyncDesiredWithDeployed(instance)
+				if err = processor.handlePendingEmptyFinalizerRemovalOnDelete(ctx, instance); err == nil {
+					instanceFinalizerRemoved := processor.processFinalizers()
+					if err = processor.SyncDesiredWithDeployed(nil); err == nil {
+						if instanceFinalizerRemoved {
+							if err = reconciler.Update(ctx, instance); err == nil {
+								reqLogger.V(1).Info("Finalizer removed")
+								servicemetrics.DeleteServiceMetrics(instance.Name, instance.Namespace)
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -138,7 +179,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 		return ctrl.Result{}, err
 	}
 	if statusErr != nil {
-		return ctrl.Result{}, fmt.Errorf("Failed to update status: error %v", statusErr)
+		return ctrl.Result{}, fmt.Errorf("Failed to update status: error %w", statusErr)
 	}
 	if retry {
 		return ctrl.Result{RequeueAfter: common.GetReconcileResyncPeriod()}, nil
@@ -148,65 +189,49 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 	return ctrl.Result{}, nil
 }
 
-func (reconciler *BrokerServiceReconciler) handlePendingEmptyFinalizer(ctx context.Context, instance *broker.BrokerService) (bool, error) {
-	if instance.DeletionTimestamp == nil || !controllerutil.ContainsFinalizer(instance, broker.AddressesPendingEmptyFinalizer) {
-		return false, nil
+// can be deleted once all deployed apps are finalized
+func (reconciler *BrokerServiceReconciler) handlePendingEmptyFinalizerRemovalOnDelete(ctx context.Context, instance *broker.BrokerService) (err error) {
+	if instance.DeletionTimestamp == nil {
+		// not yet deleted
+		return nil
 	}
 
+	if !controllerutil.ContainsFinalizer(instance, broker.AddressesPendingEmptyFinalizer) {
+		// complete
+		return nil
+	}
+
+	// fetch again to have a fresh view of finalizers
 	apps := &broker.BrokerAppList{}
 	svcKey := instance.Namespace + ":" + instance.Name
-	if listErr := reconciler.List(ctx, apps, client.MatchingFields{common.AppServiceBindingField: svcKey}); listErr != nil {
-		return true, listErr
+	if err = reconciler.List(ctx, apps, client.MatchingFields{common.AppServiceBindingField: svcKey}); err != nil {
+		return err
 	}
 	for i := range apps.Items {
 		if controllerutil.ContainsFinalizer(&apps.Items[i], broker.AddressesPendingEmptyFinalizer) {
-			return false, nil
+			return nil
 		}
 	}
 
+	// allow deletion to complete at end of reconcile
 	controllerutil.RemoveFinalizer(instance, broker.AddressesPendingEmptyFinalizer)
-	if updateErr := reconciler.Update(ctx, instance); updateErr != nil {
-		return true, updateErr
-	}
-	servicemetrics.DeleteServiceMetrics(instance.Name, instance.Namespace)
-	return true, nil
+	return nil
 }
 
-func (reconciler *BrokerServiceInstanceReconciler) ensureServicePendingEmptyFinalizer(apps *broker.BrokerAppList) error {
-	hasContentApps := false
-	for i := range apps.Items {
-		if hasOwnedContent(&apps.Items[i]) {
-			hasContentApps = true
-			break
+func (reconciler *BrokerServiceReconciler) addPendingEmptyFinalizer(ctx context.Context, brokerService *broker.BrokerService) (err error) {
+	if controllerutil.AddFinalizer(brokerService, broker.AddressesPendingEmptyFinalizer) {
+		if updateErr := reconciler.Update(ctx, brokerService); updateErr != nil {
+			err = fmt.Errorf("failed to add pending-empty finalizer to service %s: %v", brokerService.Name, updateErr)
 		}
 	}
-	if hasContentApps && controllerutil.AddFinalizer(reconciler.instance, broker.AddressesPendingEmptyFinalizer) {
-		if updateErr := reconciler.Update(context.TODO(), reconciler.instance); updateErr != nil {
-			return fmt.Errorf("failed to add pending-empty finalizer to service %s: %v", reconciler.instance.Name, updateErr)
-		}
-	} else if !hasContentApps && reconciler.instance.DeletionTimestamp == nil &&
-		controllerutil.RemoveFinalizer(reconciler.instance, broker.AddressesPendingEmptyFinalizer) {
-		if updateErr := reconciler.Update(context.TODO(), reconciler.instance); updateErr != nil {
-			return fmt.Errorf("failed to remove pending-empty finalizer from service %s: %v", reconciler.instance.Name, updateErr)
-		}
-	}
-	return nil
+	return err
 }
 
 // instance specifics for a reconciler loop
 func (r *BrokerServiceReconciler) getOwned() []client.ObjectList {
-	owned := []client.ObjectList{
-		&corev1.SecretList{},
-		&broker.BrokerList{},
-		&corev1.ServiceList{}}
-
-	// only when the kind is served: read.ListAll errors outright on one that is
-	// not, which would abort the reconcile
-	if monitoring.IsPrometheusAvailable(r.RESTMapper()) {
-		owned = append(owned, &monitoringv1.ServiceMonitorList{})
-	}
-
-	return owned
+	// due to finalizer needing dependents, we cannot use owner references and GC or they will
+	// get cascade deleted!
+	return []client.ObjectList{}
 }
 
 func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
@@ -216,6 +241,15 @@ func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
 		reflect.TypeOf(broker.Broker{}),
 		reflect.TypeOf(corev1.Service{}),
 		reflect.TypeOf(monitoringv1.ServiceMonitor{})}
+}
+
+func (r *BrokerServiceInstanceReconciler) getOrderedResources() []client.Object {
+	return []client.Object{
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: r.appPropertiesSecretName()}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: r.controlPlaneOverrideSecretName()}},
+		&broker.Broker{ObjectMeta: metav1.ObjectMeta{Name: r.instance.Name}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: r.instance.Name}},
+		&monitoringv1.ServiceMonitor{ObjectMeta: metav1.ObjectMeta{Name: monitoring.WiringName(r.instance.Name)}}}
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
@@ -367,10 +401,6 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts
 	boundApps := &broker.BrokerAppList{}
 	bindingKey := reconciler.instance.Namespace + ":" + reconciler.instance.Name
 	if err = reconciler.List(context.TODO(), boundApps, client.MatchingFields{common.AppServiceBindingField: bindingKey}); err != nil {
-		return nil, err
-	}
-
-	if err = reconciler.ensureServicePendingEmptyFinalizer(boundApps); err != nil {
 		return nil, err
 	}
 
@@ -738,6 +768,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processService() error {
 	desired.Labels = serviceLabels(reconciler.instance)
 	desired.Spec.Ports = []corev1.ServicePort{{
 		Name:       monitoring.PortName,
+		Protocol:   "TCP",
 		Port:       monitoring.Port,
 		TargetPort: intstr.FromInt32(monitoring.Port),
 	}}
@@ -845,14 +876,10 @@ func (r *BrokerServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&broker.BrokerService{}).
-		Owns(&broker.Broker{}).
-		Watches(&broker.BrokerApp{}, &appToServiceHandler{})
-
-	// see the note in the BrokerApp reconciler: Owns on a kind the API server does
-	// not serve takes the manager down at start
-	if monitoring.IsPrometheusAvailable(mgr.GetRESTMapper()) {
-		builder = builder.Owns(&monitoringv1.ServiceMonitor{})
-	}
+		Watches(&broker.BrokerApp{}, &appToServiceHandler{}).
+		Watches(&broker.Broker{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+			return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
+		}))
 
 	return builder.Complete(r)
 }
@@ -1055,9 +1082,13 @@ func (reconciler *BrokerServiceInstanceReconciler) processPendingEmpty(app *brok
 				for _, subName := range da.Subscriptions {
 					appStatus.Messages[da.Address+FQQNSeparator+subName] = 0
 				}
+			} else if len(da.MessageCounts) == 0 {
+				// pending config applied to remove producers
+				appStatus.Messages[da.Address] = -1
 			}
 		}
 		reconciler.status.PendingEmpty = append(reconciler.status.PendingEmpty, appStatus)
+		reconciler.log.V(2).Info("Pending empty", "Status", reconciler.status.PendingEmpty)
 		return false, nil
 	}
 
@@ -1609,6 +1640,7 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 	capKey := AppIdentityPrefixed(app, "capabilities.json")
 	oldCapData, exists := oldSecretData[capKey]
 	if !exists || len(oldCapData) == 0 {
+		reconciler.log.Info("provisioned app does not exist in capabilties!", "AppKey", capKey)
 		return nil, nil
 	}
 
@@ -1618,6 +1650,7 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 	}
 
 	if len(oldCaps.AddressConfigurations) == 0 {
+		reconciler.log.Info("no addresses", "AppKey", capKey)
 		return nil, nil
 	}
 
@@ -1753,6 +1786,8 @@ func evaluateAddressDrainStatus(reqLogger logr.Logger, artemis *mgmt.Artemis, ad
 	if err != nil {
 		reqLogger.V(1).Info("Pattern read for queue counts failed, marking all addresses as undrained", "error", err)
 	}
+
+	reqLogger.V(1).Info("queue counts", "json", queueCounts)
 
 	var queueCountMap map[string]int64
 	if len(queueCounts) > 0 {
