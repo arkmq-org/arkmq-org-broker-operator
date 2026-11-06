@@ -1824,6 +1824,7 @@ func equalObjectMeta(deployed, requested rtclient.Object) (isEqual bool) {
 	var pairs [][2]interface{}
 	pairs = append(pairs, [2]interface{}{deployed.GetLabels(), requested.GetLabels()})
 	pairs = append(pairs, [2]interface{}{deployed.GetAnnotations(), requested.GetAnnotations()})
+	pairs = append(pairs, [2]interface{}{deployed.GetFinalizers(), requested.GetFinalizers()})
 	isEqual = compare.EqualPairs(pairs)
 	return isEqual
 }

@@ -11,12 +11,23 @@ if [[ "${1:-}" == "--apply" ]]; then
   APPLY=true
 fi
 
-for KIND in bsvc bapp; do
+ALL_KINDS=(BrokerService BrokerApp)
+KINDS=()
+for KIND in "${ALL_KINDS[@]}"; do
+  if kubectl api-resources --no-headers 2>/dev/null | awk '{print $1}' | grep -qx "$KIND" \
+     || kubectl api-resources --no-headers 2>/dev/null | awk '{print $NF}' | grep -qx "$KIND"; then
+    KINDS+=("$KIND")
+  else
+    echo "Skipping unknown kind: $KIND"
+  fi
+done
+echo
+
+for KIND in "${KINDS[@]}"; do
   echo "=== $KIND ==="
   kubectl get "$KIND" --all-namespaces --no-headers | while read -r NAMESPACE NAME REST; do
     FINALIZERS=$(kubectl get "$KIND" "$NAME" -n "$NAMESPACE" -o jsonpath='{.metadata.finalizers}')
     if [[ -z "$FINALIZERS" || "$FINALIZERS" == "[]" ]]; then
-      echo "  $NAMESPACE/$NAME  (no finalizers)"
       continue
     fi
     echo "  $NAMESPACE/$NAME  finalizers=$FINALIZERS"

@@ -23,6 +23,7 @@ import (
 	"encoding/pem"
 	"math/big"
 	"path"
+	"reflect"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -996,5 +998,127 @@ var _ = Describe("broker controller unit", func() {
 			"Reconcile must requeue when ProcessBrokerStatus returns true "+
 				"(jolokia unreachable); the if block at broker_controller.go:148 "+
 				"captures this retry signal into requeueRequest")
+	})
+
+	It("sidecar secret preserves server-side annotations from deployed state", Label(unitLabel), func() {
+		ns := "test"
+		crName := "my-broker"
+		cr := &v1beta2.Broker{
+			ObjectMeta: v1.ObjectMeta{Name: crName, Namespace: ns},
+		}
+
+		s := runtime.NewScheme()
+		_ = v1beta2.AddToScheme(s)
+		_ = corev1.AddToScheme(s)
+		_ = rbacv1.AddToScheme(s)
+
+		cl := fake.NewClientBuilder().WithScheme(s).Build()
+
+		r := &BrokerReconciler{
+			Scheme: s,
+			log:    ctrl.Log,
+		}
+		reconciler := NewBrokerReconcilerImpl(cr, r)
+
+		sidecarName := crName + sidecarSecretSuffix
+		deployedSecret := &corev1.Secret{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      sidecarName,
+				Namespace: ns,
+				Annotations: map[string]string{
+					"kubectl.kubernetes.io/last-applied-configuration": `{"old":"data"}`,
+					"server-side-annotation":                           "preserved",
+				},
+				ResourceVersion: "42",
+			},
+			Data: map[string][]byte{"old-key": []byte("old-value")},
+		}
+
+		secretType := reflect.TypeFor[corev1.Secret]()
+		reconciler.deployed = map[reflect.Type][]client.Object{
+			secretType: {deployedSecret},
+		}
+
+		err := reconciler.ensureSidecarConfig(cl)
+		Expect(err).NotTo(HaveOccurred())
+
+		desired := reconciler.getFromDesired(reflect.TypeOf(&corev1.Secret{}), sidecarName)
+		Expect(desired).NotTo(BeNil(), "sidecar secret should be tracked as desired")
+
+		desiredSecret := desired.(*corev1.Secret)
+		Expect(desiredSecret.Annotations).To(HaveKeyWithValue(
+			"kubectl.kubernetes.io/last-applied-configuration", `{"old":"data"}`),
+			"server-side annotation should be preserved from deployed secret")
+		Expect(desiredSecret.Annotations).To(HaveKeyWithValue(
+			"server-side-annotation", "preserved"),
+			"custom server-side annotation should be preserved")
+
+		Expect(desiredSecret.Data).To(HaveKey(brokerStatusScriptKey),
+			"data should be overwritten with current sidecar config")
+		Expect(desiredSecret.Data).NotTo(HaveKey("old-key"),
+			"old data keys should not persist")
+	})
+
+	Context("equalObjectMeta", func() {
+		It("returns true when labels annotations and finalizers match", Label(unitLabel), func() {
+			deployed := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:        "s1",
+					Labels:      map[string]string{"app": "broker"},
+					Annotations: map[string]string{"note": "yes"},
+					Finalizers:  []string{"fin-a"},
+				},
+			}
+			requested := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:        "s1",
+					Labels:      map[string]string{"app": "broker"},
+					Annotations: map[string]string{"note": "yes"},
+					Finalizers:  []string{"fin-a"},
+				},
+			}
+			Expect(equalObjectMeta(deployed, requested)).To(BeTrue())
+		})
+
+		It("returns false when finalizers differ", Label(unitLabel), func() {
+			deployed := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:       "s1",
+					Finalizers: []string{"fin-a"},
+				},
+			}
+			requested := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:       "s1",
+					Finalizers: []string{"fin-b"},
+				},
+			}
+			Expect(equalObjectMeta(deployed, requested)).To(BeFalse(),
+				"differing finalizers should make equalObjectMeta return false")
+		})
+
+		It("returns true when both have empty finalizers", Label(unitLabel), func() {
+			deployed := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{Name: "s1"},
+			}
+			requested := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{Name: "s1"},
+			}
+			Expect(equalObjectMeta(deployed, requested)).To(BeTrue())
+		})
+
+		It("returns false when only one has finalizers", Label(unitLabel), func() {
+			deployed := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:       "s1",
+					Finalizers: []string{"fin-a"},
+				},
+			}
+			requested := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{Name: "s1"},
+			}
+			Expect(equalObjectMeta(deployed, requested)).To(BeFalse(),
+				"deployed has finalizer but requested does not")
+		})
 	})
 })

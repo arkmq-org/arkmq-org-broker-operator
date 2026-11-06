@@ -230,6 +230,63 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		Expect(hasConsume).Should(BeTrue(), "orders should retain consume permission")
 	})
 
+	It("records sentinel for producer-only address when drain config applied but no message counts", Label(unitLabel), func() {
+		ns := "default"
+		appName := "producer-drain-app"
+
+		app := NewBrokerApp(appName, ns).
+			WithProducerOf(NewAddressRef("orders").Build()).
+			Build()
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{
+			AppIdentityWithGeneration(app),
+		}
+		meta.SetStatusCondition(&reconciler.instance.Status.Conditions, metav1.Condition{
+			Type:   broker.AppsProvisionedConditionType,
+			Status: metav1.ConditionTrue,
+			Reason: broker.AppsProvisionedConditionSyncedReason,
+		})
+		Expect(reconciler.Client.Create(context.TODO(), app)).To(Succeed())
+
+		// Old secret has "notifications" with NO send role (simulating producers
+		// already revoked in a previous reconcile) and "orders" still active.
+		oldCaps := &brokerproperties.CapabilitiesJSON{
+			AddressConfigurations: map[string]*brokerproperties.AddressConfiguration{
+				"notifications": {RoutingTypes: brokerproperties.RoutingTypeAnycast},
+				"orders":        {RoutingTypes: brokerproperties.RoutingTypeAnycast},
+			},
+			SecurityRoles: map[string]map[string]*brokerproperties.RolePermissions{
+				"orders": {
+					producerRole(AppIdentity(app)): {Send: true},
+				},
+			},
+		}
+		oldData, err := json.Marshal(oldCaps)
+		Expect(err).NotTo(HaveOccurred())
+		capKey := AppIdentityPrefixed(app, "capabilities.json")
+		oldSecretData := map[string][]byte{capKey: oldData}
+
+		tracker, buildErr := reconciler.buildAddressTracker(app)
+		Expect(buildErr).NotTo(HaveOccurred())
+
+		skip, drainErr := reconciler.processPendingEmpty(app, tracker, oldSecretData)
+		Expect(drainErr).NotTo(HaveOccurred())
+		Expect(skip).To(BeFalse())
+
+		Expect(reconciler.status.PendingEmpty).NotTo(BeEmpty())
+		role := AppIdentity(app)
+		found := false
+		for _, pe := range reconciler.status.PendingEmpty {
+			if pe.App == role {
+				Expect(pe.Messages).To(HaveKeyWithValue("notifications", int64(-1)),
+					"removed producer-only address should have -1 sentinel when drain config applied but no message counts")
+				found = true
+			}
+		}
+		Expect(found).To(BeTrue(), "should have pending empty entry for the app")
+	})
+
 	It("does not flag address that is still in the current spec", Label(unitLabel), func() {
 		ns := "default"
 		appName := "retained-app"

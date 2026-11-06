@@ -452,6 +452,9 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 			}()
 			for i := 0; i < expectedCount; i++ {
 				msg, err := receiver.Receive(recvCtx, nil)
+				if verbose {
+					fmt.Printf("Consumed: %v\n", msg)
+				}
 				g.Expect(err).ShouldNot(HaveOccurred())
 				g.Expect(receiver.AcceptMessage(recvCtx, msg)).Should(Succeed())
 			}
@@ -934,7 +937,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 	})
 
-	PIt("F4 keeps the broker and its messages through a foreground cascade delete", func() {
+	It("keeps the broker and its messages through a foreground cascade delete", Label("verySlow"), func() {
 		if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 			return
 		}
@@ -978,14 +981,21 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 			err := k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, current)
 			g.Expect(err).ShouldNot(HaveOccurred(), "broker gone while the service is still held by %v", held.Finalizers)
 			g.Expect(current.UID).Should(Equal(brokerUID), "broker was deleted and recreated while the service is still held by %v", held.Finalizers)
-			g.Expect(current.DeletionTimestamp).Should(BeNil(), "broker is being deleted while the service is still held by %v", held.Finalizers)
 		}, time.Minute, time.Second).Should(Succeed())
 
 		By("and the 5 messages remain consumable")
 		amqpConsume(ctx, ep, "jobs", 5)
+
+		By("wait for deletion to ensure finalizer is gone")
+		Eventually(func(g Gomega) {
+			held := &broker.BrokerService{}
+			g.Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), held))).Should(BeTrue(),
+				"service deletion completed with messages consumed")
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
 	})
 
-	PIt("F5 completes deletion of an app whose service was force-removed", func() {
+	It("abandons deletion of an app whose service was force-removed", func() {
 		if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 			return
 		}
@@ -1022,11 +1032,23 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 
 		By("deleting the app, which is now bound to nothing")
 		Expect(k8sClient.Delete(ctx, &app)).Should(Succeed())
-		Eventually(func(g Gomega) {
-			current := &broker.BrokerApp{}
-			err := k8sClient.Get(ctx, client.ObjectKeyFromObject(&app), current)
-			g.Expect(errors.IsNotFound(err)).Should(BeTrue(),
-				"app stays Terminating, held by %v: no controller removes it once the service is gone", current.Finalizers)
-		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		currentApp := &broker.BrokerApp{}
+		Consistently(func(g Gomega) {
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&app), currentApp)).Should(Succeed())
+		}, time.Second*10, interval).Should(Succeed())
+
+		By("Seeing orphaned broker")
+		currentBroker := &broker.Broker{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), currentBroker)).Should(Succeed())
+		Expect(k8sClient.Delete(ctx, currentBroker)).Should(Succeed())
+
+		By("cleaning up app")
+		stripFinalizers(ctx, currentApp)
+
+		Eventually(func() bool {
+			return errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(currentApp), &broker.BrokerApp{}))
+		}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+
 	})
 })

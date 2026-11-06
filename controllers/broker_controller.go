@@ -123,7 +123,7 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 	err := r.Get(ctx, namespacedName, customResource)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
-			reqLogger.V(1).Info("Broker Controller Reconcile encountered a IsNotFound, for request NamespacedName " + namespacedName.String())
+			reqLogger.V(1).Info("Broker Controller Reconcile encountered a IsNotFound")
 			return result, nil
 		}
 		reqLogger.Error(err, "unable to retrieve the Broker")
@@ -2220,15 +2220,22 @@ func (reconciler *BrokerReconcilerImpl) ensureSidecarConfig(client rtclient.Clie
 	cr := reconciler.customResource
 	sidecarName := cr.Name + sidecarSecretSuffix
 
-	desired := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      sidecarName,
-			Namespace: cr.Namespace,
-		},
-		Data: map[string][]byte{
-			brokerStatusScriptKey: []byte(brokerStatusScript),
-			LoggingConfigKey:      templates.RenderLogging(),
-		},
+	var desired *corev1.Secret
+	obj := reconciler.cloneOfDeployed(reflect.TypeFor[corev1.Secret](), sidecarName)
+	if obj != nil {
+		desired = obj.(*corev1.Secret)
+	} else {
+		desired = &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      sidecarName,
+				Namespace: cr.Namespace,
+			},
+		}
+	}
+
+	desired.Data = map[string][]byte{
+		brokerStatusScriptKey: []byte(brokerStatusScript),
+		LoggingConfigKey:      templates.RenderLogging(),
 	}
 
 	reconciler.trackDesired(desired)
