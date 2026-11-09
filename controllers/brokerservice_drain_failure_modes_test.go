@@ -471,28 +471,6 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		}
 	}
 
-	// stand in for hack/clear-finalizers.sh on one resource
-	stripFinalizers := func(ctx context.Context, obj client.Object) {
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), obj)
-			if errors.IsNotFound(err) {
-				return
-			}
-			g.Expect(err).ShouldNot(HaveOccurred())
-			obj.SetFinalizers(nil)
-			err = k8sClient.Update(ctx, obj)
-			g.Expect(err == nil || errors.IsNotFound(err)).Should(BeTrue(), "%v", err)
-		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
-	}
-
-	forceRemove := func(ctx context.Context, obj client.Object) {
-		stripFinalizers(ctx, obj)
-		_ = k8sClient.Delete(ctx, obj)
-		Eventually(func() bool {
-			return errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), obj))
-		}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
-	}
-
 	setAppSelectorExpression := func(ctx context.Context, service *broker.BrokerService, expression string) {
 		Eventually(func(g Gomega) {
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(service), service)).Should(Succeed())
@@ -513,9 +491,9 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
 		DeferCleanup(CleanupAppCerts, appName, defaultNamespace)
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(forceRemove, ctx, &service)
+		DeferCleanup(ForceRemove, ctx, &service)
 		app := setupApp(ctx, appName, labels, jobsSpec())
-		DeferCleanup(forceRemove, ctx, &app)
+		DeferCleanup(ForceRemove, ctx, &app)
 		verifyProvisioned(ctx, serviceName, appName)
 		ep := setupMqttEndpoint(ctx, serviceName, appName)
 		DeferCleanup(cleanupMqttEndpoint, ep)
@@ -681,10 +659,10 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupAppCerts, tenantName, defaultNamespace)
 		DeferCleanup(CleanupAppCerts, controlName, defaultNamespace)
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(forceRemove, ctx, &service)
+		DeferCleanup(ForceRemove, ctx, &service)
 
 		tenant := setupApp(ctx, tenantName, labels, jobsSpec())
-		DeferCleanup(forceRemove, ctx, &tenant)
+		DeferCleanup(ForceRemove, ctx, &tenant)
 		control := setupApp(ctx, controlName, labels, broker.BrokerAppSpec{
 			Addresses: []broker.AddressType{{Address: "control"}},
 			Capabilities: []broker.AppCapabilityType{{
@@ -692,7 +670,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 				ConsumerOf: []broker.AddressRef{{Address: "control"}},
 			}},
 		})
-		DeferCleanup(forceRemove, ctx, &control)
+		DeferCleanup(ForceRemove, ctx, &control)
 		verifyProvisioned(ctx, serviceName, tenantName)
 		verifyProvisioned(ctx, serviceName, controlName)
 
@@ -739,7 +717,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
 		DeferCleanup(CleanupAppCerts, appName, defaultNamespace)
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(forceRemove, ctx, &service)
+		DeferCleanup(ForceRemove, ctx, &service)
 
 		app := setupApp(ctx, appName, labels, broker.BrokerAppSpec{
 			Capabilities: []broker.AppCapabilityType{{
@@ -750,7 +728,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 				}},
 			}},
 		})
-		DeferCleanup(forceRemove, ctx, &app)
+		DeferCleanup(ForceRemove, ctx, &app)
 		verifyProvisioned(ctx, serviceName, appName)
 		ep := setupMqttEndpoint(ctx, serviceName, appName)
 		DeferCleanup(cleanupMqttEndpoint, ep)
@@ -802,7 +780,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
 		DeferCleanup(CleanupAppCerts, appName, defaultNamespace)
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(forceRemove, ctx, &service)
+		DeferCleanup(ForceRemove, ctx, &service)
 
 		app := setupApp(ctx, appName, labels, broker.BrokerAppSpec{
 			Capabilities: []broker.AppCapabilityType{{
@@ -813,7 +791,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 				}},
 			}},
 		})
-		DeferCleanup(forceRemove, ctx, &app)
+		DeferCleanup(ForceRemove, ctx, &app)
 		verifyProvisioned(ctx, serviceName, appName)
 		ep := setupMqttEndpoint(ctx, serviceName, appName)
 		DeferCleanup(cleanupMqttEndpoint, ep)
@@ -949,9 +927,9 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
 		DeferCleanup(CleanupAppCerts, appName, defaultNamespace)
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(forceRemove, ctx, &service)
+		DeferCleanup(ForceRemove, ctx, &service)
 		app := setupApp(ctx, appName, labels, jobsSpec())
-		DeferCleanup(forceRemove, ctx, &app)
+		DeferCleanup(ForceRemove, ctx, &app)
 		verifyProvisioned(ctx, serviceName, appName)
 		ep := setupMqttEndpoint(ctx, serviceName, appName)
 		DeferCleanup(cleanupMqttEndpoint, ep)
@@ -1007,9 +985,9 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
 		DeferCleanup(CleanupAppCerts, appName, defaultNamespace)
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(forceRemove, ctx, &service)
+		DeferCleanup(ForceRemove, ctx, &service)
 		app := setupApp(ctx, appName, labels, jobsSpec())
-		DeferCleanup(forceRemove, ctx, &app)
+		DeferCleanup(ForceRemove, ctx, &app)
 		verifyProvisioned(ctx, serviceName, appName)
 		ep := setupMqttEndpoint(ctx, serviceName, appName)
 		DeferCleanup(cleanupMqttEndpoint, ep)
@@ -1025,7 +1003,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 		By("an admin accepts the loss and clears the service's finalizer only")
-		stripFinalizers(ctx, &service)
+		StripFinalizers(ctx, &service)
 		Eventually(func() bool {
 			return errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), &broker.BrokerService{}))
 		}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
@@ -1044,7 +1022,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		Expect(k8sClient.Delete(ctx, currentBroker)).Should(Succeed())
 
 		By("cleaning up app")
-		stripFinalizers(ctx, currentApp)
+		StripFinalizers(ctx, currentApp)
 
 		Eventually(func() bool {
 			return errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(currentApp), &broker.BrokerApp{}))

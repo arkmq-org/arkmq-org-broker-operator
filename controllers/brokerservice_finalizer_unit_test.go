@@ -185,11 +185,11 @@ var _ = Describe("brokerservice finalizer unit", Label(unitLabel), func() {
 
 			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
 			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).To(BeNil())
 
 			Expect(cl.Delete(context.TODO(), svc)).To(Succeed())
 
 			_, err = r.Reconcile(context.TODO(), req)
-
 			Expect(errors.IsNotFound(err)).To(BeTrue(),
 				"service should be fully deleted after finalizer removal")
 		})

@@ -1843,9 +1843,9 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow"), f
 		})
 	})
 
-	Context("cross-app producer should lose send permission when owner app drains", func() {
+	Context("cross-app mulitcast producer should not lose send permission when owner app drains", func() {
 
-		It("should drop cross-app ProducerOf send permission during drain and clean up after deletion", func() {
+		It("should not drop cross-app multicast ProducerOf send permission during drain and clean up after deletion", func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -1931,13 +1931,13 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow"), f
 				g.Expect(drainApp.Finalizers).Should(ContainElement(broker.AddressesPendingEmptyFinalizer))
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-			By("verifying producer app's send permission is dropped during drain")
+			By("verifying producer app's send permission not dropped during drain")
 			Eventually(func(g Gomega) {
 				secret := &corev1.Secret{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: defaultNamespace}, secret)).Should(Succeed())
 				capData, found := secret.Data[producerConfigKey]
 				g.Expect(found).Should(BeTrue(), "producer capabilities should still exist")
-				g.Expect(string(capData)).ShouldNot(ContainSubstring(`"send":true`),
+				g.Expect(string(capData)).Should(ContainSubstring(`"send":true`),
 					"cross-app producer should lose send permission when owner is pending empty")
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
@@ -1950,6 +1950,16 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow"), f
 				g.Expect(found).Should(BeTrue(), "owner capabilities should be preserved during drain")
 				g.Expect(string(capData)).Should(ContainSubstring(`"consume":true`),
 					"owner should retain consume permission during drain")
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("verifying consumer app sub is disabled during drain")
+			Eventually(func(g Gomega) {
+				secret := &corev1.Secret{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: defaultNamespace}, secret)).Should(Succeed())
+				capData, found := secret.Data[ownerConfigKey]
+				g.Expect(found).Should(BeTrue(), "owner capabilities should be preserved during drain")
+				g.Expect(string(capData)).Should(ContainSubstring(`"enabled":false`),
+					"sub disabled during drain")
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("consuming messages via MQTT to allow drain to complete")

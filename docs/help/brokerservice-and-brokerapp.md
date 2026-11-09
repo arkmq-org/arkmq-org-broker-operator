@@ -411,14 +411,22 @@ The BrokerService status includes a `pendingEmpty` field that lists which apps s
 ```yaml
 status:
   pendingEmpty:
-    - app: orders/order-service@3
+    - app: orders/order-service
       messages:
         ORDERS.NEW::ORDERS.NEW: 42
 ```
 
 While addresses are pending empty, the app's generation in `provisionedApps` stays at the value from before the removal. It advances to the current generation only once all pending addresses are drained. This lets external observers distinguish between a fully-applied generation and one still waiting for messages to be consumed.
 
-On the BrokerApp side, the `Deployed` condition message includes the addresses that are pending empty:
+On the BrokerApp side, the `Deployed` condition reason changes to `Unbinding` and the message lists the addresses that are pending empty. If the app was already provisioned on the broker, the condition remains `True` while consumers drain the remaining messages:
+
+```
+Deployed: True
+Reason:   Unbinding
+Message:  addresses pending empty: ORDERS.NEW::ORDERS.NEW
+```
+
+If the app was not yet provisioned (or its service is no longer found), the condition is `False`:
 
 ```
 Deployed: False

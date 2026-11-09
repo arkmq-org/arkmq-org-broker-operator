@@ -294,7 +294,7 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 
 	if processor.unbindingReason != "" && processor.status.Service != nil {
 		if statusErr != nil {
-			return ctrl.Result{}, fmt.Errorf("Failed to update status: error %v", statusErr)
+			return ctrl.Result{}, fmt.Errorf("failed to update status: error %v", statusErr)
 		}
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
@@ -1115,8 +1115,8 @@ func validateAddressRef(ref broker.AddressRef, role string, index int) error {
 	if strings.Contains(ref.Address, FQQNSeparator) {
 		return fmt.Errorf("Spec.Capability.%s[%d].address should not use FQQN format (no '::'). Use plain address name", role, index)
 	}
-	if (ref.AppNamespace != "") != (ref.AppName != "") {
-		return fmt.Errorf("Spec.Capability.%s[%d]: appNamespace and appName must both be set (for cross-app reference) or both empty (for local reference)", role, index)
+	if ref.AppName == "" && ref.AppNamespace != "" {
+		return fmt.Errorf("Spec.Capability.%s[%d]: appName is required when appNamespace is set", role, index)
 	}
 	if ref.PubSub != nil && !*ref.PubSub && len(ref.Subscriptions) > 0 {
 		return fmt.Errorf("Spec.Capability.%s[%d]: pubSub cannot be false when subscriptions are specified", role, index)

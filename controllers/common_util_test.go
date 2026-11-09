@@ -1405,3 +1405,25 @@ func FromUnstructuredToRawExtension(u *unstructured.Unstructured) runtime.RawExt
 	}
 	return runtime.RawExtension{Raw: rawBytes}
 }
+
+// stand in for hack/clear-finalizers.sh on one resource
+func StripFinalizers(ctx context.Context, obj client.Object) {
+	Eventually(func(g Gomega) {
+		err := k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		if errors.IsNotFound(err) {
+			return
+		}
+		g.Expect(err).ShouldNot(HaveOccurred())
+		obj.SetFinalizers(nil)
+		err = k8sClient.Update(ctx, obj)
+		g.Expect(err == nil || errors.IsNotFound(err)).Should(BeTrue(), "%v", err)
+	}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+}
+
+func ForceRemove(ctx context.Context, obj client.Object) {
+	StripFinalizers(ctx, obj)
+	_ = k8sClient.Delete(ctx, obj)
+	Eventually(func() bool {
+		return errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), obj))
+	}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+}
