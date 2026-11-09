@@ -1638,4 +1638,102 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		Expect(k8sService.GetOwnerReferences()).To(BeEmpty(),
 			"k8s service should have no owner references")
 	})
+
+	Context("CEL Expression Validation", func() {
+		var (
+			ns      string
+			svcName string
+		)
+
+		BeforeEach(func() {
+			ns = "default"
+			svcName = "cel-test-service"
+
+			common.SetOperatorCASecretName("op_ca")
+			DeferCleanup(common.UnsetOperatorCASecretName)
+
+			common.SetOperatorNameSpace(ns)
+			DeferCleanup(common.UnsetOperatorNameSpace)
+		})
+
+		reconcileService := func(svc *v1beta2.BrokerService) *v1beta2.BrokerService {
+			scheme := NewServiceUnitTestScheme()
+			builder := fake.NewClientBuilder().WithScheme(scheme).
+				WithObjects(WithCerts(
+					&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
+					svc,
+				)...).
+				WithStatusSubresource(svc)
+			builder.WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
+				a := rawObj.(*v1beta2.BrokerApp)
+				if a.Status.Service != nil {
+					return []string{a.Status.Service.Key()}
+				}
+				return nil
+			})
+			cl := builder.Build()
+
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &v1beta2.BrokerService{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updated)).To(Succeed())
+			return updated
+		}
+
+		It("sets Valid=False when appSelectorExpression has syntax error", func() {
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns, UID: types.UID("uid-cel-1")},
+				Spec: v1beta2.BrokerServiceSpec{
+					AppSelectorExpression: `app.metadata.namespace ==`,
+				},
+			}
+
+			updated := reconcileService(svc)
+
+			validCondition := meta.FindStatusCondition(updated.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCondition).NotTo(BeNil())
+			Expect(validCondition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(validCondition.Reason).To(Equal(v1beta2.ValidConditionSpecSelectorError))
+			Expect(validCondition.Message).To(ContainSubstring("invalid appSelectorExpression"))
+			Expect(validCondition.Message).To(ContainSubstring("failed to compile CEL expression"))
+		})
+
+		It("sets Valid=False when appSelectorExpression returns non-boolean", func() {
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns, UID: types.UID("uid-cel-2")},
+				Spec: v1beta2.BrokerServiceSpec{
+					AppSelectorExpression: `app.metadata.namespace`,
+				},
+			}
+
+			updated := reconcileService(svc)
+
+			validCondition := meta.FindStatusCondition(updated.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCondition).NotTo(BeNil())
+			Expect(validCondition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(validCondition.Reason).To(Equal(v1beta2.ValidConditionSpecSelectorError))
+			Expect(validCondition.Message).To(ContainSubstring("invalid appSelectorExpression"))
+			Expect(validCondition.Message).To(ContainSubstring("must return boolean"))
+		})
+
+		It("sets Valid=True when appSelectorExpression is valid", func() {
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns, UID: types.UID("uid-cel-3")},
+				Spec: v1beta2.BrokerServiceSpec{
+					AppSelectorExpression: `app.metadata.namespace.startsWith("team-")`,
+				},
+			}
+
+			updated := reconcileService(svc)
+
+			validCondition := meta.FindStatusCondition(updated.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCondition).NotTo(BeNil())
+			Expect(validCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(validCondition.Reason).To(Equal(v1beta2.ValidConditionSuccessReason))
+		})
+	})
 })

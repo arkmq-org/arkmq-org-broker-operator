@@ -29,7 +29,6 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/monitoring"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
-	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/appselector"
 	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
@@ -66,9 +65,9 @@ type BrokerServiceReconciler struct {
 
 type BrokerServiceInstanceReconciler struct {
 	*BrokerServiceReconciler
-	instance              *broker.BrokerService
-	status                *broker.BrokerServiceStatus
-	pendingEmptyAddresses map[string]map[string]bool
+	instance          *broker.BrokerService
+	status            *broker.BrokerServiceStatus
+	drainingAddresses map[string]map[string]bool
 }
 
 func (reconciler BrokerServiceInstanceReconciler) InitDeployedByNamedKind() error {
@@ -91,7 +90,7 @@ func (reconciler BrokerServiceInstanceReconciler) InitDeployedByNamedKind() erro
 
 // we need to preserve all of our dependents to remain functional pending empty
 func (reconciler BrokerServiceInstanceReconciler) processFinalizers() bool {
-	instanceHasFinalizer := controllerutil.ContainsFinalizer(reconciler.instance, v1beta2.AddressesPendingEmptyFinalizer)
+	instanceHasFinalizer := controllerutil.ContainsFinalizer(reconciler.instance, broker.AddressesPendingEmptyFinalizer)
 	if !instanceHasFinalizer {
 		// delete all our desired
 		reconciler.desired = nil
@@ -179,7 +178,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 		return ctrl.Result{}, err
 	}
 	if statusErr != nil {
-		return ctrl.Result{}, fmt.Errorf("Failed to update status: error %w", statusErr)
+		return ctrl.Result{}, fmt.Errorf("failed to update status: error %w", statusErr)
 	}
 	if retry {
 		return ctrl.Result{RequeueAfter: common.GetReconcileResyncPeriod()}, nil
@@ -219,7 +218,7 @@ func (reconciler *BrokerServiceReconciler) handlePendingEmptyFinalizerRemovalOnD
 }
 
 func (reconciler *BrokerServiceReconciler) addPendingEmptyFinalizer(ctx context.Context, brokerService *broker.BrokerService) (err error) {
-	if controllerutil.AddFinalizer(brokerService, broker.AddressesPendingEmptyFinalizer) {
+	if brokerService.DeletionTimestamp == nil && controllerutil.AddFinalizer(brokerService, broker.AddressesPendingEmptyFinalizer) {
 		if updateErr := reconciler.Update(ctx, brokerService); updateErr != nil {
 			err = fmt.Errorf("failed to add pending-empty finalizer to service %s: %v", brokerService.Name, updateErr)
 		}
@@ -244,12 +243,17 @@ func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
 }
 
 func (r *BrokerServiceInstanceReconciler) getOrderedResources() []client.Object {
-	return []client.Object{
+	list := []client.Object{
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: r.appPropertiesSecretName()}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: r.controlPlaneOverrideSecretName()}},
 		&broker.Broker{ObjectMeta: metav1.ObjectMeta{Name: r.instance.Name}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: r.instance.Name}},
-		&monitoringv1.ServiceMonitor{ObjectMeta: metav1.ObjectMeta{Name: monitoring.WiringName(r.instance.Name)}}}
+	}
+
+	if monitoring.IsPrometheusAvailable(r.RESTMapper()) {
+		list = append(list, &monitoringv1.ServiceMonitor{ObjectMeta: metav1.ObjectMeta{Name: monitoring.WiringName(r.instance.Name)}})
+	}
+	return list
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
@@ -429,7 +433,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts
 			break
 		}
 		var pendingEmptyComplete bool
-		pendingEmptyComplete, err = reconciler.processPendingEmpty(&app, tracker, previousSecretData)
+		pendingEmptyComplete, err = reconciler.processAddressDrain(&app, tracker, previousSecretData)
 		if err != nil {
 			reconciler.log.Error(err, "failed to process pending empty for app", "app", app.Name)
 			break
@@ -715,24 +719,6 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 	return err, retry
 }
 
-// appName returns the formatted name of an app for logging (namespace/name).
-func appName(app *broker.BrokerApp) string {
-	return app.Namespace + "/" + app.Name
-}
-
-// serviceName returns the formatted name of a service for logging (namespace/name).
-func serviceName(service *broker.BrokerService) string {
-	return service.Namespace + "/" + service.Name
-}
-
-// getBindingValue returns the string value of a service binding, or "<none>" if nil.
-func getBindingValue(service *broker.BrokerServiceBindingStatus) string {
-	if service == nil {
-		return "<none>"
-	}
-	return service.Key()
-}
-
 func isAppUnbinding(app *broker.BrokerApp) bool {
 	deployedCond := meta.FindStatusCondition(app.Status.Conditions, broker.DeployedConditionType)
 	return deployedCond != nil && deployedCond.Reason == broker.DeployedConditionUnbindingReason
@@ -925,7 +911,7 @@ func (t *AddressTracker) track(address *broker.AddressRef) *AddressConfig {
 	return entry
 }
 
-func (t *AddressTracker) trackAddressType(addr *broker.AddressType) *AddressConfig {
+func (t *AddressTracker) trackAddressType(addr *broker.AddressType) {
 	localAddr := &broker.AddressRef{
 		Address: addr.Address,
 	}
@@ -937,7 +923,6 @@ func (t *AddressTracker) trackAddressType(addr *broker.AddressType) *AddressConf
 			fqqnEntry.isMulticast = true
 		}
 	}
-	return addressConfig
 }
 
 // buildAddressTracker creates an AddressTracker populated from the app's current
@@ -955,7 +940,6 @@ func (reconciler *BrokerServiceInstanceReconciler) buildAddressTracker(app *brok
 	for _, addr := range app.Spec.Addresses {
 		addressTracker.trackAddressType(&addr)
 	}
-
 
 	for _, capability := range app.Spec.Capabilities {
 
@@ -1009,13 +993,13 @@ func (reconciler *BrokerServiceInstanceReconciler) buildAddressTracker(app *brok
 	return addressTracker, nil
 }
 
-// processPendingEmpty manages the pending-empty finalizer lifecycle for a single app.
-// It mutates the tracker to include any addresses that still have pending messages,
-// and records them on the reconciler so filterCrossAppRoles can revoke cross-app
-// send permissions.
-// Returns complete=true when the app has no remaining pending messages and the
-// caller should not generate config for it.
-func (reconciler *BrokerServiceInstanceReconciler) processPendingEmpty(app *broker.BrokerApp, tracker *AddressTracker, oldSecretData map[string][]byte) (complete bool, err error) {
+// processAddressDrain manages drain for a single app's removed addresses and subscriptions.
+// It detects what changed, mutates the tracker to keep draining entries visible to
+// processCapabilities, and populates drainingAddresses so filterCrossAppRoles can
+// revoke cross-app send permissions for address-level drains.
+// Returns complete=true when nothing remains to drain and the caller should skip
+// config generation for this app.
+func (reconciler *BrokerServiceInstanceReconciler) processAddressDrain(app *broker.BrokerApp, tracker *AddressTracker, oldSecretData map[string][]byte) (complete bool, err error) {
 	role := AppIdentity(app)
 
 	if app.DeletionTimestamp == nil && hasOwnedContent(app) && controllerutil.AddFinalizer(app, broker.AddressesPendingEmptyFinalizer) {
@@ -1030,7 +1014,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processPendingEmpty(app *brok
 	}
 	if len(pendingAddresses) > 0 {
 		if reconciler.isDrainConfigApplied(pendingAddresses) {
-			pendingAddresses = reconciler.filterDrainedAddresses(app, pendingAddresses)
+			pendingAddresses = reconciler.removeFullyDrained(app, pendingAddresses)
 		}
 	}
 	if len(pendingAddresses) > 0 {
@@ -1040,7 +1024,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processPendingEmpty(app *brok
 				Subscriptions: da.Subscriptions,
 			}
 			tracker.trackAddressType(&addrType)
-			if len(da.Subscriptions) == 0 && da.HadConsumeRole {
+			if len(da.Subscriptions) == 0 && da.WasConsumer {
 				entry := tracker.names[da.Address]
 				entry.consumerRoles[role] = role
 			}
@@ -1048,25 +1032,26 @@ func (reconciler *BrokerServiceInstanceReconciler) processPendingEmpty(app *brok
 				fqqn := da.Address + FQQNSeparator + subName
 				if qe, exists := tracker.names[fqqn]; exists {
 					qe.subscriberRoles[role] = role
-					if da.IsRetained {
-						qe.isDraining = true
-					}
+					qe.isDraining = true
 				}
 			}
 		}
-		if reconciler.pendingEmptyAddresses == nil {
-			reconciler.pendingEmptyAddresses = make(map[string]map[string]bool)
+		if reconciler.drainingAddresses == nil {
+			reconciler.drainingAddresses = make(map[string]map[string]bool)
 		}
-		if reconciler.pendingEmptyAddresses[role] == nil {
-			reconciler.pendingEmptyAddresses[role] = make(map[string]bool)
+		if reconciler.drainingAddresses[role] == nil {
+			reconciler.drainingAddresses[role] = make(map[string]bool)
 		}
 		for _, da := range pendingAddresses {
-			if da.IsRetained {
+			if len(da.Subscriptions) > 0 {
+				// subscription drain: track per-FQQN so filterCrossAppRoles
+				// does not revoke send on the parent address
 				for _, subName := range da.Subscriptions {
-					reconciler.pendingEmptyAddresses[role][da.Address+FQQNSeparator+subName] = true
+					reconciler.drainingAddresses[role][da.Address+FQQNSeparator+subName] = true
 				}
 			} else {
-				reconciler.pendingEmptyAddresses[role][da.Address] = true
+				// address-level drain: revoke cross-app producer send
+				reconciler.drainingAddresses[role][da.Address] = true
 			}
 		}
 		appStatus := broker.PendingEmptyAddressStatus{
@@ -1074,17 +1059,8 @@ func (reconciler *BrokerServiceInstanceReconciler) processPendingEmpty(app *brok
 			Messages: make(map[string]int64),
 		}
 		for _, da := range pendingAddresses {
-			if len(da.MessageCounts) > 0 {
-				for fqqn, count := range da.MessageCounts {
-					appStatus.Messages[fqqn] = count
-				}
-			} else if da.IsRetained {
-				for _, subName := range da.Subscriptions {
-					appStatus.Messages[da.Address+FQQNSeparator+subName] = 0
-				}
-			} else if len(da.MessageCounts) == 0 {
-				// pending config applied to remove producers
-				appStatus.Messages[da.Address] = -1
+			for fqqn, count := range da.MessageCounts {
+				appStatus.Messages[fqqn] = count
 			}
 		}
 		reconciler.status.PendingEmpty = append(reconciler.status.PendingEmpty, appStatus)
@@ -1143,7 +1119,7 @@ func (reconciler *BrokerServiceInstanceReconciler) filterCrossAppRoles(app *brok
 			ownerIdentity := resolveOwner(addressRef)
 			if !activeApps[ownerIdentity] {
 				delete(entry.senderRoles, role)
-			} else if addrs, ok := reconciler.pendingEmptyAddresses[ownerIdentity]; ok && addrs[addressRef.Address] {
+			} else if addrs, ok := reconciler.drainingAddresses[ownerIdentity]; ok && addrs[addressRef.Address] {
 				delete(entry.senderRoles, role)
 			}
 		}
@@ -1324,7 +1300,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 			dedupMap[fmt.Sprintf("%s=%s\n", producerRole(namespacedName), namespacedName)] = ""
 		}
 	}
-	if len(reconciler.pendingEmptyAddresses[AppIdentity(app)]) > 0 {
+	if len(reconciler.drainingAddresses[AppIdentity(app)]) > 0 {
 		dedupMap[fmt.Sprintf("%s=%s\n", consumerRole(namespacedName), namespacedName)] = ""
 	}
 
@@ -1450,9 +1426,9 @@ func AppIdentityWithGeneration(app *broker.BrokerApp) string {
 // provisioned value so that ProvisionedApps only advances once all pending
 // addresses are fully drained.
 func (reconciler *BrokerServiceInstanceReconciler) provisionedAppIdentity(app *broker.BrokerApp) string {
-	if reconciler.pendingEmptyAddresses != nil {
+	if reconciler.drainingAddresses != nil {
 		role := AppIdentity(app)
-		if _, hasPending := reconciler.pendingEmptyAddresses[role]; hasPending {
+		if _, hasPending := reconciler.drainingAddresses[role]; hasPending {
 			prefix := AppIdentityPrefix(app)
 			for _, pa := range reconciler.instance.Status.ProvisionedApps {
 				if strings.HasPrefix(pa, prefix) {
@@ -1629,9 +1605,10 @@ func (reconciler *BrokerServiceInstanceReconciler) isSubscriptionDrainProvisione
 }
 
 // detectDrainingAddresses compares the current spec addresses against the previously
-// deployed capabilities.json to find addresses that were removed. Each candidate is
-// annotated with whether its producers are still active in the deployed config.
-// The caller gates the Jolokia message-count check on isDrainConfigApplied.
+// deployed capabilities.json to find addresses or subscriptions that were removed.
+// Each candidate is annotated with PendingDeploy when the drain config change has
+// not yet been applied by the broker; the caller gates the Jolokia message-count
+// check on isDrainConfigApplied.
 func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *broker.BrokerApp, currentTracker *AddressTracker, oldSecretData map[string][]byte) ([]DrainingAddressInfo, error) {
 	if !reconciler.wasAppEverProvisioned(app) {
 		return nil, nil
@@ -1669,16 +1646,16 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 	appProducerRole := producerRole(appIdentity)
 	var candidates []DrainingAddressInfo
 	for name, oldCfg := range oldCaps.AddressConfigurations {
-		isRetained := currentOwned[name]
+		addressStillOwned := currentOwned[name]
 
-		dai := DrainingAddressInfo{Address: name, IsRetained: isRetained}
+		dai := DrainingAddressInfo{Address: name, AddressStillOwned: addressStillOwned}
 		if addrRoles, ok := oldCaps.SecurityRoles[name]; ok {
 			if perms, ok := addrRoles[appConsumerRole]; ok && perms.Consume {
-				dai.HadConsumeRole = true
+				dai.WasConsumer = true
 			}
-			if !isRetained {
+			if !addressStillOwned {
 				if perms, ok := addrRoles[appProducerRole]; ok && perms.Send {
-					dai.HasActiveProducers = true
+					dai.PendingDeploy = true
 				}
 			}
 		}
@@ -1696,12 +1673,21 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 			sort.Strings(dai.Subscriptions)
 		}
 
-		if isRetained && len(dai.Subscriptions) == 0 {
+		if addressStillOwned && len(dai.Subscriptions) == 0 {
 			continue
 		}
 
-		if isRetained && !reconciler.isSubscriptionDrainProvisioned(appIdentity, name, dai.Subscriptions) {
-			dai.HasActiveProducers = true
+		dai.MessageCounts = make(map[string]int64)
+		if len(dai.Subscriptions) > 0 {
+			for _, subName := range dai.Subscriptions {
+				dai.MessageCounts[dai.Address+FQQNSeparator+subName] = -1
+			}
+		} else {
+			dai.MessageCounts[dai.Address] = -1
+		}
+
+		if addressStillOwned && !reconciler.isSubscriptionDrainProvisioned(appIdentity, name, dai.Subscriptions) {
+			dai.PendingDeploy = true
 		}
 
 		candidates = append(candidates, dai)
@@ -1710,13 +1696,13 @@ func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *
 	return candidates, nil
 }
 
-// isDrainConfigApplied returns true when the deployed config has had producers
-// revoked for all candidates AND the broker has applied that config. This gates
-// the Jolokia message-count check so we only query counts after producers are
-// actually stopped on the broker.
+// isDrainConfigApplied returns true when no candidates are PendingDeploy (the
+// drain config has been pushed) AND the broker has applied that config. This
+// gates the Jolokia message-count check so we only query counts after message
+// flow has actually stopped on the broker.
 func (reconciler *BrokerServiceInstanceReconciler) isDrainConfigApplied(candidates []DrainingAddressInfo) bool {
 	for _, c := range candidates {
-		if c.HasActiveProducers {
+		if c.PendingDeploy {
 			return false
 		}
 	}
@@ -1724,9 +1710,9 @@ func (reconciler *BrokerServiceInstanceReconciler) isDrainConfigApplied(candidat
 	return appsProvisioned != nil && appsProvisioned.Status == metav1.ConditionTrue
 }
 
-// filterDrainedAddresses checks Jolokia for message counts and returns only
+// removeFullyDrained checks Jolokia for message counts and returns only
 // addresses that still have pending messages.
-func (reconciler *BrokerServiceInstanceReconciler) filterDrainedAddresses(app *broker.BrokerApp, candidates []DrainingAddressInfo) []DrainingAddressInfo {
+func (reconciler *BrokerServiceInstanceReconciler) removeFullyDrained(app *broker.BrokerApp, candidates []DrainingAddressInfo) []DrainingAddressInfo {
 	drainResults, err := reconciler.checkAddressDrainStatus(context.TODO(), candidates)
 	if err != nil {
 		reconciler.log.V(1).Info("Error checking address drain status, preserving all candidates",
@@ -1750,12 +1736,12 @@ func (reconciler *BrokerServiceInstanceReconciler) filterDrainedAddresses(app *b
 }
 
 type DrainingAddressInfo struct {
-	Address            string           `json:"address"`
-	Subscriptions      []string         `json:"subscriptions,omitempty"`
-	HadConsumeRole     bool             `json:"-"`
-	HasActiveProducers bool             `json:"-"`
-	IsRetained         bool             `json:"-"`
-	MessageCounts      map[string]int64 `json:"-"`
+	Address           string           `json:"address"`
+	Subscriptions     []string         `json:"subscriptions,omitempty"`
+	WasConsumer       bool             `json:"-"`
+	PendingDeploy     bool             `json:"-"`
+	AddressStillOwned bool             `json:"-"`
+	MessageCounts     map[string]int64 `json:"-"`
 }
 
 type addressDrainResult struct {
@@ -1790,7 +1776,7 @@ func evaluateAddressDrainStatus(reqLogger logr.Logger, artemis *mgmt.Artemis, ad
 	reqLogger.V(1).Info("queue counts", "json", queueCounts)
 
 	var queueCountMap map[string]int64
-	if len(queueCounts) > 0 {
+	if err == nil {
 		queueCountMap = make(map[string]int64, len(queueCounts))
 		for _, qc := range queueCounts {
 			key := qc.Address + "::" + qc.Queue + "::" + qc.RoutingType

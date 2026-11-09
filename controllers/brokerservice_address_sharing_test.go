@@ -1720,7 +1720,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
 			// let drain complete before cert cleanup
 			Eventually(func() bool {
-				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerApp{}))
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{}))
 			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
 			CleanupAppCerts(consumerAppName, defaultNamespace)
 			CleanupAppCerts(ownerAppName, defaultNamespace)
@@ -1908,7 +1908,7 @@ var _ = Describe("broker-service address sharing scenarios", func() {
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
 			// let drain complete before cert cleanup
 			Eventually(func() bool {
-				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerApp{}))
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{}))
 			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
 			CleanupAppCerts(app2Name, defaultNamespace)
 			CleanupAppCerts(app1Name, defaultNamespace)

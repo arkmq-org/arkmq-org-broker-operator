@@ -44,14 +44,13 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 			ref := broker.AddressRef{Address: "orders", AppNamespace: "other-ns"}
 			err := validateAddressRef(ref, "ProducerOf", 0)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("appNamespace and appName must both be set"))
+			Expect(err.Error()).To(ContainSubstring("appName is required when appNamespace is set"))
 		})
 
-		It("rejects appName without appNamespace", Label(unitLabel), func() {
+		It("allows appName without appNamespace for same-namespace inference", Label(unitLabel), func() {
 			ref := broker.AddressRef{Address: "orders", AppName: "other-app"}
 			err := validateAddressRef(ref, "ConsumerOf", 0)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("appNamespace and appName must both be set"))
+			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("rejects pubSub=false with subscriptions", Label(unitLabel), func() {
