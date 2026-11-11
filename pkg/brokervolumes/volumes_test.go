@@ -26,9 +26,10 @@ var _ = Describe("MakeVolumes", func() {
 		Expect(vols[0].PersistentVolumeClaim.ClaimName).To(Equal("my-broker"))
 	})
 
-	It("mirrors the broker call site: persistent=true, one extra volume, one EPVC — asserts claim names and ordering", func() {
-		// Matches: brokervolumes.MakeVolumes(customResource.Name, customResource.Spec.PersistenceEnabled,
-		//   customResource.Spec.ExtraVolumes, customResource.Spec.ExtraVolumeClaimTemplates)
+	It("mirrors the BrokerCluster call site: persistent=true, one extra volume, one EPVC — asserts claim names and ordering", func() {
+		// Matches the BrokerCluster call: brokervolumes.MakeVolumes(customResource.Name, persistent,
+		//   customResource.Spec.DeploymentPlan.ExtraVolumes, customResource.Spec.DeploymentPlan.ExtraVolumeClaimTemplates)
+		// The Broker call site always passes persistent=false and adds an emptyDir for the data mount.
 		extra := corev1.Volume{
 			Name: "cfg-vol",
 			VolumeSource: corev1.VolumeSource{

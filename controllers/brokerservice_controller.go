@@ -42,6 +42,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -54,6 +55,28 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+const (
+	journalVolumeName = "journal"
+	journalMountPath  = "/app/data"
+)
+
+// An empty storageClass leaves StorageClassName nil so the cluster default class applies.
+func journalClaimTemplate(size resource.Quantity, storageClass string) broker.VolumeClaimTemplate {
+	claim := broker.VolumeClaimTemplate{
+		ObjectMeta: broker.ObjectMeta{Name: journalVolumeName},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: size},
+			},
+		},
+	}
+	if storageClass != "" {
+		claim.Spec.StorageClassName = &storageClass
+	}
+	return claim
+}
 
 type BrokerServiceReconciler struct {
 	*ReconcilerLoop
@@ -179,6 +202,20 @@ func (reconciler *BrokerServiceInstanceReconciler) validateSpec() error {
 		}
 	}
 
+	// Validate journal storage quantity when resources.limits[arkmq.org/journal-storage] is set
+	if storageQty, ok := reconciler.instance.Spec.Resources.Limits[broker.ResourceJournalStorage]; ok {
+		if _, err := resource.ParseQuantity(storageQty.String()); err != nil {
+			return NewValidationError(
+				broker.ValidConditionFailureReason,
+				".Spec.Resources.Limits[arkmq.org/journal-storage] quantity string is invalid: %v", err)
+		}
+		if storageQty.CmpInt64(0) <= 0 {
+			return NewValidationError(
+				broker.ValidConditionFailureReason,
+				".Spec.Resources.Limits[arkmq.org/journal-storage] must be greater than zero")
+		}
+	}
+
 	return nil
 }
 
@@ -258,7 +295,19 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 	} else {
 		desired = common.GenerateBroker(reconciler.instance.Name, reconciler.instance.Namespace)
 	}
-	desired.Spec.PersistenceEnabled = false
+	containerResources := reconciler.instance.Spec.Resources.DeepCopy()
+	if storageQty, ok := containerResources.Limits[broker.ResourceJournalStorage]; ok {
+		desired.Spec.ExtraVolumeClaimTemplates = []broker.VolumeClaimTemplate{
+			journalClaimTemplate(storageQty, reconciler.instance.Spec.JournalStorageClass),
+		}
+		desired.Spec.ExtraVolumeMounts = []corev1.VolumeMount{
+			{Name: journalVolumeName, MountPath: journalMountPath},
+		}
+		delete(containerResources.Limits, broker.ResourceJournalStorage)
+	} else {
+		desired.Spec.ExtraVolumeClaimTemplates = nil
+		desired.Spec.ExtraVolumeMounts = nil
+	}
 	desired.Spec.Labels = map[string]string{
 		// App-specific recommended labels (name/instance/part-of are set by the Broker labeler).
 		selectors.LabelAppKubernetesComponent: "broker-service",
@@ -268,7 +317,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 		selectors.LabelBrokerPeerIndex: "0",
 	}
 	desired.Spec.Env = reconciler.instance.Spec.Env
-	desired.Spec.Resources = reconciler.instance.Spec.Resources
+	desired.Spec.Resources = *containerResources
 
 	if reconciler.instance.Spec.Image != nil {
 		desired.Spec.Image = *reconciler.instance.Spec.Image
