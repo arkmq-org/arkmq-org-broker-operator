@@ -2170,7 +2170,7 @@ func (reconciler *BrokerClusterReconcilerImpl) PodTemplateSpecForCR(customResour
 
 	podSpec.ImagePullSecrets = customResource.Spec.DeploymentPlan.ImagePullSecrets
 
-	container := containers.MakeContainer(podSpec, customResource.Name, common.ResolveImage(customResource, common.BrokerImageKey), MakeEnvVarArrayForCR(customResource, namer))
+	container := containers.MakeContainer(podSpec, customResource.Name, common.ResolveImage(customResource, common.BrokerImageKey, reconciler.log), MakeEnvVarArrayForCR(customResource, namer))
 
 	container.Resources = customResource.Spec.DeploymentPlan.Resources
 
@@ -2287,7 +2287,7 @@ func (reconciler *BrokerClusterReconcilerImpl) PodTemplateSpecForCR(customResour
 	podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, volumeMountForCfg)
 
 	reqLogger.V(2).Info("Creating init container for broker configuration")
-	initContainer := containers.MakeInitContainer(podSpec, customResource.Name, common.ResolveImage(customResource, common.InitImageKey), MakeEnvVarArrayForCR(customResource, namer))
+	initContainer := containers.MakeInitContainer(podSpec, customResource.Name, common.ResolveImage(customResource, common.InitImageKey, reconciler.log), MakeEnvVarArrayForCR(customResource, namer))
 	initContainer.Resources = customResource.Spec.DeploymentPlan.Resources
 
 	reconciler.configureContianerSecurityContext(initContainer, customResource.Spec.DeploymentPlan.ContainerSecurityContext)
@@ -3504,7 +3504,7 @@ func (reconciler *BrokerClusterReconcilerImpl) resolveJolokiaEndpoints(cr *v1bet
 				NamespacedName: types.NamespacedName{Name: namer.CrToSS(cr.Name), Namespace: cr.Namespace},
 				Replicas:       cr.Status.DeploymentPlanSize,
 				Labels:         nil,
-			}}, client)
+			}}, client, reconciler.log)
 	}
 }
 

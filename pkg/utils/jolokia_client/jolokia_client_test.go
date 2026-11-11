@@ -1,6 +1,7 @@
 package jolokia_client_test
 
 import (
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
@@ -26,7 +27,7 @@ var _ = Describe("JolokiaClient", func() {
 					Namespace: "some-ns",
 				}
 				ssInfos := ss.GetDeployedStatefulSetNames(client, brokerRef.Namespace, []types.NamespacedName{brokerRef})
-				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client)
+				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client, logr.Discard())
 				Expect(infos).Should(BeEmpty())
 			})
 		})
@@ -50,7 +51,7 @@ var _ = Describe("JolokiaClient", func() {
 					Namespace: "some-ns",
 				}
 				ssInfos := ss.GetDeployedStatefulSetNames(client, brokerRef.Namespace, []types.NamespacedName{brokerRef})
-				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client)
+				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client, logr.Discard())
 				Expect(infos).Should(BeEmpty())
 			})
 			It("should return an empty array if no Pods are available", func() {
@@ -81,7 +82,7 @@ var _ = Describe("JolokiaClient", func() {
 					Namespace: "some-ns",
 				}
 				ssInfos := ss.GetDeployedStatefulSetNames(client, brokerRef.Namespace, []types.NamespacedName{brokerRef})
-				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client)
+				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client, logr.Discard())
 				Expect(infos).Should(BeEmpty())
 
 			})
@@ -125,7 +126,7 @@ var _ = Describe("JolokiaClient", func() {
 				}
 				ssInfos := ss.GetDeployedStatefulSetNames(client, brokerRef.Namespace, []types.NamespacedName{brokerRef})
 				Expect(len(ssInfos)).To(Equal(1))
-				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client)
+				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client, logr.Discard())
 				Expect(infos).Should(HaveLen(1))
 				Expect(infos[0].IP).To(Equal("broker-ss-0.broker-hdls-svc.some-ns.svc.cluster.local"))
 				Expect(infos[0].Artemis).NotTo(BeNil())
@@ -183,7 +184,7 @@ var _ = Describe("JolokiaClient", func() {
 				}
 				ssInfos := ss.GetDeployedStatefulSetNames(client, brokerRef.Namespace, []types.NamespacedName{brokerRef})
 				Expect(len(ssInfos)).To(Equal(1))
-				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client)
+				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client, logr.Discard())
 				Expect(infos).Should(HaveLen(1))
 				Expect(infos[0].Artemis).NotTo(BeNil())
 				Expect(infos[0].Artemis.GetJolokia().GetProtocol()).To(Equal("https"))
@@ -240,7 +241,7 @@ var _ = Describe("JolokiaClient", func() {
 				}
 				ssInfos := ss.GetDeployedStatefulSetNames(client, brokerRef.Namespace, []types.NamespacedName{brokerRef})
 				Expect(len(ssInfos)).To(Equal(1))
-				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client)
+				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client, logr.Discard())
 				Expect(infos).Should(HaveLen(1))
 				Expect(infos[0].Artemis).NotTo(BeNil())
 				Expect(infos[0].Artemis.GetJolokia().GetProtocol()).To(Equal("https"))
@@ -297,7 +298,7 @@ var _ = Describe("JolokiaClient", func() {
 				}
 				ssInfos := ss.GetDeployedStatefulSetNames(client, brokerRef.Namespace, []types.NamespacedName{brokerRef})
 				Expect(len(ssInfos)).To(Equal(1))
-				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client)
+				infos := jolokia_client.GetBrokers(brokerRef, ssInfos, client, logr.Discard())
 				Expect(infos).Should(HaveLen(1))
 				Expect(infos[0].Artemis).NotTo(BeNil())
 				Expect(infos[0].Artemis.GetJolokia().GetProtocol()).To(Equal("http"))

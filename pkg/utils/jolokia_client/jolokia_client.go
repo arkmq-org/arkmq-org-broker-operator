@@ -29,6 +29,7 @@ import (
 	mgmt "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/artemis"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -48,28 +49,27 @@ type JkInfo struct {
 // resource: the address CR for which the broker pods are gathered
 // ssInfos: target statefulsets to look for pods in
 // client: the client to access the api server
-func GetBrokers(resource types.NamespacedName, ssInfos []ss.StatefulSetInfo, client rtclient.Client) []*JkInfo {
-	reqLogger := ctrl.Log.WithName("jolokia").WithValues("Request.Namespace", resource.Namespace, "Request.Name", resource.Name)
+func GetBrokers(resource types.NamespacedName, ssInfos []ss.StatefulSetInfo, client rtclient.Client, logger logr.Logger) []*JkInfo {
 
 	var artemisArray []*JkInfo = []*JkInfo{} // empty slice
 
 	for _, info := range ssInfos {
-		jkInfos := GetBrokersFromDNS(namer.SSToCr(info.NamespacedName.Name), info.NamespacedName.Namespace, info.Replicas, client)
+		jkInfos := GetBrokersFromDNS(namer.SSToCr(info.NamespacedName.Name), info.NamespacedName.Namespace, info.Replicas, client, logger)
 		artemisArray = append(artemisArray, jkInfos...)
 	}
 
-	reqLogger.V(1).Info("Gathered some mgmt array", "size", len(artemisArray))
+	logger.V(1).Info("Gathered some mgmt array", "size", len(artemisArray))
 	return artemisArray
 }
 
-func GetMinimalJolokiaAgents(cr *v1beta2.BrokerCluster, client rtclient.Client) []*JkInfo {
+func GetMinimalJolokiaAgents(cr *v1beta2.BrokerCluster, client rtclient.Client, logger logr.Logger) []*JkInfo {
 	var artemisArray []*JkInfo = []*JkInfo{} // empty slice
 	var i int32 = 0
 	for i = 0; i < cr.Status.DeploymentPlanSize; i++ {
 
 		ordinalFqdn := common.OrdinalFQDNS(cr.Name, cr.Namespace, i)
 
-		artemis := mgmt.GetArtemisAgentForRestricted(client, environments.ResolveBrokerNameFromEnvs(cr.Spec.Env, cr.Name), ordinalFqdn)
+		artemis := mgmt.GetArtemisAgentForRestricted(client, environments.ResolveBrokerNameFromEnvs(cr.Spec.Env, cr.Name), ordinalFqdn, logger)
 
 		jkInfo := JkInfo{
 			Artemis: artemis,
@@ -82,9 +82,9 @@ func GetMinimalJolokiaAgents(cr *v1beta2.BrokerCluster, client rtclient.Client) 
 	return artemisArray
 }
 
-func GetMinimalJolokiaAgentsForBroker(cr *v1beta2.Broker, client rtclient.Client) []*JkInfo {
+func GetMinimalJolokiaAgentsForBroker(cr *v1beta2.Broker, client rtclient.Client, logger logr.Logger) []*JkInfo {
 	ordinalFqdn := common.OrdinalFQDNS(cr.Name, cr.Namespace, 0)
-	artemis := mgmt.GetArtemisAgentForRestricted(client, environments.ResolveBrokerNameFromEnvs(cr.Spec.Env, cr.Name), ordinalFqdn)
+	artemis := mgmt.GetArtemisAgentForRestricted(client, environments.ResolveBrokerNameFromEnvs(cr.Spec.Env, cr.Name), ordinalFqdn, logger)
 	return []*JkInfo{{
 		Artemis: artemis,
 		IP:      ordinalFqdn,
@@ -93,8 +93,7 @@ func GetMinimalJolokiaAgentsForBroker(cr *v1beta2.Broker, client rtclient.Client
 }
 
 // Get brokers Using DNS names in the namespace
-func GetBrokersFromDNS(crName string, namespace string, size int32, client rtclient.Client) []*JkInfo {
-	reqLogger := ctrl.Log.WithName("jolokia").WithValues("Request.Namespace", namespace, "Request.Name", crName)
+func GetBrokersFromDNS(crName string, namespace string, size int32, client rtclient.Client, logger logr.Logger) []*JkInfo {
 
 	var artemisArray []*JkInfo = []*JkInfo{} // empty slice
 
@@ -109,24 +108,24 @@ func GetBrokersFromDNS(crName string, namespace string, size int32, client rtcli
 			Namespace: namespace,
 		}
 
-		reqLogger.V(2).Info("Trying finding pod " + podNamespacedName.Name)
+		logger.V(2).Info("Trying finding pod " + podNamespacedName.Name)
 		if err := client.Get(context.TODO(), podNamespacedName, pod); err != nil {
 			if errors.IsNotFound(err) {
 				// The IsNotFound err could point to unrelated pods.
-				reqLogger.V(1).Info("Pod IsNotFound", "Namespace", podNamespacedName.Namespace, "Name", podNamespacedName.Name)
+				logger.V(1).Info("Pod IsNotFound", "Namespace", podNamespacedName.Namespace, "Name", podNamespacedName.Name)
 			} else {
-				reqLogger.Error(err, "Pod lookup error", "Namespace", namespace, "Name", pod.Name)
+				logger.Error(err, "Pod lookup error", "Namespace", namespace, "Name", pod.Name)
 			}
 		} else {
-			reqLogger.V(2).Info("Pod found", "Namespace", namespace, "Name", crName)
+			logger.V(2).Info("Pod found", "Namespace", namespace, "Name", crName)
 			containers := pod.Spec.Containers //get env from this
 			jolokiaSecretName := crName + "-jolokia-secret"
 
 			jolokiaUser, jolokiaPassword, jolokiaProtocol := resolveJolokiaRequestParams(namespace, client, client.Scheme(), jolokiaSecretName, &containers, podNamespacedName)
 
-			reqLogger.V(2).Info("hostname to use for jolokia ", "hostname", ordinalFqdn)
+			logger.V(2).Info("hostname to use for jolokia ", "hostname", ordinalFqdn)
 
-			artemis := mgmt.GetArtemis(client, ordinalFqdn, "8161", environments.ResolveBrokerNameFromEnvs(pod.Spec.Containers[0].Env, environments.NameEnvVarDefaultValue), jolokiaUser, jolokiaPassword, jolokiaProtocol)
+			artemis := mgmt.GetArtemis(client, ordinalFqdn, "8161", environments.ResolveBrokerNameFromEnvs(pod.Spec.Containers[0].Env, environments.NameEnvVarDefaultValue), jolokiaUser, jolokiaPassword, jolokiaProtocol, logger)
 
 			jkInfo := JkInfo{
 				Artemis: artemis,
@@ -137,7 +136,7 @@ func GetBrokersFromDNS(crName string, namespace string, size int32, client rtcli
 		}
 	}
 
-	reqLogger.V(2).Info("got mgmt array", "size", len(artemisArray))
+	logger.V(2).Info("got mgmt array", "size", len(artemisArray))
 	return artemisArray
 }
 

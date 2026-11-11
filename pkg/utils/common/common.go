@@ -28,6 +28,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 	"github.com/blang/semver/v4"
 
+	"github.com/go-logr/logr"
 	routev1 "github.com/openshift/api/route/v1"
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
@@ -344,9 +345,8 @@ func ResolveBrokerVersionFromCR(cr *v1beta2.BrokerCluster) (string, error) {
 	return result.String(), nil
 }
 
-func DetermineImageToUse(customResource *v1beta2.BrokerCluster, imageTypeKey string) string {
+func DetermineImageToUse(customResource *v1beta2.BrokerCluster, imageTypeKey string, logger logr.Logger) string {
 
-	log := ctrl.Log.WithName("util_common")
 	found := false
 	imageName := ""
 	compactVersionToUse, _ := DetermineCompactVersionToUse(customResource)
@@ -358,18 +358,18 @@ func DetermineImageToUse(customResource *v1beta2.BrokerCluster, imageTypeKey str
 		archSpecificRelatedImageEnvVarName = genericRelatedImageEnvVarName + "_" + osruntime.GOARCH
 	}
 	imageName, found = os.LookupEnv(archSpecificRelatedImageEnvVarName)
-	log.V(1).Info("DetermineImageToUse", "env", archSpecificRelatedImageEnvVarName, "imageName", imageName)
+	logger.V(1).Info("DetermineImageToUse", "env", archSpecificRelatedImageEnvVarName, "imageName", imageName)
 
 	// Use genericRelatedImageEnvVarName if archSpecificRelatedImageEnvVarName is not found
 	if !found {
 		imageName, found = os.LookupEnv(genericRelatedImageEnvVarName)
-		log.V(1).Info("DetermineImageToUse - from generic", "env", genericRelatedImageEnvVarName, "imageName", imageName)
+		logger.V(1).Info("DetermineImageToUse - from generic", "env", genericRelatedImageEnvVarName, "imageName", imageName)
 	}
 
 	// Use latest images if archSpecificRelatedImageEnvVarName and genericRelatedImageEnvVarName are not found
 	if !found {
 		imageName = version.DefaultImageName(archSpecificRelatedImageEnvVarName)
-		log.V(1).Info("DetermineImageToUse - from default", "env", archSpecificRelatedImageEnvVarName, "imageName", imageName)
+		logger.V(1).Info("DetermineImageToUse - from default", "env", archSpecificRelatedImageEnvVarName, "imageName", imageName)
 	}
 
 	return imageName
@@ -380,17 +380,15 @@ func SetStatusConditionWithGeneration(cr *v1beta2.BrokerCluster, condition metav
 	meta.SetStatusCondition(&cr.Status.Conditions, condition)
 }
 
-func ProcessStatus(cr *v1beta2.BrokerCluster, client rtclient.Client, namespacedName types.NamespacedName, namer Namers, reconcileError error) {
+func ProcessStatus(cr *v1beta2.BrokerCluster, client rtclient.Client, namespacedName types.NamespacedName, namer Namers, reconcileError error, logger logr.Logger) {
 
-	reqLogger := ctrl.Log.WithName("util_process_status").WithValues("ActiveMQArtemis Name", cr.Name)
-
-	updateVersionStatus(cr)
+	updateVersionStatus(cr, logger)
 
 	updateScaleStatus(cr, namer)
 
-	cr.Status.PodStatus = updatePodStatus(cr, client, namespacedName)
+	cr.Status.PodStatus = updatePodStatus(cr, client, namespacedName, logger)
 
-	reqLogger.V(1).Info("PodStatus current", "info:", cr.Status.PodStatus)
+	logger.V(1).Info("PodStatus current", "info:", cr.Status.PodStatus)
 
 	ValidCondition := getValidCondition(cr)
 	SetStatusConditionWithGeneration(cr, ValidCondition)
@@ -410,9 +408,9 @@ func UpdateBlockedStatus(cr *v1beta2.BrokerCluster, blocked bool) {
 	}
 }
 
-func updateVersionStatus(cr *v1beta2.BrokerCluster) {
-	cr.Status.Version.Image = ResolveImage(cr, BrokerImageKey)
-	cr.Status.Version.InitImage = ResolveImage(cr, InitImageKey)
+func updateVersionStatus(cr *v1beta2.BrokerCluster, logger logr.Logger) {
+	cr.Status.Version.Image = ResolveImage(cr, BrokerImageKey, logger)
+	cr.Status.Version.InitImage = ResolveImage(cr, InitImageKey, logger)
 	cr.Status.Version.BrokerVersion, _ = ResolveBrokerVersionFromCR(cr)
 
 	if isLockedDown(cr.Spec.DeploymentPlan.Image) || isLockedDown(cr.Spec.DeploymentPlan.InitImage) {
@@ -446,7 +444,7 @@ func updateVersionStatus(cr *v1beta2.BrokerCluster) {
 	}
 }
 
-func ResolveImage(customResource *v1beta2.BrokerCluster, key string) string {
+func ResolveImage(customResource *v1beta2.BrokerCluster, key string, logger logr.Logger) string {
 	var imageName string
 
 	if key == InitImageKey && isLockedDown(customResource.Spec.DeploymentPlan.InitImage) {
@@ -454,7 +452,7 @@ func ResolveImage(customResource *v1beta2.BrokerCluster, key string) string {
 	} else if key == BrokerImageKey && isLockedDown(customResource.Spec.DeploymentPlan.Image) {
 		imageName = customResource.Spec.DeploymentPlan.Image
 	} else {
-		imageName = DetermineImageToUse(customResource, key)
+		imageName = DetermineImageToUse(customResource, key, logger)
 	}
 	return imageName
 }
@@ -520,9 +518,9 @@ func updateScaleStatus(cr *v1beta2.BrokerCluster, namer Namers) {
 	cr.Status.ScaleLabelSelector = strings.Join(labels[:], ",")
 }
 
-func updatePodStatus(cr *v1beta2.BrokerCluster, client rtclient.Client, namespacedName types.NamespacedName) olm.DeploymentStatus {
+func updatePodStatus(cr *v1beta2.BrokerCluster, client rtclient.Client, namespacedName types.NamespacedName, logger logr.Logger) olm.DeploymentStatus {
 
-	reqLogger := ctrl.Log.WithName("util_update_pod_status").WithValues("ActiveMQArtemis Name", namespacedName.Name)
+	reqLogger := logger.WithValues("ActiveMQArtemis Name", namespacedName.Name)
 	reqLogger.V(1).Info("Getting status for pods")
 
 	var status olm.DeploymentStatus
@@ -829,9 +827,9 @@ func DetectGatewayAPIWith(config *rest.Config) (bool, error) {
 	return *isGatewayAPIAvailable, nil
 }
 
-func GetOperandCertSecretName(cr *v1beta2.Broker, client rtclient.Client) string {
+func GetOperandCertSecretName(cr *v1beta2.Broker, client rtclient.Client, logger logr.Logger) string {
 
-	secret, _ := ResolveSecret(cr.Name, cr.Namespace, DefaultOperandCertSecretName, client)
+	secret, _ := ResolveSecret(cr.Name, cr.Namespace, DefaultOperandCertSecretName, client, logger)
 
 	if secret != nil {
 		return secret.Name
@@ -902,10 +900,10 @@ type ControlPlaneCNs struct {
 //
 // A missing prometheus cert is not an error: the entry is simply omitted, and
 // the template drops the line.
-func ResolveControlPlaneCNs(client rtclient.Client, cr *v1beta2.Broker) (ControlPlaneCNs, error) {
+func ResolveControlPlaneCNsWithLog(client rtclient.Client, cr *v1beta2.Broker, logger logr.Logger) (ControlPlaneCNs, error) {
 	cfg := ControlPlaneCNs{}
 
-	operatorCert, err := GetOperatorClientCertificate(client, nil)
+	operatorCert, err := GetOperatorClientCertificate(client, nil, logger)
 	if err != nil {
 		return cfg, fmt.Errorf("failed to get operator client cert, %w", err)
 	}
@@ -915,7 +913,7 @@ func ResolveControlPlaneCNs(client rtclient.Client, cr *v1beta2.Broker) (Control
 	}
 	cfg.OperatorCN = operatorCertSubject.CommonName
 
-	operandCertSecret, err := GetNamespacedSecret(client, GetOperandCertSecretName(cr, client), cr.Namespace)
+	operandCertSecret, err := GetNamespacedSecretWithLog(client, GetOperandCertSecretName(cr, client, logger), cr.Namespace, logger)
 	if err != nil {
 		return cfg, err
 	}
@@ -925,9 +923,9 @@ func ResolveControlPlaneCNs(client rtclient.Client, cr *v1beta2.Broker) (Control
 	}
 	cfg.OperandCN = operandCertSubject.CommonName
 
-	prometheusCertSecret, err := GetNamespacedSecret(client, GetPrometheusCertSecretName(cr, client), cr.Namespace)
+	prometheusCertSecret, err := GetNamespacedSecretWithLog(client, GetPrometheusCertSecretName(cr, client, logger), cr.Namespace, logger)
 	if err != nil {
-		ctrl.Log.V(1).Info("prometheus secret not found", "err", err)
+		logger.V(1).Info("prometheus secret not found", "err", err)
 		return cfg, nil
 	}
 	prometheusCertSubject, err := ExtractCertSubjectFromSecret(prometheusCertSecret)
@@ -939,21 +937,21 @@ func ResolveControlPlaneCNs(client rtclient.Client, cr *v1beta2.Broker) (Control
 	return cfg, nil
 }
 
-func GetPrometheusCertSecretName(cr *v1beta2.Broker, client rtclient.Client) string {
-	return GetPrometheusCertSecretNameFor(cr.Name, cr.Namespace, client)
+func GetPrometheusCertSecretName(cr *v1beta2.Broker, client rtclient.Client, logger logr.Logger) string {
+	return GetPrometheusCertSecretNameFor(cr.Name, cr.Namespace, client, logger)
 }
 
 // GetPrometheusCertSecretNameFor is GetPrometheusCertSecretName for callers that
 // hold a name and namespace rather than a Broker, such as the BrokerService
 // generating scrape wiring.
-func GetPrometheusCertSecretNameFor(name string, namespace string, client rtclient.Client) string {
+func GetPrometheusCertSecretNameFor(name string, namespace string, client rtclient.Client, logger logr.Logger) string {
 	// Determine the base secret name (from env or default)
 	if prometheusCertSecretName == nil {
 		prometheusCertSecretName = fromEnv("BASE_PROMETHEUS_CERT_SECRET_NAME", DefaultPrometheusCertSecretName)
 	}
 	baseSecretName := *prometheusCertSecretName
 
-	secret, _ := ResolveSecret(name, namespace, baseSecretName, client)
+	secret, _ := ResolveSecret(name, namespace, baseSecretName, client, logger)
 	if secret != nil {
 		return secret.Name
 	}
@@ -965,7 +963,7 @@ func GetPrometheusCertSecretNameFor(name string, namespace string, client rtclie
 // ResolveSecret looks for a secret with CR-specific name first, then falls back to shared name.
 // It first tries [crName]-[baseSecretName], then [baseSecretName].
 // Returns the secret if found, nil if not found, or error if a non-NotFound error occurs.
-func ResolveSecret(crName string, namespace string, baseSecretName string, client rtclient.Client) (*corev1.Secret, error) {
+func ResolveSecret(crName string, namespace string, baseSecretName string, client rtclient.Client, logger logr.Logger) (*corev1.Secret, error) {
 	ctx := context.Background()
 
 	// Try CR-specific secret first
@@ -978,7 +976,7 @@ func ResolveSecret(crName string, namespace string, baseSecretName string, clien
 
 	err := client.Get(ctx, secretKey, secret)
 	if err == nil {
-		ctrl.Log.V(1).Info("Found CR-specific secret", "secret", crSpecificName)
+		logger.V(1).Info("Found CR-specific secret", "secret", crSpecificName)
 		return secret, nil
 	}
 
@@ -990,7 +988,7 @@ func ResolveSecret(crName string, namespace string, baseSecretName string, clien
 	secretKey.Name = baseSecretName
 	err = client.Get(ctx, secretKey, secret)
 	if err == nil {
-		ctrl.Log.V(1).Info("Found shared secret", "secret", baseSecretName)
+		logger.V(1).Info("Found shared secret", "secret", baseSecretName)
 		return secret, nil
 	}
 
@@ -1002,10 +1000,10 @@ func ResolveSecret(crName string, namespace string, baseSecretName string, clien
 	return nil, err
 }
 
-func GetOperatorCASecretKey(client rtclient.Client, bundleSecret *corev1.Secret) (key string, err error) {
+func GetOperatorCASecretKey(client rtclient.Client, bundleSecret *corev1.Secret, logger logr.Logger) (key string, err error) {
 	if bundleSecret == nil {
-		if bundleSecret, err = GetOperatorCASecret(client); err != nil {
-			ctrl.Log.V(1).Info("ca secret not found", "err", err)
+		if bundleSecret, err = GetOperatorCASecret(client, logger); err != nil {
+			logger.V(1).Info("ca secret not found", "err", err)
 			return key, errors.Errorf("failed to get ca bundle secret to find ca key %v", err)
 		}
 	}
@@ -1033,19 +1031,19 @@ func fromEnv(envVarName, defaultValue string) *string {
 	}
 }
 
-func GetRootCAs(client rtclient.Client) (pool *x509.CertPool, err error) {
+func GetRootCAs(client rtclient.Client, logger logr.Logger) (pool *x509.CertPool, err error) {
 
 	if client == nil {
 		return nil, nil
 	}
 
 	var certSecret *corev1.Secret
-	if certSecret, err = GetOperatorCASecret(client); err != nil {
+	if certSecret, err = GetOperatorCASecret(client, logger); err != nil {
 		return nil, err
 	}
 
 	var bundleSecretKey string
-	if bundleSecretKey, err = GetOperatorCASecretKey(client, certSecret); err != nil {
+	if bundleSecretKey, err = GetOperatorCASecretKey(client, certSecret, logger); err != nil {
 		return nil, err
 	}
 
@@ -1097,17 +1095,17 @@ func legacyOperatorCASecretNameIfApplicable() string {
 	return LegacyOperatorCASecretName
 }
 
-func GetOperatorCASecret(client rtclient.Client) (*corev1.Secret, error) {
-	return GetOperatorSecretWithFallback(client, GetOperatorCASecretName(), legacyOperatorCASecretNameIfApplicable())
+func GetOperatorCASecret(client rtclient.Client, logger logr.Logger) (*corev1.Secret, error) {
+	return GetOperatorSecretWithFallback(client, GetOperatorCASecretName(), legacyOperatorCASecretNameIfApplicable(), logger)
 }
 
-func GetOperatorClientCertSecret(client rtclient.Client) (*corev1.Secret, error) {
-	return GetOperatorSecretWithFallback(client, GetOperatorCertSecretName(), legacyOperatorCertSecretNameIfApplicable())
+func GetOperatorClientCertSecret(client rtclient.Client, logger logr.Logger) (*corev1.Secret, error) {
+	return GetOperatorSecretWithFallback(client, GetOperatorCertSecretName(), legacyOperatorCertSecretNameIfApplicable(), logger)
 }
 
 // GetOperatorSecretWithFallback tries to get a secret with the preferred name first,
 // then falls back to the legacy name when legacyName is non-empty and the preferred secret is not found.
-func GetOperatorSecretWithFallback(client rtclient.Client, preferredName string, legacyName string) (*corev1.Secret, error) {
+func GetOperatorSecretWithFallback(client rtclient.Client, preferredName string, legacyName string, logger logr.Logger) (*corev1.Secret, error) {
 	var operatorNamespace string
 	var err error
 	operatorNamespace, err = GetOperatorNamespaceFromEnv()
@@ -1116,17 +1114,17 @@ func GetOperatorSecretWithFallback(client rtclient.Client, preferredName string,
 	}
 
 	// Try preferred (new) name first
-	secret, err := GetNamespacedSecret(client, preferredName, operatorNamespace)
+	secret, err := GetNamespacedSecretWithLog(client, preferredName, operatorNamespace, logger)
 	if err == nil {
-		ctrl.Log.V(1).Info("Using preferred secret name", "secret", preferredName)
+		logger.V(1).Info("Using preferred secret name", "secret", preferredName)
 		return secret, nil
 	}
 
 	if legacyName != "" && legacyName != preferredName {
-		ctrl.Log.V(1).Info("Preferred secret not found, trying legacy name", "preferred", preferredName, "legacy", legacyName)
-		legacySecret, legacyErr := GetNamespacedSecret(client, legacyName, operatorNamespace)
+		logger.V(1).Info("Preferred secret not found, trying legacy name", "preferred", preferredName, "legacy", legacyName)
+		legacySecret, legacyErr := GetNamespacedSecretWithLog(client, legacyName, operatorNamespace, logger)
 		if legacyErr == nil {
-			ctrl.Log.Info("Using legacy secret name (deprecated)", "secret", legacyName, "preferred", preferredName)
+			logger.Info("Using legacy secret name (deprecated)", "secret", legacyName, "preferred", preferredName)
 			return legacySecret, nil
 		}
 		return nil, fmt.Errorf("failed to get secret %s (or legacy %s), %w", preferredName, legacyName, err)
@@ -1148,10 +1146,14 @@ func GetOperatorSecret(client rtclient.Client, secretName string) (*corev1.Secre
 }
 
 func GetNamespacedSecret(client rtclient.Client, secretName string, secretNamespace string) (*corev1.Secret, error) {
+	return GetNamespacedSecretWithLog(client, secretName, secretNamespace, ctrl.Log)
+}
+
+func GetNamespacedSecretWithLog(client rtclient.Client, secretName string, secretNamespace string, logger logr.Logger) (*corev1.Secret, error) {
 	secretNamespacedName := types.NamespacedName{Name: secretName, Namespace: secretNamespace}
 	secret := corev1.Secret{}
-	if err := resources.Retrieve(secretNamespacedName, client, &secret); err != nil {
-		ctrl.Log.V(1).Info("secret not found", "name", secretNamespacedName, "err", err)
+	if err := resources.RetrieveWithLog(logger, secretNamespacedName, client, &secret); err != nil {
+		logger.V(1).Info("secret not found", "name", secretNamespacedName, "err", err)
 		return nil, fmt.Errorf("failed to get secret %s, %w", secretNamespacedName, err)
 	}
 	return &secret, nil
@@ -1159,14 +1161,14 @@ func GetNamespacedSecret(client rtclient.Client, secretName string, secretNamesp
 
 var operatorHasCertAndTrustBundle *bool
 
-func OperatorHasCertAndTrustBundle(client rtclient.Client) bool {
+func OperatorHasCertAndTrustBundle(client rtclient.Client, logger logr.Logger) bool {
 	if operatorHasCertAndTrustBundle == nil {
 		var ok bool = false
 
 		var secret *corev1.Secret
 		var err error
-		if secret, err = GetOperatorCASecret(client); secret != nil && err == nil {
-			if secret, err = GetOperatorClientCertSecret(client); secret != nil && err == nil {
+		if secret, err = GetOperatorCASecret(client, logger); secret != nil && err == nil {
+			if secret, err = GetOperatorClientCertSecret(client, logger); secret != nil && err == nil {
 				ok = true
 			}
 		}
@@ -1175,10 +1177,10 @@ func OperatorHasCertAndTrustBundle(client rtclient.Client) bool {
 	return *operatorHasCertAndTrustBundle
 }
 
-func GetOperatorClientCertificate(client rtclient.Client, info *tls.CertificateRequestInfo) (cert *tls.Certificate, err error) {
+func GetOperatorClientCertificate(client rtclient.Client, info *tls.CertificateRequestInfo, logger logr.Logger) (cert *tls.Certificate, err error) {
 
 	var secret *corev1.Secret
-	if secret, err = GetOperatorClientCertSecret(client); err == nil {
+	if secret, err = GetOperatorClientCertSecret(client, logger); err == nil {
 		cert, err = ExtractCertFromSecret(secret)
 	}
 	return cert, err

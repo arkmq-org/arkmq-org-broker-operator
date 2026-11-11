@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/go-logr/logr"
 	rtclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -59,9 +60,10 @@ type Jolokia struct {
 	protocol   string
 	restricted bool
 	client     rtclient.Client
+	log        logr.Logger
 }
 
-func GetRestrictedJolokia(client rtclient.Client, _ip string, _port string, _path string) *Jolokia {
+func GetRestrictedJolokia(client rtclient.Client, _ip string, _port string, _path string, logger logr.Logger) *Jolokia {
 	j := Jolokia{
 		ip:         _ip,
 		port:       _port,
@@ -69,11 +71,12 @@ func GetRestrictedJolokia(client rtclient.Client, _ip string, _port string, _pat
 		protocol:   "https",
 		restricted: true,
 		client:     client,
+		log:        logger,
 	}
 	return &j
 }
 
-func GetJolokia(_client rtclient.Client, _ip string, _port string, _path string, _user string, _password string, _protocol string) *Jolokia {
+func GetJolokia(_client rtclient.Client, _ip string, _port string, _path string, _user string, _password string, _protocol string, logger logr.Logger) *Jolokia {
 
 	j := Jolokia{
 		ip:         _ip,
@@ -83,6 +86,7 @@ func GetJolokia(_client rtclient.Client, _ip string, _port string, _path string,
 		password:   _password,
 		protocol:   _protocol,
 		client:     _client,
+		log:        logger,
 	}
 	if j.user == "" {
 		j.user = "admin"
@@ -119,14 +123,14 @@ func (j *Jolokia) GetClientWithTimeout(timeout time.Duration) *http.Client {
 			InsecureSkipVerify: true,
 			ServerName:         j.ip,
 		}
-		if common.OperatorHasCertAndTrustBundle(j.client) {
+		if common.OperatorHasCertAndTrustBundle(j.client, j.log) {
 			httpClientTransport.TLSClientConfig.InsecureSkipVerify = false
 			httpClientTransport.TLSClientConfig.GetClientCertificate =
 				func(cri *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-					return common.GetOperatorClientCertificate(j.client, cri)
+					return common.GetOperatorClientCertificate(j.client, cri, j.log)
 				}
 		}
-		if rootCas, err := common.GetRootCAs(j.client); err == nil {
+		if rootCas, err := common.GetRootCAs(j.client, j.log); err == nil {
 			httpClientTransport.TLSClientConfig.RootCAs = rootCas
 		}
 	}

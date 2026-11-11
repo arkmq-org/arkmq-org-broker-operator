@@ -88,7 +88,7 @@ var _ = Describe("broker controller unit", func() {
 		namer := MakeNamersForBroker(cr)
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
+		ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 
 		var times = 0
 		interceptorFuncs := interceptor.Funcs{
@@ -141,7 +141,7 @@ var _ = Describe("broker controller unit", func() {
 			r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
 			namer := MakeNamersForBroker(cr)
 
-			reconciler1 := NewBrokerReconcilerImpl(cr, r)
+			reconciler1 := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 			firstPTS, err := reconciler1.PodTemplateSpecForCR(cr, *namer, &appsv1.StatefulSet{}, localClient)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(firstPTS.Spec.InitContainers).To(HaveLen(1), "should have one sidecar init container")
@@ -169,7 +169,7 @@ var _ = Describe("broker controller unit", func() {
 			applyServerSideDefaults(deployed.Spec.Template.Spec.Containers)
 
 			currentClone := deployed.DeepCopy()
-			reconciler2 = NewBrokerReconcilerImpl(cr, r)
+			reconciler2 = NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 			secondPTS, err := reconciler2.PodTemplateSpecForCR(cr, *namer, currentClone, localClient)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -216,7 +216,7 @@ var _ = Describe("broker controller unit", func() {
 		}
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
+		ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 
 		fakeSecrets := map[string]client.Object{}
 		interceptorFuncs := interceptor.Funcs{
@@ -660,7 +660,7 @@ var _ = Describe("broker controller unit", func() {
 			DeferCleanup(common.UnsetOperatorNameSpace)
 
 			localClient := fake.NewClientBuilder().WithObjects(operandSecret, operatorCert, operatorCA).Build()
-			reconciler := NewBrokerReconcilerImpl(cr, NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift))
+			reconciler := NewBrokerReconcilerImpl(cr, NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift), ctrl.Log)
 			namer := MakeNamersForBroker(cr)
 
 			var err error
@@ -789,7 +789,7 @@ var _ = Describe("broker controller unit", func() {
 		}
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
+		ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 		Expect(strings.Contains(result, "EXTRA_BROKER_PROPERTIES")).To(BeFalse(),
 			"brokerPropertiesConfigSystemPropValue must not contain the token when EXTRA_BROKER_PROPERTIES is unset")
@@ -824,7 +824,7 @@ var _ = Describe("broker controller unit", func() {
 		Expect(found).To(BeTrue(), "EXTRA_BROKER_PROPERTIES with user value must be in env array")
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
+		ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 		Expect(strings.HasSuffix(result, ",${EXTRA_BROKER_PROPERTIES}")).To(BeTrue(),
 			"brokerPropertiesConfigSystemPropValue must end with ,${EXTRA_BROKER_PROPERTIES} when user has set it")
@@ -836,7 +836,7 @@ var _ = Describe("broker controller unit", func() {
 		}
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
+		ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 		Expect(result).To(Equal("-Dbroker.properties=/config/my-resource/"),
 			"the directory must be loaded so the restricted *.json entries next to broker.properties apply")
@@ -853,7 +853,7 @@ var _ = Describe("broker controller unit", func() {
 		}
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
+		ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 		Expect(result).To(Equal("-Dbroker.properties=/config/my-resource/," + common.SecretPathBase + "my" + common.BrokerPropsSuffix + "/"))
 		Expect(result).NotTo(ContainSubstring("STATEFUL_SET_ORDINAL"))
@@ -928,7 +928,7 @@ var _ = Describe("broker controller unit", func() {
 				Expect(found).To(BeTrue(), "EXTRA_BROKER_PROPERTIES with valueFrom must be in env array")
 
 				r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-				ri := NewBrokerReconcilerImpl(cr, r)
+				ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 				result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 				Expect(strings.HasSuffix(result, ",${EXTRA_BROKER_PROPERTIES}")).To(BeTrue(),
 					"brokerPropertiesConfigSystemPropValue must end with ,${EXTRA_BROKER_PROPERTIES}")
@@ -1018,7 +1018,7 @@ var _ = Describe("broker controller unit", func() {
 			Scheme: s,
 			log:    ctrl.Log,
 		}
-		reconciler := NewBrokerReconcilerImpl(cr, r)
+		reconciler := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 
 		sidecarName := crName + sidecarSecretSuffix
 		deployedSecret := &corev1.Secret{

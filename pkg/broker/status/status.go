@@ -15,6 +15,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/channels"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
+	"github.com/go-logr/logr"
 	routev1 "github.com/openshift/api/route/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -30,14 +31,13 @@ import (
 
 var lastStatusMap map[types.NamespacedName]olm.DeploymentStatus = make(map[types.NamespacedName]olm.DeploymentStatus)
 
-func ProcessStatus(cr *v1beta2.Broker, client rtclient.Client, namespacedName types.NamespacedName, namer common.Namers, reconcileError error) {
-	reqLogger := ctrl.Log.WithName("util_process_status").WithValues("ActiveMQArtemis Name", cr.Name)
+func ProcessStatus(cr *v1beta2.Broker, client rtclient.Client, namespacedName types.NamespacedName, namer common.Namers, reconcileError error, logger logr.Logger) {
 
-	updateVersionStatus(cr)
+	updateVersionStatus(cr, logger)
 
-	cr.Status.PodStatus = updatePodStatus(client, namespacedName)
+	cr.Status.PodStatus = updatePodStatus(client, namespacedName, logger)
 
-	reqLogger.V(1).Info("PodStatus current", "info:", cr.Status.PodStatus)
+	logger.V(1).Info("PodStatus current", "info:", cr.Status.PodStatus)
 
 	ValidCondition := getValidCondition(cr)
 	SetStatusConditionWithGeneration(cr, ValidCondition)
@@ -62,8 +62,8 @@ func UpdateBlockedStatus(cr *v1beta2.Broker, blocked bool) {
 	}
 }
 
-func updateVersionStatus(cr *v1beta2.Broker) {
-	cr.Status.Version.Image = brokerversion.ResolveImage(cr, common.BrokerImageKey)
+func updateVersionStatus(cr *v1beta2.Broker, logger logr.Logger) {
+	cr.Status.Version.Image = brokerversion.ResolveImage(cr, common.BrokerImageKey, logger)
 	// Broker has no InitImage (no init containers in restricted mode)
 	cr.Status.Version.InitImage = ""
 	cr.Status.Version.BrokerVersion, _ = brokerversion.ResolveBrokerVersionFromCR(cr)
@@ -98,16 +98,15 @@ func updateVersionStatus(cr *v1beta2.Broker) {
 	}
 }
 
-func updatePodStatus(client rtclient.Client, namespacedName types.NamespacedName) olm.DeploymentStatus {
-	reqLogger := ctrl.Log.WithName("util_update_pod_status").WithValues("ActiveMQArtemis Name", namespacedName.Name)
-	reqLogger.V(1).Info("Getting status for pods")
+func updatePodStatus(client rtclient.Client, namespacedName types.NamespacedName, logger logr.Logger) olm.DeploymentStatus {
+	logger.V(1).Info("Getting status for pods")
 
 	var status olm.DeploymentStatus
 	var lastStatus olm.DeploymentStatus
 
 	lastStatusExist := false
 	if lastStatus, lastStatusExist = lastStatusMap[namespacedName]; !lastStatusExist {
-		reqLogger.V(2).Info("Creating lastStatus for new CR", "name", namespacedName)
+		logger.V(2).Info("Creating lastStatus for new CR", "name", namespacedName)
 		lastStatus = olm.DeploymentStatus{}
 		lastStatusMap[namespacedName] = lastStatus
 	}
@@ -125,7 +124,7 @@ func updatePodStatus(client rtclient.Client, namespacedName types.NamespacedName
 	}
 
 	if len(status.Ready) == 1 && len(lastStatus.Ready) == 0 {
-		reqLogger.V(1).Info("Notifying address controller", "new ready", status.Ready[0])
+		logger.V(1).Info("Notifying address controller", "new ready", status.Ready[0])
 		channels.AddressListeningCh <- types.NamespacedName{Namespace: namespacedName.Namespace, Name: status.Ready[0]}
 	}
 	lastStatusMap[namespacedName] = status

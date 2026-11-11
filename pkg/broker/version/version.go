@@ -11,6 +11,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 	"github.com/blang/semver/v4"
+	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -43,8 +44,7 @@ func ResolveBrokerVersionFromCR(cr *v1beta2.Broker) (string, error) {
 	return result.String(), nil
 }
 
-func determineImageToUse(customResource *v1beta2.Broker, imageTypeKey string) string {
-	log := ctrl.Log.WithName("util_common")
+func determineImageToUse(customResource *v1beta2.Broker, imageTypeKey string, logger logr.Logger) string {
 	found := false
 	imageName := ""
 	compactVersionToUse, _ := DetermineCompactVersionToUse(customResource)
@@ -55,28 +55,28 @@ func determineImageToUse(customResource *v1beta2.Broker, imageTypeKey string) st
 		archSpecificRelatedImageEnvVarName = genericRelatedImageEnvVarName + "_" + osruntime.GOARCH
 	}
 	imageName, found = os.LookupEnv(archSpecificRelatedImageEnvVarName)
-	log.V(1).Info("DetermineImageToUse", "env", archSpecificRelatedImageEnvVarName, "imageName", imageName)
+	logger.V(1).Info("DetermineImageToUse", "env", archSpecificRelatedImageEnvVarName, "imageName", imageName)
 
 	if !found {
 		imageName, found = os.LookupEnv(genericRelatedImageEnvVarName)
-		log.V(1).Info("DetermineImageToUse - from generic", "env", genericRelatedImageEnvVarName, "imageName", imageName)
+		logger.V(1).Info("DetermineImageToUse - from generic", "env", genericRelatedImageEnvVarName, "imageName", imageName)
 	}
 
 	if !found {
 		imageName = version.DefaultImageName(archSpecificRelatedImageEnvVarName)
-		log.V(1).Info("DetermineImageToUse - from default", "env", archSpecificRelatedImageEnvVarName, "imageName", imageName)
+		logger.V(1).Info("DetermineImageToUse - from default", "env", archSpecificRelatedImageEnvVarName, "imageName", imageName)
 	}
 
 	return imageName
 }
 
-func ResolveImage(customResource *v1beta2.Broker, key string) string {
+func ResolveImage(customResource *v1beta2.Broker, key string, logger logr.Logger) string {
 	// Broker has no InitImage (no init containers in restricted mode).
 	// Only the broker image can be locked down via Spec.Image.
 	if key == common.BrokerImageKey && IsLockedDown(customResource.Spec.Image) {
 		return customResource.Spec.Image
 	}
-	return determineImageToUse(customResource, key)
+	return determineImageToUse(customResource, key, logger)
 }
 
 func IsLockedDown(imageAttribute string) bool {

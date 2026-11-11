@@ -113,7 +113,7 @@ func NewBrokerReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShif
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,namespace=arkmq-org-broker-operator,resources=roles;rolebindings,verbs=create;delete;get;list;patch;watch
 
 func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
-	reqLogger := r.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "Broker")
+	reqLog := r.log.WithValues("Reconciling", request.Namespace+"/"+request.Name)
 
 	customResource := &v1beta2.Broker{}
 	namespacedName := request.NamespacedName
@@ -123,10 +123,10 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 	err := r.Get(ctx, namespacedName, customResource)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
-			reqLogger.V(1).Info("Broker Controller Reconcile encountered a IsNotFound")
+			reqLog.V(1).Info("Broker Controller Reconcile encountered a IsNotFound")
 			return result, nil
 		}
-		reqLogger.Error(err, "unable to retrieve the Broker")
+		reqLog.Error(err, "unable to retrieve the Broker")
 		return result, err
 	}
 
@@ -138,7 +138,7 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 	}
 
 	namer := MakeNamersForBroker(customResource)
-	reconciler := NewBrokerReconcilerImpl(customResource, r)
+	reconciler := NewBrokerReconcilerImpl(customResource, r, reqLog)
 
 	valid, requeueRequest := reconciler.validate(customResource, r.Client)
 	if valid {
@@ -152,7 +152,7 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 	}
 
 	brokerstatus.UpdateBlockedStatus(customResource, reconcileBlocked)
-	brokerstatus.ProcessStatus(customResource, r.Client, namespacedName, *namer, err)
+	brokerstatus.ProcessStatus(customResource, r.Client, namespacedName, *namer, err, reqLog)
 
 	crStatusUpdateErr := r.UpdateBrokerCRStatus(customResource, r.Client, namespacedName)
 	if crStatusUpdateErr != nil {
@@ -160,12 +160,12 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 	}
 
 	if requeueRequest {
-		reqLogger.V(1).Info("requeue reconcile")
+		reqLog.V(1).Info("requeue reconcile")
 		result = ctrl.Result{RequeueAfter: common.GetReconcileResyncPeriod()}
 	}
 
 	if valid && err == nil && crStatusUpdateErr == nil {
-		reqLogger.V(1).Info("resource successfully reconciled")
+		reqLog.V(1).Info("resource successfully reconciled")
 	}
 	return result, err
 }
@@ -332,9 +332,9 @@ func withCRContext(logger logr.Logger, kind, name, namespace string) logr.Logger
 	return logger.WithValues("Kind", kind, "CRD.Name", name, "CRD.Namespace", namespace)
 }
 
-func NewBrokerReconcilerImpl(customResource *v1beta2.Broker, parent *BrokerReconciler) *BrokerReconcilerImpl {
+func NewBrokerReconcilerImpl(customResource *v1beta2.Broker, parent *BrokerReconciler, logger logr.Logger) *BrokerReconcilerImpl {
 	return &BrokerReconcilerImpl{
-		log:                withCRContext(parent.log, customResource.Kind, customResource.Name, customResource.Namespace),
+		log:                logger,
 		customResource:     customResource,
 		scheme:             parent.Scheme,
 		requestedResources: make(map[reflect.Type]map[string]rtclient.Object),
@@ -884,7 +884,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 	podSpec.ImagePullSecrets = customResource.Spec.ImagePullSecrets
 
-	container := containers.MakeContainer(podSpec, customResource.Name, brokerversion.ResolveImage(customResource, common.BrokerImageKey), MakeEnvVarArrayForCRForBroker(customResource, namer))
+	container := containers.MakeContainer(podSpec, customResource.Name, brokerversion.ResolveImage(customResource, common.BrokerImageKey, reconciler.log), MakeEnvVarArrayForCRForBroker(customResource, namer))
 
 	container.Resources = customResource.Spec.Resources
 
@@ -934,14 +934,14 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 		}
 
 		// still needed below for the mount and the cert paths
-		operandCertSecretName := common.GetOperandCertSecretName(customResource, client)
+		operandCertSecretName := common.GetOperandCertSecretName(customResource, client, reconciler.log)
 
 		var caCertSecret *corev1.Secret
-		if caCertSecret, err = common.GetOperatorCASecret(client); err != nil {
+		if caCertSecret, err = common.GetOperatorCASecret(client, reconciler.log); err != nil {
 			return nil, fmt.Errorf("failed to get operator ca secret, %w", err)
 		}
 
-		caSecretKey, err := common.GetOperatorCASecretKey(client, caCertSecret)
+		caSecretKey, err := common.GetOperatorCASecretKey(client, caCertSecret, reconciler.log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get operator ca secret key, %w", err)
 		}
@@ -951,7 +951,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 		// shared with the BrokerService controller, which renders this same file
 		// complete into its control-plane override
-		cns, err := common.ResolveControlPlaneCNs(client, customResource)
+		cns, err := common.ResolveControlPlaneCNsWithLog(client, customResource, reconciler.log)
 		if err != nil {
 			return nil, err
 		}
@@ -1141,7 +1141,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	// the broker image does not widen the attack surface.
 
 	sidecarRestartPolicy := corev1.ContainerRestartPolicyAlways
-	sidecarContainer.Image = brokerversion.ResolveImage(customResource, common.BrokerImageKey)
+	sidecarContainer.Image = brokerversion.ResolveImage(customResource, common.BrokerImageKey, reconciler.log)
 	sidecarContainer.Command = []string{"/bin/bash", path.Join(sidecarSecretPath, brokerStatusScriptKey)}
 	sidecarContainer.RestartPolicy = &sidecarRestartPolicy
 	sidecarContainer.Env = []corev1.EnvVar{
@@ -1787,7 +1787,7 @@ func (reconciler *BrokerReconcilerImpl) GetAndCacheBrokerStatus(jk *jolokia_clie
 
 func (reconciler *BrokerReconcilerImpl) resolveJolokiaEndpoints(cr *v1beta2.Broker, client rtclient.Client) {
 	if reconciler.jolokiaEndpoints == nil {
-		reconciler.jolokiaEndpoints = jolokia_client.GetMinimalJolokiaAgentsForBroker(cr, client)
+		reconciler.jolokiaEndpoints = jolokia_client.GetMinimalJolokiaAgentsForBroker(cr, client, reconciler.log)
 	}
 }
 
@@ -2058,7 +2058,7 @@ func validateEnvVarsForBroker(customResource *v1beta2.Broker) (*metav1.Condition
 
 func (reconciler *BrokerReconcilerImpl) validateRequiredSecrets(client rtclient.Client) (*metav1.Condition, bool) {
 	retry := true
-	if _, err := common.GetOperatorClientCertSecret(client); err != nil {
+	if _, err := common.GetOperatorClientCertSecret(client, reconciler.log); err != nil {
 		return &metav1.Condition{
 			Type:    v1beta2.ValidConditionType,
 			Status:  metav1.ConditionFalse,
@@ -2066,7 +2066,7 @@ func (reconciler *BrokerReconcilerImpl) validateRequiredSecrets(client rtclient.
 			Message: fmt.Sprintf("operator failed to locate necessary operator client certificate secret, %v", err),
 		}, retry
 	}
-	if _, err := common.GetOperatorCASecret(client); err != nil {
+	if _, err := common.GetOperatorCASecret(client, reconciler.log); err != nil {
 		return &metav1.Condition{
 			Type:    v1beta2.ValidConditionType,
 			Status:  metav1.ConditionFalse,
@@ -2074,8 +2074,8 @@ func (reconciler *BrokerReconcilerImpl) validateRequiredSecrets(client rtclient.
 			Message: fmt.Sprintf("operator failed to locate necessary operator ca secret, %v", err),
 		}, retry
 	}
-	operandCertSecretName := common.GetOperandCertSecretName(reconciler.customResource, client)
-	if _, err := common.GetNamespacedSecret(client, operandCertSecretName, reconciler.customResource.Namespace); err != nil {
+	operandCertSecretName := common.GetOperandCertSecretName(reconciler.customResource, client, reconciler.log)
+	if _, err := common.GetNamespacedSecretWithLog(client, operandCertSecretName, reconciler.customResource.Namespace, reconciler.log); err != nil {
 		return &metav1.Condition{
 			Type:    v1beta2.ValidConditionType,
 			Status:  metav1.ConditionFalse,

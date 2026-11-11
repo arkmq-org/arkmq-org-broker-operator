@@ -550,7 +550,7 @@ func createControllerManager(watchNamespace string) {
 	enabledControllers := common.ResolveEnabledControllers()
 
 	if enabledControllers["ActiveMQArtemis"] {
-		brokerReconciler = NewActiveMQArtemisReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable)
+		brokerReconciler = NewActiveMQArtemisReconciler(k8Manager, ctrl.Log.WithName("ActiveMQArtemisReconciler"), isOpenshift, isGatewayAPIAvailable)
 
 		if err = brokerReconciler.SetupWithManager(k8Manager); err != nil {
 			ctrl.Log.Error(err, "unable to create controller", "controller", "ActiveMQArtemisReconciler")
@@ -566,7 +566,7 @@ func createControllerManager(watchNamespace string) {
 	}
 
 	if enabledControllers["Broker"] {
-		brokerCRReconciler := NewBrokerReconciler(k8Manager, ctrl.Log, isOpenshift)
+		brokerCRReconciler := NewBrokerReconciler(k8Manager, ctrl.Log.WithName("BrokerReconciler"), isOpenshift)
 
 		if err = brokerCRReconciler.SetupWithManager(k8Manager); err != nil {
 			ctrl.Log.Error(err, "unable to create controller", "controller", "BrokerReconciler")
@@ -582,7 +582,7 @@ func createControllerManager(watchNamespace string) {
 				Client:           k8Manager.GetClient(),
 				Scheme:           k8Manager.GetScheme(),
 				BrokerReconciler: brokerReconciler,
-				log:              ctrl.Log,
+				log:              ctrl.Log.WithName("ActiveMQArtemisSecurityReconciler"),
 			}
 
 			err = securityReconciler.SetupWithManager(k8Manager)
@@ -594,7 +594,7 @@ func createControllerManager(watchNamespace string) {
 		addressReconciler := &ActiveMQArtemisAddressReconciler{
 			Client: k8Manager.GetClient(),
 			Scheme: k8Manager.GetScheme(),
-			log:    ctrl.Log,
+			log:    ctrl.Log.WithName("ActiveMQArtemisAddressReconciler"),
 		}
 
 		err = addressReconciler.SetupWithManager(k8Manager, managerCtx)
@@ -606,7 +606,7 @@ func createControllerManager(watchNamespace string) {
 			Client: k8Manager.GetClient(),
 			Scheme: k8Manager.GetScheme(),
 			Config: k8Manager.GetConfig(),
-			log:    ctrl.Log,
+			log:    ctrl.Log.WithName("ActiveMQArtemisScaledownReconciler"),
 		}
 
 		err = scaleDownRconciler.SetupWithManager(k8Manager)
@@ -618,7 +618,7 @@ func createControllerManager(watchNamespace string) {
 			k8Manager.GetClient(),
 			k8Manager.GetScheme(),
 			k8Manager.GetConfig(),
-			ctrl.Log,
+			ctrl.Log.WithName("BrokerServiceReconciler"),
 		)
 
 		err = serviceReconciler.SetupWithManager(k8Manager)
@@ -630,7 +630,7 @@ func createControllerManager(watchNamespace string) {
 			k8Manager.GetClient(),
 			k8Manager.GetScheme(),
 			k8Manager.GetConfig(),
-			ctrl.Log,
+			ctrl.Log.WithName("BrokerAppReconciler"),
 		)
 
 		err = appReconciler.SetupWithManager(k8Manager)

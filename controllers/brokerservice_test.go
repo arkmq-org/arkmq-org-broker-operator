@@ -29,6 +29,7 @@ import (
 	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -811,10 +812,10 @@ var _ = Describe("broker-service-poc", func() {
 				}
 				httpClientTransport.TLSClientConfig.GetClientCertificate =
 					func(cri *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-						return common.GetOperatorClientCertificate(k8sClient, cri)
+						return common.GetOperatorClientCertificate(k8sClient, cri, ctrl.Log)
 					}
 
-				if rootCas, err := common.GetRootCAs(k8sClient); err == nil {
+				if rootCas, err := common.GetRootCAs(k8sClient, ctrl.Log); err == nil {
 					httpClientTransport.TLSClientConfig.RootCAs = rootCas
 				}
 
@@ -878,7 +879,7 @@ var _ = Describe("broker-service-poc", func() {
 
 				httpClientTransport.TLSClientConfig.Certificates = []tls.Certificate{cert}
 
-				if rootCas, err := common.GetRootCAs(k8sClient); err == nil {
+				if rootCas, err := common.GetRootCAs(k8sClient, ctrl.Log); err == nil {
 					httpClientTransport.TLSClientConfig.RootCAs = rootCas
 				}
 

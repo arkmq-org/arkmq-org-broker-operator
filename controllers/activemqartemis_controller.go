@@ -202,7 +202,7 @@ func (r *ActiveMQArtemisReconciler) Reconcile(ctx context.Context, request ctrl.
 	}
 
 	common.UpdateBlockedStatus(customResource, reconcileBlocked)
-	common.ProcessStatus(customResource, r.Client, request.NamespacedName, *namer, err)
+	common.ProcessStatus(customResource, r.Client, request.NamespacedName, *namer, err, reqLogger)
 
 	if !requeueRequest {
 		deployedCondition := meta.FindStatusCondition(customResource.Status.Conditions, brokerv1beta1.DeployedConditionType)

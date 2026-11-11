@@ -183,7 +183,7 @@ func (reconciler BrokerAppInstanceReconciler) validateAddressSharingSelectors() 
 func (reconciler BrokerAppInstanceReconciler) verifyAppCert() error {
 	secretName := reconciler.instance.Name + common.AppCertSecretSuffix
 
-	secret, err := common.GetNamespacedSecret(reconciler.Client, secretName, reconciler.instance.Namespace)
+	secret, err := common.GetNamespacedSecretWithLog(reconciler.Client, secretName, reconciler.instance.Namespace, reconciler.log)
 	if err != nil {
 		return NewTransientErrorWithCause(
 			broker.DeployedConditionMissingAppCertReason,
@@ -248,8 +248,6 @@ func NewBrokerAppReconciler(client client.Client, scheme *runtime.Scheme, config
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerservices,verbs=get;list;watch;update
 
 func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
-	reqLogger := reconciler.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "BrokerApp")
-
 	instance := &broker.BrokerApp{}
 	var err = reconciler.Get(ctx, request.NamespacedName, instance)
 	if err != nil {
@@ -260,7 +258,12 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 	}
 
 	localLoop := &ReconcilerLoop{
-		KubeBits:           reconciler.KubeBits,
+		KubeBits: &KubeBits{
+			Client: reconciler.Client,
+			Scheme: reconciler.Scheme,
+			Config: reconciler.Config,
+			log:    reconciler.log.WithValues("Reconciling", request.Namespace+"/"+request.Name),
+		},
 		ReconcilerLoopType: reconciler,
 	}
 
@@ -270,7 +273,7 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 		status:              instance.Status.DeepCopy(),
 	}
 
-	reqLogger.V(2).Info("Reconciler Processing...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation)
+	processor.log.V(2).Info("Processing...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation)
 	if err = processor.checkServiceAcceptance(); err == nil {
 		if processor.unbindingReason != "" {
 			processor.handleUnbinding(nil)
@@ -290,7 +293,7 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 
 	// Update status with conditions
 	statusErr := processor.processStatus(err)
-	reqLogger.V(2).Info("Reconciler Processed...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation, "error", err)
+	processor.log.V(2).Info("Processed...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation, "error", err)
 
 	if processor.unbindingReason != "" && processor.status.Service != nil {
 		if statusErr != nil {

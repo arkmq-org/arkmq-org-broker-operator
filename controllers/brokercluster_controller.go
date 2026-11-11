@@ -104,7 +104,7 @@ func (r *BrokerClusterReconciler) Reconcile(ctx context.Context, request ctrl.Re
 	}
 
 	common.UpdateBlockedStatus(customResource, reconcileBlocked)
-	common.ProcessStatus(customResource, r.Client, request.NamespacedName, *namer, err)
+	common.ProcessStatus(customResource, r.Client, request.NamespacedName, *namer, err, reqLogger)
 
 	crStatusUpdateErr := r.UpdateBrokerClusterCRStatus(customResource, r.Client, request.NamespacedName)
 	if crStatusUpdateErr != nil {
