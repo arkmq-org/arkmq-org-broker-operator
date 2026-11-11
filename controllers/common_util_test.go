@@ -1420,6 +1420,13 @@ func StripFinalizers(ctx context.Context, obj client.Object) {
 	}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 }
 
+func GracefulRemove(ctx context.Context, obj client.Object) {
+	_ = k8sClient.Delete(ctx, obj)
+	Eventually(func() bool {
+		return errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), obj))
+	}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+}
+
 func ForceRemove(ctx context.Context, obj client.Object) {
 	StripFinalizers(ctx, obj)
 	_ = k8sClient.Delete(ctx, obj)

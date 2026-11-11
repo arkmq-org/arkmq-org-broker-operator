@@ -16,6 +16,7 @@ package controllers
 
 import (
 	"context"
+	"time"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
@@ -166,6 +167,107 @@ var _ = Describe("brokerservice finalizer unit", Label(unitLabel), func() {
 			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(readyCond.Reason).To(Equal(v1beta2.ReadyConditionAddressesPendingEmpty))
 			Expect(readyCond.Message).To(ContainSubstring("Deletion pending"))
+		})
+
+		It("does not update Ready lastTransitionTime on repeated reconciles during drain", Label(unitLabel), func() {
+			svcName := "drain-stable-time"
+			appName := "drain-app"
+
+			svc := NewBrokerService(svcName, ns).Build()
+
+			app := NewBrokerApp(appName, ns).
+				WithAddresses(NewAddressType("orders").Build()).
+				WithProducerOf(NewAddressRef("orders").Build()).
+				WithConsumerOf(NewAddressRef("orders").Build()).
+				WithServiceBinding(svcName, ns, "binding-secret", 61616).
+				Build()
+
+			oc := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "op_ca", Namespace: ns},
+				Data:       map[string][]byte{"ca.pem": []byte("test")},
+			}
+			namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+
+			objects := WithCerts(namespace, oc, svc, app)
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(objects...).
+				WithStatusSubresource(svc, app, &v1beta2.Broker{}).
+				WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
+					a := rawObj.(*v1beta2.BrokerApp)
+					if a.Status.Service != nil {
+						return []string{a.Status.Service.Key()}
+					}
+					return nil
+				}).Build()
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+
+			By("initial reconcile establishes finalizers")
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("simulating the broker reporting deployed and apps provisioned")
+			secretName := AppPropertiesSecretName(svcName)
+			appSecret := &corev1.Secret{}
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, appSecret)).To(Succeed())
+
+			brokerCR := &v1beta2.Broker{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, brokerCR)).To(Succeed())
+			brokerCR.Status.Conditions = []metav1.Condition{
+				{Type: v1beta2.ReadyConditionType, Status: metav1.ConditionTrue, Reason: "Ready"},
+				{Type: v1beta2.DeployedConditionType, Status: metav1.ConditionTrue, Reason: "Ready"},
+			}
+			brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
+				{Name: secretName, ResourceVersion: appSecret.ResourceVersion},
+			}
+			Expect(cl.Status().Update(context.TODO(), brokerCR)).To(Succeed())
+
+			_, err = r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedSvc := &v1beta2.BrokerService{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedSvc)).To(Succeed())
+			readyCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ReadyConditionType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionTrue),
+				"precondition: service should be Ready before deletion")
+
+			By("deleting the service")
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedSvc)).To(Succeed())
+			Expect(cl.Delete(context.TODO(), updatedSvc)).To(Succeed())
+
+			By("first reconcile after deletion — Ready transitions to False/AddressesPendingEmpty")
+			_, err = r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedSvc)).To(Succeed())
+			readyCond = meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ReadyConditionType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal(v1beta2.ReadyConditionAddressesPendingEmpty))
+			firstTransitionTime := readyCond.LastTransitionTime
+
+			By("keeping broker in sync with latest secret version")
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, appSecret)).To(Succeed())
+			Expect(cl.Get(context.TODO(), req.NamespacedName, brokerCR)).To(Succeed())
+			brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
+				{Name: secretName, ResourceVersion: appSecret.ResourceVersion},
+			}
+			Expect(cl.Status().Update(context.TODO(), brokerCR)).To(Succeed())
+
+			By("second reconcile — lastTransitionTime must not change")
+			time.Sleep(time.Second)
+			_, err = r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedSvc)).To(Succeed())
+			readyCond = meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ReadyConditionType)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal(v1beta2.ReadyConditionAddressesPendingEmpty))
+			Expect(readyCond.LastTransitionTime).To(Equal(firstTransitionTime),
+				"lastTransitionTime must not change when the condition status has not changed")
 		})
 
 		It("removes finalizer when deleted service has no bound apps", Label(unitLabel), func() {

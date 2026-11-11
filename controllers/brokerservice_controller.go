@@ -565,16 +565,29 @@ func (reconciler *BrokerServiceInstanceReconciler) setReadyCondition(generation 
 		ObservedGeneration: generation,
 	}
 
-	ready := meta.IsStatusConditionTrue(reconciler.status.Conditions, broker.DeployedConditionType)
-	for _, c := range reconciler.status.Conditions {
-		if c.Type != broker.ReadyConditionType && c.Status == metav1.ConditionFalse {
-			ready = false
-		}
-	}
-	if !ready {
+	if reconciler.instance.DeletionTimestamp != nil && controllerutil.ContainsFinalizer(reconciler.instance, broker.AddressesPendingEmptyFinalizer) {
 		condition.Status = metav1.ConditionFalse
-		condition.Reason = broker.NotReadyConditionReason
-		condition.Message = common.NotReadyConditionMessage
+		condition.Reason = broker.ReadyConditionAddressesPendingEmpty
+		condition.Message = "Deletion pending, addresses pending empty"
+		if len(reconciler.status.PendingEmpty) > 0 {
+			pendingApps := make([]string, 0, len(reconciler.status.PendingEmpty))
+			for _, ds := range reconciler.status.PendingEmpty {
+				pendingApps = append(pendingApps, ds.App)
+			}
+			condition.Message = fmt.Sprintf("Deletion pending, addresses pending empty for apps: %s", strings.Join(pendingApps, ", "))
+		}
+	} else {
+		ready := meta.IsStatusConditionTrue(reconciler.status.Conditions, broker.DeployedConditionType)
+		for _, c := range reconciler.status.Conditions {
+			if c.Type != broker.ReadyConditionType && c.Status == metav1.ConditionFalse {
+				ready = false
+			}
+		}
+		if !ready {
+			condition.Status = metav1.ConditionFalse
+			condition.Reason = broker.NotReadyConditionReason
+			condition.Message = common.NotReadyConditionMessage
+		}
 	}
 
 	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
@@ -680,24 +693,6 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 	meta.SetStatusCondition(&reconciler.status.Conditions, appsProvisionedCondition)
 
 	reconciler.setReadyCondition(generation)
-
-	if reconciler.instance.DeletionTimestamp != nil && controllerutil.ContainsFinalizer(reconciler.instance, broker.AddressesPendingEmptyFinalizer) {
-		message := "Deletion pending, addresses pending empty"
-		if len(reconciler.status.PendingEmpty) > 0 {
-			pendingApps := make([]string, 0, len(reconciler.status.PendingEmpty))
-			for _, ds := range reconciler.status.PendingEmpty {
-				pendingApps = append(pendingApps, ds.App)
-			}
-			message = fmt.Sprintf("Deletion pending, addresses pending empty for apps: %s", strings.Join(pendingApps, ", "))
-		}
-		meta.SetStatusCondition(&reconciler.status.Conditions, metav1.Condition{
-			Type:               broker.ReadyConditionType,
-			Status:             metav1.ConditionFalse,
-			Reason:             broker.ReadyConditionAddressesPendingEmpty,
-			Message:            message,
-			ObservedGeneration: generation,
-		})
-	}
 
 	reconciler.status.ObservedGeneration = generation
 
@@ -1056,11 +1051,15 @@ func (reconciler *BrokerServiceInstanceReconciler) processAddressDrain(app *brok
 		}
 		appStatus := broker.PendingEmptyAddressStatus{
 			App:      role,
-			Messages: make(map[string]int64),
+			Messages: make(map[string]string),
 		}
 		for _, da := range pendingAddresses {
 			for fqqn, count := range da.MessageCounts {
-				appStatus.Messages[fqqn] = count
+				if count < 0 {
+					appStatus.Messages[fqqn] = "unknown"
+				} else {
+					appStatus.Messages[fqqn] = fmt.Sprintf("%d", count)
+				}
 			}
 		}
 		reconciler.status.PendingEmpty = append(reconciler.status.PendingEmpty, appStatus)
@@ -1271,6 +1270,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 	// process authN cert login module params
 
 	/* TODO: pull down full DN from app cert
+	// see: appIdentityEntries
 
 	var appCert *tls.Certificate
 	if appCert, err = common.ExtractCertFromSecret(...); err != nil {

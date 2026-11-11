@@ -455,7 +455,7 @@ var _ = Describe("brokerapp unbinding unit", func() {
 			svc := NewBrokerService(svcName, ns).
 				WithPendingEmpty(v1beta2.PendingEmptyAddressStatus{
 					App:      AppIdentity(app),
-					Messages: map[string]int64{"orders": 10},
+					Messages: map[string]string{"orders": "10"},
 				}).
 				Build()
 			brokerCR := &v1beta2.Broker{

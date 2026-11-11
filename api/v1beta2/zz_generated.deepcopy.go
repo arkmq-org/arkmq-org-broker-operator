@@ -1486,7 +1486,7 @@ func (in *PendingEmptyAddressStatus) DeepCopyInto(out *PendingEmptyAddressStatus
 	*out = *in
 	if in.Messages != nil {
 		in, out := &in.Messages, &out.Messages
-		*out = make(map[string]int64, len(*in))
+		*out = make(map[string]string, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val
 		}

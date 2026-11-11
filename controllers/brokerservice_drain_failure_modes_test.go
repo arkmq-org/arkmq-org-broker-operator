@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -491,9 +492,9 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
 		DeferCleanup(CleanupAppCerts, appName, defaultNamespace)
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(ForceRemove, ctx, &service)
+		DeferCleanup(GracefulRemove, ctx, &service)
 		app := setupApp(ctx, appName, labels, jobsSpec())
-		DeferCleanup(ForceRemove, ctx, &app)
+		DeferCleanup(GracefulRemove, ctx, &app)
 		verifyProvisioned(ctx, serviceName, appName)
 		ep := setupMqttEndpoint(ctx, serviceName, appName)
 		DeferCleanup(cleanupMqttEndpoint, ep)
@@ -659,10 +660,10 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupAppCerts, tenantName, defaultNamespace)
 		DeferCleanup(CleanupAppCerts, controlName, defaultNamespace)
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(ForceRemove, ctx, &service)
+		DeferCleanup(GracefulRemove, ctx, &service)
 
 		tenant := setupApp(ctx, tenantName, labels, jobsSpec())
-		DeferCleanup(ForceRemove, ctx, &tenant)
+		DeferCleanup(GracefulRemove, ctx, &tenant)
 		control := setupApp(ctx, controlName, labels, broker.BrokerAppSpec{
 			Addresses: []broker.AddressType{{Address: "control"}},
 			Capabilities: []broker.AppCapabilityType{{
@@ -670,7 +671,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 				ConsumerOf: []broker.AddressRef{{Address: "control"}},
 			}},
 		})
-		DeferCleanup(ForceRemove, ctx, &control)
+		DeferCleanup(GracefulRemove, ctx, &control)
 		verifyProvisioned(ctx, serviceName, tenantName)
 		verifyProvisioned(ctx, serviceName, controlName)
 
@@ -717,7 +718,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
 		DeferCleanup(CleanupAppCerts, appName, defaultNamespace)
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(ForceRemove, ctx, &service)
+		DeferCleanup(GracefulRemove, ctx, &service)
 
 		app := setupApp(ctx, appName, labels, broker.BrokerAppSpec{
 			Capabilities: []broker.AppCapabilityType{{
@@ -728,7 +729,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 				}},
 			}},
 		})
-		DeferCleanup(ForceRemove, ctx, &app)
+		DeferCleanup(GracefulRemove, ctx, &app)
 		verifyProvisioned(ctx, serviceName, appName)
 		ep := setupMqttEndpoint(ctx, serviceName, appName)
 		DeferCleanup(cleanupMqttEndpoint, ep)
@@ -753,19 +754,22 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 			if verbose {
 				fmt.Printf("\n Service Status: %v\n", current.Status)
 			}
-			var pending map[string]int64
+			var pending map[string]string
 			for _, pe := range current.Status.PendingEmpty {
 				if pe.App == AppIdentity(&app) {
 					pending = pe.Messages
 				}
 			}
-			g.Expect(pending).Should(HaveKeyWithValue("orders::fm-b.orders", int64(5)),
+			g.Expect(pending).Should(HaveKeyWithValue("orders::fm-b.orders", "5"),
 				"5 messages on the removed subscription are not tracked as pending empty, status.pendingEmpty=%+v",
 				current.Status.PendingEmpty)
 		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 		By("the removed subscriber can still drain its messages")
 		mqttConsume(ctx, ep, "fm-b", "orders", 5)
+
+		By("the remaining subscriber can consume its messages")
+		mqttConsume(ctx, ep, "fm-a", "orders", 5)
 	})
 
 	It("retained subscription keeps receiving while a sibling subscription is draining", Label("slow"), func() {
@@ -780,7 +784,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
 		DeferCleanup(CleanupAppCerts, appName, defaultNamespace)
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(ForceRemove, ctx, &service)
+		DeferCleanup(GracefulRemove, ctx, &service)
 
 		app := setupApp(ctx, appName, labels, broker.BrokerAppSpec{
 			Capabilities: []broker.AppCapabilityType{{
@@ -791,7 +795,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 				}},
 			}},
 		})
-		DeferCleanup(ForceRemove, ctx, &app)
+		DeferCleanup(GracefulRemove, ctx, &app)
 		verifyProvisioned(ctx, serviceName, appName)
 		ep := setupMqttEndpoint(ctx, serviceName, appName)
 		DeferCleanup(cleanupMqttEndpoint, ep)
@@ -858,7 +862,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 			if verbose {
 				fmt.Printf("\n Service Status: %v\n", current.Status)
 			}
-			var pending map[string]int64
+			var pending map[string]string
 			for _, pe := range current.Status.PendingEmpty {
 				if pe.App == AppIdentity(&app) {
 					pending = pe.Messages
@@ -884,11 +888,13 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
 			for _, pe := range current.Status.PendingEmpty {
 				if pe.App == AppIdentity(&app) {
-					count, ok := pe.Messages["events::removed.events"]
+					countStr, ok := pe.Messages["events::removed.events"]
 					if ok {
 						if verbose {
 							fmt.Printf("\n BrokerService PendingEmpty: %v\n", current.Status.PendingEmpty)
 						}
+						count, err := strconv.ParseInt(countStr, 10, 64)
+						g.Expect(err).NotTo(HaveOccurred())
 						g.Expect(count).Should(BeNumerically("<=", int64(15)),
 							"removed subscription should not receive continuous messages, got %d", count)
 					}
@@ -913,6 +919,9 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 				}
 			}
 		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		By("consuming kept events to allow drain")
+		mqttConsume(ctx, ep, "kept", "events", 1)
 	})
 
 	It("keeps the broker and its messages through a foreground cascade delete", Label("verySlow"), func() {
@@ -927,9 +936,9 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
 		DeferCleanup(CleanupAppCerts, appName, defaultNamespace)
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(ForceRemove, ctx, &service)
+		DeferCleanup(GracefulRemove, ctx, &service)
 		app := setupApp(ctx, appName, labels, jobsSpec())
-		DeferCleanup(ForceRemove, ctx, &app)
+		DeferCleanup(GracefulRemove, ctx, &app)
 		verifyProvisioned(ctx, serviceName, appName)
 		ep := setupMqttEndpoint(ctx, serviceName, appName)
 		DeferCleanup(cleanupMqttEndpoint, ep)
