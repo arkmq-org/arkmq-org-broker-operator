@@ -387,7 +387,7 @@ func (r *ActiveMQArtemisAddressReconciler) getPodBrokers(instance *AddressDeploy
 	reqLogger.V(2).Info("target Cr names", "result", targetCrNamespacedNames)
 	ssInfos := ss.GetDeployedStatefulSetNames(client, request.Namespace, targetCrNamespacedNames)
 
-	return jc.GetBrokers(request.NamespacedName, ssInfos, client)
+	return jc.GetBrokers(request.NamespacedName, ssInfos, client, reqLogger)
 }
 
 func createTargetCrNamespacedNames(namespace string, targetCrNames []string, log logr.Logger) []types.NamespacedName {

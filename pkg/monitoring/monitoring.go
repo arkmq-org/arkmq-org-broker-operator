@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -134,10 +135,10 @@ func Labels(component string, instance string, serviceName string) map[string]st
 // distributes it to every namespace under the same name, so the reference is
 // valid from the service's namespace. Returns nil when the
 // bundle cannot be resolved, which means no wiring should be generated.
-func CARef(client rtclient.Client) *corev1.SecretKeySelector {
+func CARef(client rtclient.Client, logger logr.Logger) *corev1.SecretKeySelector {
 	name := common.GetOperatorCASecretName()
 
-	key, err := common.GetOperatorCASecretKey(client, nil)
+	key, err := common.GetOperatorCASecretKey(client, nil, logger)
 	if err != nil {
 		return nil
 	}

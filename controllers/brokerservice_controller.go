@@ -115,8 +115,6 @@ func NewBrokerServiceReconciler(client client.Client, scheme *runtime.Scheme, co
 //+kubebuilder:rbac:groups=broker.arkmq.org,namespace=arkmq-org-broker-operator,resources=brokerapps/finalizers,verbs=update
 
 func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
-	reqLogger := reconciler.log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name, "Reconciling", "BrokerService")
-
 	instance := &broker.BrokerService{}
 	var err = reconciler.Get(ctx, request.NamespacedName, instance)
 	if err != nil {
@@ -133,7 +131,12 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 	}
 
 	localLoop := &ReconcilerLoop{
-		KubeBits:           reconciler.KubeBits,
+		KubeBits: &KubeBits{
+			Client: reconciler.Client,
+			Scheme: reconciler.Scheme,
+			Config: reconciler.Config,
+			log:    reconciler.log.WithValues("Reconciling", request.Namespace+"/"+request.Name),
+		},
 		ReconcilerLoopType: reconciler,
 	}
 
@@ -143,7 +146,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 		status:                  instance.Status.DeepCopy(),
 	}
 
-	reqLogger.V(2).Info("Reconciler Processing...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation)
+	processor.log.V(2).Info("Processing...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation)
 
 	// Validate spec first, before doing any work
 	if err = processor.validateSpec(); err == nil {
@@ -154,7 +157,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 					if err = processor.SyncDesiredWithDeployed(nil); err == nil {
 						if instanceFinalizerRemoved {
 							if err = reconciler.Update(ctx, instance); err == nil {
-								reqLogger.V(1).Info("Finalizer removed")
+								processor.log.V(1).Info("Finalizer removed")
 								servicemetrics.DeleteServiceMetrics(instance.Name, instance.Namespace)
 							}
 						}
@@ -164,7 +167,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 		}
 	}
 
-	reqLogger.V(2).Info("Reconciler Processed...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation, "error", err)
+	processor.log.V(2).Info("Processed...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation, "error", err)
 
 	statusErr, retry := processor.processStatus(err)
 	if err != nil {
@@ -294,14 +297,14 @@ func (reconciler *BrokerServiceInstanceReconciler) processMonitoring() {
 	// Without a prometheus certificate there is no identity to scrape as, and the
 	// broker would reject the connection. Not an error: the same absence is
 	// tolerated when resolving the control plane CNs.
-	promCertSecret := common.GetPrometheusCertSecretNameFor(instance.Name, instance.Namespace, reconciler.Client)
-	if _, err := common.GetNamespacedSecret(reconciler.Client, promCertSecret, instance.Namespace); err != nil {
+	promCertSecret := common.GetPrometheusCertSecretNameFor(instance.Name, instance.Namespace, reconciler.Client, reconciler.log)
+	if _, err := common.GetNamespacedSecretWithLog(reconciler.Client, promCertSecret, instance.Namespace, reconciler.log); err != nil {
 		reconciler.log.V(1).Info("no prometheus cert, generating no ServiceMonitor",
 			"service", instance.Name, "secret", promCertSecret)
 		return
 	}
 
-	caRef := monitoring.CARef(reconciler.Client)
+	caRef := monitoring.CARef(reconciler.Client, reconciler.log)
 	if caRef == nil {
 		reconciler.log.V(1).Info("no ca bundle, generating no ServiceMonitor", "service", instance.Name)
 		return
@@ -599,14 +602,14 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 
 	generation := reconciler.instance.Generation
 
-	var deployedCondition metav1.Condition = metav1.Condition{
+	var deployedCondition = metav1.Condition{
 		Type:               broker.DeployedConditionType,
 		Status:             metav1.ConditionFalse,
 		Reason:             broker.DeployedConditionNotReadyReason,
 		ObservedGeneration: generation,
 	}
 
-	var appsProvisionedCondition metav1.Condition = metav1.Condition{
+	var appsProvisionedCondition = metav1.Condition{
 		Type:               broker.AppsProvisionedConditionType,
 		Status:             metav1.ConditionFalse,
 		Reason:             broker.AppsProvisionedConditionWaitingReason,
@@ -1373,8 +1376,8 @@ func (reconciler *BrokerServiceInstanceReconciler) getTrustStorePath(_ *broker.B
 	var caCertSecret *corev1.Secret
 	var caSecretKey string
 	var err error
-	if caCertSecret, err = common.GetOperatorCASecret(reconciler.Client); err == nil {
-		if caSecretKey, err = common.GetOperatorCASecretKey(reconciler.Client, caCertSecret); err == nil {
+	if caCertSecret, err = common.GetOperatorCASecret(reconciler.Client, reconciler.log); err == nil {
+		if caSecretKey, err = common.GetOperatorCASecretKey(reconciler.Client, caCertSecret, reconciler.log); err == nil {
 			return fmt.Sprintf("/amq/extra/secrets/%s/%s", caCertSecret.Name, caSecretKey), nil
 		}
 	}
@@ -1503,8 +1506,8 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 		return err
 	}
 
-	cns, err := common.ResolveControlPlaneCNs(reconciler.Client,
-		common.GenerateBroker(reconciler.instance.Name, reconciler.instance.Namespace))
+	cns, err := common.ResolveControlPlaneCNsWithLog(reconciler.Client,
+		common.GenerateBroker(reconciler.instance.Name, reconciler.instance.Namespace), reconciler.log)
 	if err != nil {
 		return err
 	}
@@ -1526,8 +1529,8 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 	}
 	desired.Data[common.GetCertRolesKey(common.HttpAuthenticatorRealm)] = certRoles
 
-	for k, v := range desired.Data {
-		reconciler.log.V(1).Info("Override", "Key", k, "Value", string(v))
+	for k := range desired.Data {
+		reconciler.log.V(2).Info("Override", "Key", k)
 	}
 	reconciler.TrackDesired(desired)
 	return nil
@@ -1561,7 +1564,7 @@ func (reconciler *BrokerServiceInstanceReconciler) appIdentityEntries(validApps 
 func (reconciler *BrokerServiceInstanceReconciler) appCertCN(app *broker.BrokerApp) (string, error) {
 	secretName := app.Name + common.AppCertSecretSuffix
 
-	secret, err := common.GetNamespacedSecret(reconciler.Client, secretName, app.Namespace)
+	secret, err := common.GetNamespacedSecretWithLog(reconciler.Client, secretName, app.Namespace, reconciler.log)
 	if err != nil {
 		return "", err
 	}
@@ -1759,7 +1762,7 @@ func (reconciler *BrokerServiceInstanceReconciler) checkAddressDrainStatus(ctx c
 		return nil, fmt.Errorf("failed to get Broker CR for address drain check: %v", err)
 	}
 
-	jkInfos := jolokia_client.GetMinimalJolokiaAgentsForBroker(brokerCR, reconciler.Client)
+	jkInfos := jolokia_client.GetMinimalJolokiaAgentsForBroker(brokerCR, reconciler.Client, reconciler.log)
 	if len(jkInfos) == 0 {
 		return nil, fmt.Errorf("no Jolokia agents found for broker %s", brokerKey.Name)
 	}
@@ -1875,9 +1878,9 @@ func queueOwners(validApps []broker.BrokerApp, log logr.Logger) map[string]templ
 
 func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]templates.QueueOwner) ([]byte, error) {
 	var caSecret, caSecretKey string
-	if caCertSecret, err := common.GetOperatorCASecret(reconciler.Client); err == nil {
+	if caCertSecret, err := common.GetOperatorCASecret(reconciler.Client, reconciler.log); err == nil {
 		caSecret = caCertSecret.Name
-		if key, err := common.GetOperatorCASecretKey(reconciler.Client, caCertSecret); err == nil {
+		if key, err := common.GetOperatorCASecretKey(reconciler.Client, caCertSecret, reconciler.log); err == nil {
 			caSecretKey = key
 		}
 	}

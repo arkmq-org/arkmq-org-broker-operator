@@ -54,6 +54,7 @@ import (
 	svc "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/services"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 var _ = Describe("broker-service mqtt", func() {
@@ -831,7 +832,7 @@ func scrapeMetrics(g Gomega, serverName string, getClientCert func(*tls.Certific
 		InsecureSkipVerify:   false,
 		GetClientCertificate: getClientCert,
 	}
-	if rootCas, err := common.GetRootCAs(k8sClient); err == nil {
+	if rootCas, err := common.GetRootCAs(k8sClient, ctrl.Log); err == nil {
 		transport.TLSClientConfig.RootCAs = rootCas
 	}
 
@@ -856,7 +857,7 @@ func scrapeMetrics(g Gomega, serverName string, getClientCert func(*tls.Certific
 // operatorClientCert presents the operator's client certificate, which is a
 // member of the broad "metrics" role and therefore sees every app's queues.
 func operatorClientCert(cri *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-	return common.GetOperatorClientCertificate(k8sClient, cri)
+	return common.GetOperatorClientCertificate(k8sClient, cri, ctrl.Log)
 }
 
 // appClientCert presents an app's own <app>-app-cert, whose identity is scoped

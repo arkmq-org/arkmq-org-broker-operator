@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/jolokia"
+	"github.com/go-logr/logr"
 	rtclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -53,24 +54,24 @@ type Artemis struct {
 	jolokia     jolokia.IJolokia
 }
 
-func GetArtemisAgentForRestricted(client rtclient.Client, brokerName string, ordinalFqdn string) *Artemis {
+func GetArtemisAgentForRestricted(client rtclient.Client, brokerName string, ordinalFqdn string, logger logr.Logger) *Artemis {
 	artemis := Artemis{
 		ip:          ordinalFqdn,
 		jolokiaPort: jolokia.JOLOKIA_AGENT_PORT,
 		name:        brokerName,
-		jolokia:     jolokia.GetRestrictedJolokia(client, ordinalFqdn, jolokia.JOLOKIA_AGENT_PORT, "/jolokia"),
+		jolokia:     jolokia.GetRestrictedJolokia(client, ordinalFqdn, jolokia.JOLOKIA_AGENT_PORT, "/jolokia", logger),
 	}
 	return &artemis
 
 }
 
-func GetArtemis(_client rtclient.Client, _ip string, _jolokiaPort string, _name string, _user string, _password string, _protocol string) *Artemis {
+func GetArtemis(_client rtclient.Client, _ip string, _jolokiaPort string, _name string, _user string, _password string, _protocol string, logger logr.Logger) *Artemis {
 
 	artemis := Artemis{
 		ip:          _ip,
 		jolokiaPort: _jolokiaPort,
 		name:        _name,
-		jolokia:     jolokia.GetJolokia(_client, _ip, _jolokiaPort, "/console/jolokia", _user, _password, _protocol),
+		jolokia:     jolokia.GetJolokia(_client, _ip, _jolokiaPort, "/console/jolokia", _user, _password, _protocol, logger),
 	}
 
 	return &artemis

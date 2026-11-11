@@ -24,6 +24,7 @@ import (
 
 	"github.com/RHsyseng/operator-utils/pkg/olm"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -115,7 +116,7 @@ var _ = Describe("Common Test", func() {
 
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(crSpecificSecret).Build()
 
-			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient)
+			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient, logr.Discard())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(secret).NotTo(BeNil())
 			Expect(secret.Name).To(Equal(crName + "-control-plane-override"))
@@ -135,7 +136,7 @@ var _ = Describe("Common Test", func() {
 
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(sharedSecret).Build()
 
-			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient)
+			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient, logr.Discard())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(secret).NotTo(BeNil())
 			Expect(secret.Name).To(Equal("control-plane-override"))
@@ -145,7 +146,7 @@ var _ = Describe("Common Test", func() {
 		It("should return nil when no secret exists", func() {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient)
+			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient, logr.Discard())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(secret).To(BeNil())
 		})
@@ -173,7 +174,7 @@ var _ = Describe("Common Test", func() {
 
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(crSpecificSecret, sharedSecret).Build()
 
-			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient)
+			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient, logr.Discard())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(secret).NotTo(BeNil())
 			Expect(secret.Name).To(Equal(crName + "-control-plane-override"))
@@ -185,7 +186,7 @@ var _ = Describe("Common Test", func() {
 				Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
 			}
 
-			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient)
+			secret, err := ResolveSecret(crName, namespace, "control-plane-override", fakeClient, logr.Discard())
 			Expect(err).To(HaveOccurred())
 			Expect(secret).To(BeNil())
 		})
@@ -218,7 +219,7 @@ var _ = Describe("Common Test", func() {
 			}
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(newSecret).Build()
 
-			secret, err := GetOperatorClientCertSecret(fakeClient)
+			secret, err := GetOperatorClientCertSecret(fakeClient, logr.Discard())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(secret.Name).To(Equal(DefaultOperatorCertSecretName))
 		})
@@ -229,7 +230,7 @@ var _ = Describe("Common Test", func() {
 			}
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(legacySecret).Build()
 
-			secret, err := GetOperatorClientCertSecret(fakeClient)
+			secret, err := GetOperatorClientCertSecret(fakeClient, logr.Discard())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(secret.Name).To(Equal(LegacyOperatorCertSecretName))
 		})
@@ -243,7 +244,7 @@ var _ = Describe("Common Test", func() {
 			}
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(newSecret, legacySecret).Build()
 
-			secret, err := GetOperatorClientCertSecret(fakeClient)
+			secret, err := GetOperatorClientCertSecret(fakeClient, logr.Discard())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(secret.Name).To(Equal(DefaultOperatorCertSecretName))
 		})
@@ -256,7 +257,7 @@ var _ = Describe("Common Test", func() {
 			}
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(legacySecret).Build()
 
-			_, err := GetOperatorClientCertSecret(fakeClient)
+			_, err := GetOperatorClientCertSecret(fakeClient, logr.Discard())
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("custom-cert"))
 			Expect(err.Error()).NotTo(ContainSubstring(LegacyOperatorCertSecretName))
@@ -270,7 +271,7 @@ var _ = Describe("Common Test", func() {
 			}
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(legacySecret).Build()
 
-			_, err := GetOperatorCASecret(fakeClient)
+			_, err := GetOperatorCASecret(fakeClient, logr.Discard())
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("custom-ca"))
 			Expect(err.Error()).NotTo(ContainSubstring(LegacyOperatorCASecretName))
@@ -279,7 +280,7 @@ var _ = Describe("Common Test", func() {
 		It("should return error when neither new nor legacy secret exists", func() {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-			_, err := GetOperatorClientCertSecret(fakeClient)
+			_, err := GetOperatorClientCertSecret(fakeClient, logr.Discard())
 			Expect(err).To(HaveOccurred())
 		})
 	})

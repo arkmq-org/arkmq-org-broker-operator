@@ -50,6 +50,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 var _ = Describe("Address controller tests", func() {
@@ -664,7 +665,7 @@ var _ = Describe("Address controller tests", func() {
 						podNamespacedName := types.NamespacedName{Name: podName, Namespace: defaultNamespace}
 						g.Expect(k8sClient.Get(ctx, podNamespacedName, pod)).Should(Succeed())
 
-						jolokia := jolokia.GetJolokia(k8sClient, pod.Status.PodIP, "8161", "/console/jolokia", "", "", "http")
+						jolokia := jolokia.GetJolokia(k8sClient, pod.Status.PodIP, "8161", "/console/jolokia", "", "", "http", ctrl.Log)
 						data, err := jolokia.Exec("", `{ "type":"EXEC","mbean":"org.apache.activemq.artemis:broker=\"amq-broker\"","operation":"listAddresses(java.lang.String)","arguments":[","] }`)
 						g.Expect(err).To(BeNil())
 						g.Expect(data.Value).Should(ContainSubstring(addressName))
@@ -1359,7 +1360,7 @@ func CheckQueueAttribute(brokerCrName string, podName string, namespace string, 
 	pod := &corev1.Pod{}
 	Eventually(func(g Gomega) {
 		g.Expect(k8sClient.Get(ctx, podKey, pod)).Should(Succeed())
-		jolokia := jolokia.GetJolokia(k8sClient, pod.Status.PodIP, "8161", "/console/jolokia", "", "", "http")
+		jolokia := jolokia.GetJolokia(k8sClient, pod.Status.PodIP, "8161", "/console/jolokia", "", "", "http", ctrl.Log)
 		data, err := jolokia.Read("org.apache.activemq.artemis:broker=\"amq-broker\",address=\"" + addressName + "\",component=addresses,queue=\"" + queueName + "\",routing-type=\"" + routingType + "\",subcomponent=queues/" + attrName)
 		g.Expect(err).To(BeNil())
 		g.Expect(data.Value).Should(ContainSubstring(attrValueAsString), data.Value)
