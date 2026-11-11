@@ -279,8 +279,8 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		found := false
 		for _, pe := range reconciler.status.PendingEmpty {
 			if pe.App == role {
-				Expect(pe.Messages).To(HaveKeyWithValue("notifications", int64(-1)),
-					"removed producer-only address should have -1 sentinel when drain config applied but no message counts")
+				Expect(pe.Messages).To(HaveKeyWithValue("notifications", "unknown"),
+					"removed producer-only address should show unknown when drain config applied but no message counts")
 				found = true
 			}
 		}
@@ -443,7 +443,7 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 			AppIdentityWithGeneration(app),
 		}
 		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
-			{App: AppIdentity(app), Messages: map[string]int64{"events::removed.events": 5}},
+			{App: AppIdentity(app), Messages: map[string]string{"events::removed.events": "5"}},
 		}
 
 		appIdentity := AppIdentity(app)
@@ -877,7 +877,7 @@ var _ = Describe("cross-app drain unit", Label(unitLabel), func() {
 			AppIdentityWithGeneration(app),
 		}
 		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
-			{App: AppIdentity(app), Messages: map[string]int64{"events::removed.events": 3}},
+			{App: AppIdentity(app), Messages: map[string]string{"events::removed.events": "3"}},
 		}
 		Expect(reconciler.Client.Create(context.TODO(), app)).To(Succeed())
 
@@ -929,7 +929,7 @@ var _ = Describe("cross-app drain unit", Label(unitLabel), func() {
 			AppIdentityWithGeneration(producerApp),
 		}
 		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
-			{App: AppIdentity(ownerApp), Messages: map[string]int64{"events::removed.events": 3}},
+			{App: AppIdentity(ownerApp), Messages: map[string]string{"events::removed.events": "3"}},
 		}
 		Expect(reconciler.Client.Create(context.TODO(), ownerApp)).To(Succeed())
 		Expect(reconciler.Client.Create(context.TODO(), producerApp)).To(Succeed())
@@ -994,7 +994,7 @@ var _ = Describe("cross-app drain unit", Label(unitLabel), func() {
 			AppIdentityWithGeneration(app),
 		}
 		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
-			{App: AppIdentity(app), Messages: map[string]int64{"events::removed.events": 5}},
+			{App: AppIdentity(app), Messages: map[string]string{"events::removed.events": "5"}},
 		}
 		Expect(reconciler.Client.Create(context.TODO(), app)).To(Succeed())
 
@@ -1289,7 +1289,7 @@ var _ = Describe("app updated during drain", Label(unitLabel), func() {
 
 		Expect(reconciler.status.PendingEmpty).NotTo(BeEmpty(),
 			"removed address should appear in pendingEmpty")
-		Expect(reconciler.status.PendingEmpty[0].Messages).To(HaveKeyWithValue("notifications", int64(-1)))
+		Expect(reconciler.status.PendingEmpty[0].Messages).To(HaveKeyWithValue("notifications", "unknown"))
 
 		Expect(reconciler.provisionedAppIdentity(app)).To(Equal(ns+"/"+appName+"@2"),
 			"generation should be held at the pre-drain value while addresses are pending empty")
@@ -1311,7 +1311,7 @@ var _ = Describe("sequential address removal during drain", Label(unitLabel), fu
 			AppIdentityWithGeneration(app),
 		}
 		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
-			{App: AppIdentity(app), Messages: map[string]int64{"notifications": 5}},
+			{App: AppIdentity(app), Messages: map[string]string{"notifications": "5"}},
 		}
 		Expect(reconciler.Client.Create(context.TODO(), app)).To(Succeed())
 

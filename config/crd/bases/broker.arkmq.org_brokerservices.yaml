@@ -355,11 +355,11 @@ spec:
                       type: string
                     messages:
                       additionalProperties:
-                        format: int64
-                        type: integer
+                        type: string
                       description: |-
                         Messages maps each fully qualified queue name (address::queue) to its
                         pending message count. Entries are removed once the count reaches zero.
+                        A value of "unknown" indicates the count has not yet been queried.
                       type: object
                   required:
                   - app

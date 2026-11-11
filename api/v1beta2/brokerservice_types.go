@@ -60,7 +60,8 @@ type PendingEmptyAddressStatus struct {
 	App string `json:"app"`
 	// Messages maps each fully qualified queue name (address::queue) to its
 	// pending message count. Entries are removed once the count reaches zero.
-	Messages map[string]int64 `json:"messages,omitempty"`
+	// A value of "unknown" indicates the count has not yet been queried.
+	Messages map[string]string `json:"messages,omitempty"`
 }
 
 type BrokerServiceStatus struct {
