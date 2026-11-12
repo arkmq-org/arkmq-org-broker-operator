@@ -7,13 +7,42 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
+
+	configv1 "github.com/openshift/api/config/v1"
+	openshifttls "github.com/openshift/controller-runtime-common/pkg/tls"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	rtclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const JOLOKIA_AGENT_PORT = "8778"
+
+var (
+	cachedTLSProfile   configv1.TLSProfileSpec
+	cachedTLSProfileMu sync.RWMutex
+	tlsProfileSet      bool
+)
+
+func SetTLSProfile(profile configv1.TLSProfileSpec) {
+	cachedTLSProfileMu.Lock()
+	defer cachedTLSProfileMu.Unlock()
+	cachedTLSProfile = profile
+	tlsProfileSet = true
+}
+
+func getTLSProfile() configv1.TLSProfileSpec {
+	cachedTLSProfileMu.RLock()
+	defer cachedTLSProfileMu.RUnlock()
+	if tlsProfileSet {
+		return cachedTLSProfile
+	}
+	return configv1.TLSProfileSpec{
+		Ciphers:       openshifttls.DefaultTLSCiphers,
+		MinTLSVersion: openshifttls.DefaultMinTLSVersion,
+	}
+}
 
 type IData interface {
 	Print()
@@ -114,20 +143,22 @@ func (j *Jolokia) GetClientWithTimeout(timeout time.Duration) *http.Client {
 
 	if j.protocol == "https" {
 		httpClientTransport := httpClient.Transport.(*http.Transport)
-		httpClientTransport.TLSClientConfig = &tls.Config{
-			InsecureSkipVerify: true,
-			ServerName:         j.ip,
+		tlsCfg := &tls.Config{
+			ServerName: j.ip,
 		}
+		profile := getTLSProfile()
+		tlsConfigFn, _ := openshifttls.NewTLSConfigFromProfile(profile)
+		tlsConfigFn(tlsCfg)
 		if common.OperatorHasCertAndTrustBundle(j.client) {
-			httpClientTransport.TLSClientConfig.InsecureSkipVerify = false
-			httpClientTransport.TLSClientConfig.GetClientCertificate =
+			tlsCfg.GetClientCertificate =
 				func(cri *tls.CertificateRequestInfo) (*tls.Certificate, error) {
 					return common.GetOperatorClientCertificate(j.client, cri)
 				}
 		}
 		if rootCas, err := common.GetRootCAs(j.client); err == nil {
-			httpClientTransport.TLSClientConfig.RootCAs = rootCas
+			tlsCfg.RootCAs = rootCas
 		}
+		httpClientTransport.TLSClientConfig = tlsCfg
 	}
 
 	return &httpClient

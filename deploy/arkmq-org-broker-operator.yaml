@@ -20285,6 +20285,20 @@ rules:
   - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: arkmq-org-broker-tls-profile-reader
+rules:
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - apiservers
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: arkmq-org-broker-leader-election-rolebinding
@@ -20307,6 +20321,19 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: arkmq-org-broker-operator-role
+subjects:
+- kind: ServiceAccount
+  name: arkmq-org-broker-controller-manager
+  namespace: arkmq-org-broker-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: arkmq-org-broker-tls-profile-reader-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: arkmq-org-broker-tls-profile-reader
 subjects:
 - kind: ServiceAccount
   name: arkmq-org-broker-controller-manager
