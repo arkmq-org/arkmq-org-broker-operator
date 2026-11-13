@@ -113,7 +113,7 @@ func NewBrokerReconciler(cluster cluster.Cluster, logger logr.Logger, isOpenShif
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,namespace=arkmq-org-broker-operator,resources=roles;rolebindings,verbs=create;delete;get;list;patch;watch
 
 func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
-	reqLog := r.log.WithValues("Reconciling", request.Namespace+"/"+request.Name)
+	reqLog := r.log.WithValues("CR", request.Namespace+"/"+request.Name)
 
 	customResource := &v1beta2.Broker{}
 	namespacedName := request.NamespacedName
@@ -160,12 +160,12 @@ func (r *BrokerReconciler) Reconcile(ctx context.Context, request ctrl.Request) 
 	}
 
 	if requeueRequest {
-		reqLog.V(1).Info("requeue reconcile")
+		reqLog.V(2).Info("Requeue reconcile")
 		result = ctrl.Result{RequeueAfter: common.GetReconcileResyncPeriod()}
 	}
 
 	if valid && err == nil && crStatusUpdateErr == nil {
-		reqLog.V(1).Info("resource successfully reconciled")
+		reqLog.V(1).Info("Resource successfully reconciled")
 	}
 	return result, err
 }
@@ -328,10 +328,6 @@ func countOfDeployedBroker(reconciler *BrokerReconcilerImpl) (total int) {
 	return total
 }
 
-func withCRContext(logger logr.Logger, kind, name, namespace string) logr.Logger {
-	return logger.WithValues("Kind", kind, "CRD.Name", name, "CRD.Namespace", namespace)
-}
-
 func NewBrokerReconcilerImpl(customResource *v1beta2.Broker, parent *BrokerReconciler, logger logr.Logger) *BrokerReconcilerImpl {
 	return &BrokerReconcilerImpl{
 		log:                logger,
@@ -346,7 +342,7 @@ func NewBrokerReconcilerImpl(customResource *v1beta2.Broker, parent *BrokerRecon
 
 func (reconciler *BrokerReconcilerImpl) Process(customResource *v1beta2.Broker, namer common.Namers, client rtclient.Client, scheme *runtime.Scheme) error {
 
-	reconciler.log.V(1).Info("Reconciler processing...", "CRD ver", customResource.ResourceVersion, "CRD Gen", customResource.Generation)
+	reconciler.log.V(1).Info("Processing...", "CRD ver", customResource.ResourceVersion, "CRD Gen", customResource.Generation)
 
 	reconciler.CurrentDeployedResources(customResource, client)
 
@@ -384,7 +380,7 @@ func (reconciler *BrokerReconcilerImpl) Process(customResource *v1beta2.Broker, 
 	err = reconciler.ProcessResources(customResource, client, scheme)
 
 	if err != nil {
-		reconciler.log.Error(err, "error processing resources")
+		reconciler.log.Error(err, "Error processing resources")
 	}
 
 	reconciler.log.V(1).Info("Reconciler processing...complete", "CRD ver", customResource.ResourceVersion, "CRD Gen", customResource.Generation)
@@ -800,9 +796,9 @@ func (reconciler *BrokerReconcilerImpl) createRequestedResource(customResource *
 func (reconciler *BrokerReconcilerImpl) updateRequestedResource(client rtclient.Client, requested rtclient.Object, kind reflect.Type) error {
 	var updateError error
 	if updateError = resources.Update(client, requested); updateError == nil {
-		reconciler.log.V(1).Info("updated", "kind ", kind, "named ", requested.GetName())
+		reconciler.log.V(1).Info("Updated", "kind ", kind, "named ", requested.GetName())
 	} else {
-		reconciler.log.V(0).Info("updated Failed", "kind ", kind, "named ", requested.GetName(), "error ", updateError)
+		reconciler.log.V(0).Info("Update Failed", "kind ", kind, "named ", requested.GetName(), "error ", updateError)
 	}
 	return updateError
 }
@@ -811,9 +807,9 @@ func (reconciler *BrokerReconcilerImpl) deleteRequestedResource(client rtclient.
 
 	var deleteError error
 	if deleteError := resources.Delete(client, requested); deleteError == nil {
-		reconciler.log.V(2).Info("deleted", "kind", kind, " named ", requested.GetName())
+		reconciler.log.V(2).Info("Deleted", "kind", kind, " named ", requested.GetName())
 	} else {
-		reconciler.log.Error(deleteError, "delete Failed", "kind", kind, " named ", requested.GetName())
+		reconciler.log.Error(deleteError, "Delete Failed", "kind", kind, " named ", requested.GetName())
 	}
 	return deleteError
 }
@@ -1249,7 +1245,7 @@ func (reconciler *BrokerReconcilerImpl) configureReadinessProbe(container *corev
 	if probeFromCr != nil {
 		conditionallyApplyValuesToPreserveDefaults(readinessProbe, probeFromCr)
 		if probeFromCr.GRPC == nil && probeFromCr.Exec == nil && probeFromCr.HTTPGet == nil && probeFromCr.TCPSocket == nil {
-			reconciler.log.V(2).Info("adding default handler to user provided readiness Probe")
+			reconciler.log.V(2).Info("Adding default handler to user provided readiness Probe")
 
 			// respect existing command where already deployed
 			if readinessProbe.Exec != nil && reflect.DeepEqual(readinessProbe.Exec.Command, command) {
@@ -1305,7 +1301,7 @@ func (reconciler *BrokerReconcilerImpl) applyControlPlaneOverridesForBroker(cust
 		}
 	}
 
-	reconciler.log.V(1).Info("applying overrides from secret", "name", overrideSecret.Name, "keys", slices.Collect(maps.Keys(overrideSecret.Data)))
+	reconciler.log.V(1).Info("Applying overrides from secret", "name", overrideSecret.Name, "keys", slices.Collect(maps.Keys(overrideSecret.Data)))
 
 	// Apply overrides - complete replacement per key
 	maps.Copy(brokerPropertiesMapData, overrideSecret.Data)
@@ -1353,7 +1349,7 @@ func (reconciler *BrokerReconcilerImpl) addResourceForBrokerProperties(customRes
 	data := brokerproperties.BrokerPropertiesData(reconciler.customResource.Spec.BrokerProperties)
 
 	if desired == nil {
-		reconciler.log.V(2).Info("desired brokerprop secret nil, create new one", "name", resourceName.Name)
+		reconciler.log.V(2).Info("Desired brokerprop secret nil, create new one", "name", resourceName.Name)
 		secret := secrets.MakeSecret(resourceName, data, namer.LabelBuilder.Labels())
 		desired = &secret
 	} else {
@@ -1576,7 +1572,7 @@ func MakeEnvVarArrayForCRForBroker(customResource *v1beta2.Broker, namer common.
 func (reconciler *BrokerReconcilerImpl) ProcessBrokerStatus(cr *v1beta2.Broker, client rtclient.Client, scheme *runtime.Scheme) (retry bool) {
 	var condition metav1.Condition
 
-	err := AssertBrokersAvailableForBroker(cr)
+	err := reconciler.AssertBrokersAvailableForBroker(cr)
 	if err != nil {
 		condition = trapErrorAsCondition(err, v1beta2.ConfigAppliedConditionType)
 		meta.SetStatusCondition(&cr.Status.Conditions, condition)
@@ -1629,13 +1625,12 @@ func (reconciler *BrokerReconcilerImpl) ProcessBrokerStatus(cr *v1beta2.Broker, 
 	return retry
 }
 
-func AssertBrokersAvailableForBroker(cr *v1beta2.Broker) ArtemisError {
-	reqLogger := withCRContext(ctrl.Log, cr.Kind, cr.Name, cr.Namespace)
+func (reconciler *BrokerReconcilerImpl) AssertBrokersAvailableForBroker(cr *v1beta2.Broker) ArtemisError {
 
 	// pre-condition, we must be deployed, avoid broker status roundtrip till ready
 	DeployedCondition := meta.FindStatusCondition(cr.Status.Conditions, v1beta2.DeployedConditionType)
 	if DeployedCondition == nil || DeployedCondition.Status == metav1.ConditionFalse {
-		reqLogger.V(2).Info("There are no available brokers from DeployedCondition", "condition", DeployedCondition)
+		reconciler.log.V(2).Info("There are no available brokers from DeployedCondition", "condition", DeployedCondition)
 		return NewArtemisStatusError(errors.New("no available brokers from deployed condition"), false)
 	}
 	return nil
@@ -1646,7 +1641,7 @@ func (reconciler *BrokerReconcilerImpl) AssertBrokerPropertiesStatus(cr *v1beta2
 
 	secretProjection, err := reconciler.getSecretProjection(getPropertiesResourceNsNameForBroker(cr), client)
 	if err != nil {
-		reqLogger.V(2).Info("error retrieving config resources.")
+		reqLogger.V(2).Info("Error retrieving config resources.")
 		return NewArtemisStatusError(err, false)
 	}
 
@@ -1660,7 +1655,7 @@ func (reconciler *BrokerReconcilerImpl) AssertBrokerPropertiesStatus(cr *v1beta2
 			if strings.HasSuffix(extraSecretName, common.BrokerPropsSuffix) {
 				secretProjection, err = reconciler.getSecretProjection(types.NamespacedName{Name: extraSecretName, Namespace: cr.Namespace}, client)
 				if err != nil {
-					reqLogger.V(2).Info("error retrieving -bp extra mount resource.")
+					reqLogger.V(2).Info("Error retrieving -bp extra mount resource.")
 					return NewArtemisStatusError(err, false)
 				}
 				errorStatus = reconciler.checkProjectionStatus(cr, client, secretProjection, func(BrokerStatus *brokerStatus, FileName string) (propertiesStatus, bool) {
@@ -1685,7 +1680,7 @@ func (reconciler *BrokerReconcilerImpl) AssertJaasPropertiesStatus(cr *v1beta2.B
 
 	Projection, err := reconciler.getConfigMappedJaasProperties(cr, client)
 	if err != nil {
-		reqLogger.V(2).Info("error retrieving config resources.")
+		reqLogger.V(2).Info("Error retrieving config resources.")
 		return NewArtemisStatusError(err, false)
 	}
 
@@ -1727,7 +1722,7 @@ func (reconciler *BrokerReconcilerImpl) CheckStatus(cr *v1beta2.Broker, client r
 	reconciler.resolveJolokiaEndpoints(cr, client)
 
 	if len(reconciler.jolokiaEndpoints) == 0 {
-		reconciler.log.V(1).Info("no Jolokia Clients available")
+		reconciler.log.V(1).Info("No Jolokia Clients available")
 		return NewJolokiaClientsNotFoundError(errors.New("Waiting for Jolokia Clients to become available"))
 	}
 
@@ -1768,7 +1763,7 @@ func (reconciler *BrokerReconcilerImpl) GetAndCacheBrokerStatus(jk *jolokia_clie
 		return nil, artemisError
 	}
 
-	reconciler.log.V(2).Info("raw json status", "IP", jk.IP, "ordinal", jk.Ordinal, "status json", currentJSON)
+	reconciler.log.V(2).Info("Raw json status", "IP", jk.IP, "ordinal", jk.Ordinal, "status json", currentJSON)
 
 	status, err := unmarshallStatus(currentJSON)
 	if err != nil {
@@ -1778,7 +1773,7 @@ func (reconciler *BrokerReconcilerImpl) GetAndCacheBrokerStatus(jk *jolokia_clie
 		return nil, artemisError
 	}
 
-	reconciler.log.V(2).Info("cached broker status", "ordinal", jk.Ordinal, "status", status)
+	reconciler.log.V(2).Info("Cached broker status", "ordinal", jk.Ordinal, "status", status)
 	reconciler.cachedBrokerStatus[jk.Ordinal] = status
 
 	return &status, nil
@@ -1794,7 +1789,7 @@ func (reconciler *BrokerReconcilerImpl) resolveJolokiaEndpoints(cr *v1beta2.Brok
 func (reconciler *BrokerReconcilerImpl) checkProjectionStatus(cr *v1beta2.Broker, client rtclient.Client, secretProjection *projection, extractStatus func(BrokerStatus *brokerStatus, FileName string) (propertiesStatus, bool)) ArtemisError {
 	reqLogger := reconciler.log
 
-	reqLogger.V(2).Info("in sync check", "projection", secretProjection)
+	reqLogger.V(2).Info("In sync check", "projection", secretProjection)
 
 	checkErr := reconciler.CheckStatus(cr, client, func(brokerStatus *brokerStatus, jk *jolokia_client.JkInfo) ArtemisError {
 
@@ -1847,7 +1842,7 @@ func (reconciler *BrokerReconcilerImpl) checkProjectionStatus(cr *v1beta2.Broker
 		}
 
 		if applyError != nil {
-			reqLogger.V(1).Info("in sync with apply error", "error", applyError)
+			reqLogger.V(1).Info("In sync with apply error", "error", applyError)
 			return *applyError
 		}
 
@@ -1877,7 +1872,7 @@ func (reconciler *BrokerReconcilerImpl) checkProjectionStatus(cr *v1beta2.Broker
 		return checkErr
 	}
 
-	reqLogger.V(1).Info("successfully synced with brokers", "status", statusMessageFromProjection(secretProjection))
+	reqLogger.V(1).Info("Successfully synced with brokers", "status", statusMessageFromProjection(secretProjection))
 
 	return nil
 }

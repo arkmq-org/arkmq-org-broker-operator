@@ -701,6 +701,7 @@ var _ = Describe("cross-app drain unit", Label(unitLabel), func() {
 		// Simulate ownerApp address removal to trigger drain detection
 		ownerApp.Spec.Capabilities = nil
 		ownerApp.Spec.Addresses = nil
+		ownerApp.Status.BoundSpec = &broker.AppBoundSpec{Spec: *ownerApp.Spec.DeepCopy(), Generation: ownerApp.Generation}
 
 		// Pass 1: buildAddressTracker + processDrain for both apps
 		ownerTracker, buildErr := reconciler.buildAddressTracker(ownerApp)

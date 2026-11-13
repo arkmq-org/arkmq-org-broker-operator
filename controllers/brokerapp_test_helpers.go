@@ -240,10 +240,20 @@ func (b *BrokerAppBuilder) WithCapabilities(capabilities ...v1beta2.AppCapabilit
 }
 
 func (b *BrokerAppBuilder) Build() *v1beta2.BrokerApp {
+	WithBoundSpec(b.app)
 	return b.app
 }
 
 // AddressRefBuilder builds AddressRef test fixtures
+func WithBoundSpec(app *v1beta2.BrokerApp) {
+	if app.Status.BoundSpec == nil {
+		app.Status.BoundSpec = &v1beta2.AppBoundSpec{
+			Spec:       *app.Spec.DeepCopy(),
+			Generation: app.Generation,
+		}
+	}
+}
+
 type AddressRefBuilder struct {
 	ref v1beta2.AddressRef
 }

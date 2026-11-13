@@ -14380,6 +14380,229 @@ spec:
               type: object
             status:
               properties:
+                boundSpec:
+                  description: |-
+                    BoundSpec holds the last successfully validated spec and the generation it
+                    was captured from. The BrokerService controller reads this instead of Spec
+                    to ensure it only operates on validated configuration.
+                  properties:
+                    generation:
+                      format: int64
+                      type: integer
+                    spec:
+                      properties:
+                        addresses:
+                          description: Addresses with a lifecycle tied to this app.
+                          items:
+                            description: AddressType defines a messaging address with optional sharing selectors
+                            properties:
+                              address:
+                                description: Address is the address identifier (unique within a broker service)
+                                type: string
+                              consumerOfAppSelector:
+                                description: |-
+                                  ConsumerOfAppSelector is a CEL expression that selects which apps may consume from this address.
+                                  When empty, no other apps may reference this address as a consumer.
+                                  Example: "app.metadata.namespace == 'team-b'"
+                                type: string
+                              producerOfAppSelector:
+                                description: |-
+                                  ProducerOfAppSelector is a CEL expression that selects which apps may produce to this address.
+                                  When empty, no other apps may reference this address as a producer.
+                                  Example: "app.metadata.name == 'order-processor'"
+                                type: string
+                              pubSub:
+                                description: |-
+                                  PubSub declares publish/subscribe (pubSub) semantics.
+                                  PubSub is necessary when an address needs to be declared pubSub without declaring Subscriptions.
+                                type: boolean
+                              subscriptions:
+                                description: |-
+                                  Subscriptions declares subscription queue names for an address.
+                                  Typical values will be of the form <client id>.<subscription name>
+                                items:
+                                  type: string
+                                type: array
+                            required:
+                              - address
+                            type: object
+                          type: array
+                        capabilities:
+                          items:
+                            properties:
+                              consumerOf:
+                                items:
+                                  description: AddressRef references an address for use in capabilities
+                                  properties:
+                                    address:
+                                      description: Address is the address identifier (required)
+                                      type: string
+                                    appName:
+                                      description: AppName of owning app - for cross-app references (optional)
+                                      type: string
+                                    appNamespace:
+                                      description: AppNamespace of owning app - for cross-app references (optional)
+                                      type: string
+                                    pubSub:
+                                      description: |-
+                                        PubSub declares publish/subscribe (pubSub) semantics.
+                                        Used with ProducerOf, to declare pubSub semantics.
+                                      type: boolean
+                                    subscriptions:
+                                      description: |-
+                                        Subscriptions declares subscription queue names for an address.
+                                        Typical values will be of the form <client id>.<subscription name>
+                                      items:
+                                        type: string
+                                      type: array
+                                  required:
+                                    - address
+                                  type: object
+                                type: array
+                              producerOf:
+                                items:
+                                  description: AddressRef references an address for use in capabilities
+                                  properties:
+                                    address:
+                                      description: Address is the address identifier (required)
+                                      type: string
+                                    appName:
+                                      description: AppName of owning app - for cross-app references (optional)
+                                      type: string
+                                    appNamespace:
+                                      description: AppNamespace of owning app - for cross-app references (optional)
+                                      type: string
+                                    pubSub:
+                                      description: |-
+                                        PubSub declares publish/subscribe (pubSub) semantics.
+                                        Used with ProducerOf, to declare pubSub semantics.
+                                      type: boolean
+                                    subscriptions:
+                                      description: |-
+                                        Subscriptions declares subscription queue names for an address.
+                                        Typical values will be of the form <client id>.<subscription name>
+                                      items:
+                                        type: string
+                                      type: array
+                                  required:
+                                    - address
+                                  type: object
+                                type: array
+                            type: object
+                          type: array
+                        resources:
+                          description: ResourceRequirements describes the compute resource requirements.
+                          properties:
+                            claims:
+                              description: |-
+                                Claims lists the names of resources, defined in spec.resourceClaims,
+                                that are used by this container.
+
+                                This field depends on the
+                                DynamicResourceAllocation feature gate.
+
+                                This field is immutable. It can only be set for containers.
+                              items:
+                                description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                                properties:
+                                  name:
+                                    description: |-
+                                      Name must match the name of one entry in pod.spec.resourceClaims of
+                                      the Pod where this field is used. It makes that resource available
+                                      inside a container.
+                                    type: string
+                                  request:
+                                    description: |-
+                                      Request is the name chosen for a request in the referenced claim.
+                                      If empty, everything from the claim is made available, otherwise
+                                      only the result of this request.
+                                    type: string
+                                required:
+                                  - name
+                                type: object
+                              type: array
+                              x-kubernetes-list-map-keys:
+                                - name
+                              x-kubernetes-list-type: map
+                            limits:
+                              additionalProperties:
+                                anyOf:
+                                  - type: integer
+                                  - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: |-
+                                Limits describes the maximum amount of compute resources allowed.
+                                More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                              type: object
+                            requests:
+                              additionalProperties:
+                                anyOf:
+                                  - type: integer
+                                  - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: |-
+                                Requests describes the minimum amount of compute resources required.
+                                If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                                otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                                More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                              type: object
+                          type: object
+                        serviceSelector:
+                          description: |-
+                            A label selector is a label query over a set of resources. The result of matchLabels and
+                            matchExpressions are ANDed. An empty label selector matches all objects. A null
+                            label selector matches no objects.
+                          properties:
+                            matchExpressions:
+                              description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
+                              items:
+                                description: |-
+                                  A label selector requirement is a selector that contains values, a key, and an operator that
+                                  relates the key and values.
+                                properties:
+                                  key:
+                                    description: key is the label key that the selector applies to.
+                                    type: string
+                                  operator:
+                                    description: |-
+                                      operator represents a key's relationship to a set of values.
+                                      Valid operators are In, NotIn, Exists and DoesNotExist.
+                                    type: string
+                                  values:
+                                    description: |-
+                                      values is an array of string values. If the operator is In or NotIn,
+                                      the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                      the values array must be empty. This array is replaced during a strategic
+                                      merge patch.
+                                    items:
+                                      type: string
+                                    type: array
+                                    x-kubernetes-list-type: atomic
+                                required:
+                                  - key
+                                  - operator
+                                type: object
+                              type: array
+                              x-kubernetes-list-type: atomic
+                            matchLabels:
+                              additionalProperties:
+                                type: string
+                              description: |-
+                                matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                operator is "In", and the values array contains only "value". The requirements are ANDed.
+                              type: object
+                          type: object
+                          x-kubernetes-map-type: atomic
+                      required:
+                        - serviceSelector
+                      type: object
+                  required:
+                    - generation
+                    - spec
+                  type: object
                 conditions:
                   description: |-
                     Current state of the resource

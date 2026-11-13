@@ -782,6 +782,17 @@ var _ = Describe("RestrictedConfigData", func() {
 		b := mustRestrictedConfig("broker-b")
 		Expect(a).NotTo(Equal(b))
 	})
+
+	It("sets configDeleteAddresses and configDeleteQueues to FORCE", func() {
+		var m map[string]any
+		Expect(json.Unmarshal(mustRestrictedConfig("x"), &m)).To(Succeed())
+		addrSettings, ok := m["addressSettings"].(map[string]any)
+		Expect(ok).To(BeTrue())
+		catchAll, ok := addrSettings["#"].(map[string]any)
+		Expect(ok).To(BeTrue())
+		Expect(catchAll["configDeleteAddresses"]).To(Equal("FORCE"))
+		Expect(catchAll["configDeleteQueues"]).To(Equal("FORCE"))
+	})
 })
 
 var _ = Describe("RBACConfigData", func() {

@@ -58,7 +58,9 @@ func hasKeyContaining(data map[string][]byte, substring string) bool {
 }
 
 func newBrokerApp(namespace, name string) v1beta2.BrokerApp {
-	return v1beta2.BrokerApp{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}}
+	app := v1beta2.BrokerApp{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}}
+	WithBoundSpec(&app)
+	return app
 }
 
 type appCert struct {
@@ -123,10 +125,12 @@ func newServiceReconcilerWithClient(cl client.Client) *BrokerServiceInstanceReco
 }
 
 func ownerApp(namespace, name string, capabilities ...v1beta2.AppCapabilityType) v1beta2.BrokerApp {
-	return v1beta2.BrokerApp{
+	app := v1beta2.BrokerApp{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 		Spec:       v1beta2.BrokerAppSpec{Capabilities: capabilities},
 	}
+	WithBoundSpec(&app)
+	return app
 }
 
 var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
@@ -170,6 +174,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 				},
 			},
 		}
+		WithBoundSpec(app)
 
 		builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(WithCerts(namespace, oc, s1, s2, app)...).WithStatusSubresource(s1, s2, app)
 		builder.WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
@@ -260,6 +265,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		app := &v1beta2.BrokerApp{
 			ObjectMeta: metav1.ObjectMeta{Name: appName, Namespace: ns, UID: types.UID("uid-app")},
 		}
+		WithBoundSpec(app)
 
 		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(WithCerts(s1, app)...).WithStatusSubresource(s1, app).Build()
 
@@ -384,6 +390,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 				},
 			},
 		}
+		WithBoundSpec(app)
 
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
@@ -468,6 +475,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 				},
 			},
 		}
+		WithBoundSpec(app1)
 
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
@@ -522,6 +530,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 				},
 			},
 		}
+		WithBoundSpec(app2)
 		err = cl.Create(context.TODO(), app2)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cl.Create(context.TODO(), NewAppCertSecret(app2Name, ns))).NotTo(HaveOccurred())
@@ -676,6 +685,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 				},
 			},
 		}
+		WithBoundSpec(app)
 
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
@@ -1161,6 +1171,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 				}},
 			},
 		}
+		WithBoundSpec(app)
 
 		secret := &corev1.Secret{}
 		tracker, trackerErr := reconciler.buildAddressTracker(app)
@@ -1184,6 +1195,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "quiet-app", Namespace: "ns1"},
 			Spec:       v1beta2.BrokerAppSpec{},
 		}
+		WithBoundSpec(app)
 
 		secret := &corev1.Secret{}
 		tracker, trackerErr := reconciler.buildAddressTracker(app)
@@ -1306,6 +1318,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 				},
 			},
 		}
+		WithBoundSpec(app)
 
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
@@ -1388,6 +1401,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 				},
 			},
 		}
+		WithBoundSpec(app)
 
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
@@ -1470,6 +1484,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 				},
 			},
 		}
+		WithBoundSpec(app)
 
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
@@ -1601,6 +1616,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 				},
 			},
 		}
+		WithBoundSpec(app)
 
 		builder := fake.NewClientBuilder().WithScheme(scheme).
 			WithObjects(WithCerts(namespace, oc, svc, app)...).

@@ -332,6 +332,11 @@ var _ = Describe("broker-service mqtt", func() {
 				g.Expect(readyCond.Status).Should(Equal(metav1.ConditionTrue))
 				g.Expect(readyCond.ObservedGeneration).Should(Equal(createdApp.Generation))
 
+				deployedCond := meta.FindStatusCondition(createdApp.Status.Conditions, broker.DeployedConditionType)
+				g.Expect(deployedCond).ShouldNot(BeNil())
+				g.Expect(deployedCond.Status).Should(Equal(metav1.ConditionTrue))
+				g.Expect(deployedCond.ObservedGeneration).Should(Equal(createdApp.Generation))
+
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			// publish should now succeed on a new connection,
