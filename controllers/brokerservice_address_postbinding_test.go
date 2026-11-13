@@ -32,7 +32,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/environments"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/artemis"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 var _ = Describe("broker-service address post-binding validation", func() {
@@ -303,10 +306,13 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{})).ToNot(BeNil())
+			}, timeout, interval).Should(Succeed())
+			CleanupAppCerts(consumerAppName, defaultNamespace)
+			CleanupAppCerts(ownerAppName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
 		It("Scenario 2: should detect when shared address is modified to remove sharing selector", func() {
@@ -517,10 +523,13 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{})).ToNot(BeNil())
+			}, timeout, interval).Should(Succeed())
+			CleanupAppCerts(consumerAppName, defaultNamespace)
+			CleanupAppCerts(ownerAppName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
 		It("Scenario 3: should detect routing type conflict after binding", func() {
@@ -822,13 +831,16 @@ var _ = Describe("broker-service address post-binding validation", func() {
 			Expect(k8sClient.Delete(ctx, &consumerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &ownerApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(consumerCertName, defaultNamespace)
-			UninstallCert(ownerCertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{})).ToNot(BeNil())
+			}, timeout, interval).Should(Succeed())
+			CleanupAppCerts(consumerAppName, defaultNamespace)
+			CleanupAppCerts(ownerAppName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 
-		It("Scenario 4: should detect new address clash introduced post-binding", func() {
+		It("Scenario 4: should detect new address clash introduced post-binding", Label("verySlow"), func() {
 
 			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
 				return
@@ -1021,23 +1033,290 @@ var _ = Describe("broker-service address post-binding validation", func() {
 				g.Expect(k8sClient.Update(ctx, updatedApp2)).Should(Succeed())
 			}, timeout, interval).Should(Succeed())
 
-			By("EXPECTED: app2 should reconcile and unbind - clash. harsh for an update but we can't have a partially valid deployed app")
+			By("EXPECTED: app2 should reconcile and be invalid")
 			Eventually(func(g Gomega) {
 				updatedService := &broker.BrokerService{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, updatedService)).Should(Succeed())
 
-				// app2 should not be in ProvisionedApps
-				g.Expect(updatedService.Status.ProvisionedApps).ShouldNot(ContainElement(ContainSubstring(app2Name)))
+				// app2 should still be in ProvisionedApps at version 2
+				g.Expect(updatedService.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(app2Name)))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				createdApp2 := &broker.BrokerApp{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: app2Name, Namespace: defaultNamespace}, createdApp2)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("updated runtime invalid app2 STATUS: %v\n", createdApp2.Status)
+				}
+
+				deployedCond := meta.FindStatusCondition(createdApp2.Status.Conditions, broker.DeployedConditionType)
+				g.Expect(deployedCond).ShouldNot(BeNil())
+				g.Expect(deployedCond.Status).Should(Equal(metav1.ConditionTrue))
+				g.Expect(deployedCond.ObservedGeneration).Should(Equal(int64(1)))
+
+				validCond := meta.FindStatusCondition(createdApp2.Status.Conditions, broker.ValidConditionType)
+				g.Expect(validCond).ShouldNot(BeNil())
+				g.Expect(validCond.Status).Should(Equal(metav1.ConditionFalse))
+				g.Expect(validCond.Reason).Should(Equal(broker.ValidConditionAddressTypeError))
+				g.Expect(validCond.ObservedGeneration).Should(Equal(int64(2)))
+
+			}, 10, 2).Should(Succeed())
+
+			By("updating app1 with a trivial change to trigger service reconcile")
+			Eventually(func(g Gomega) {
+				updatedApp1 := &broker.BrokerApp{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: app1Name, Namespace: defaultNamespace}, updatedApp1)).Should(Succeed())
+
+				updatedApp1.Spec.Resources.Requests[corev1.ResourceMemory] = resource.MustParse("513Mi")
+				g.Expect(k8sClient.Update(ctx, updatedApp1)).Should(Succeed())
+			}, timeout, interval).Should(Succeed())
+
+			By("verifying service reconciles successfully with app1 updated and app2 using BoundSpec")
+			Eventually(func(g Gomega) {
+				updatedService := &broker.BrokerService{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, updatedService)).Should(Succeed())
+
+				g.Expect(updatedService.Status.ProvisionedApps).Should(HaveLen(2))
+
+				createdApp1 := &broker.BrokerApp{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: app1Name, Namespace: defaultNamespace}, createdApp1)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("app1 updated app1 STATUS: %v\n", createdApp1.Status)
+				}
+				g.Expect(updatedService.Status.ProvisionedApps).Should(ContainElement(Equal(AppIdentityWithBoundGeneration(createdApp1))))
+				// app1 should be at gen 2 (the memory update)
+				g.Expect(createdApp1.Generation).Should(Equal(int64(2)))
+
+				createdApp2 := &broker.BrokerApp{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: app2Name, Namespace: defaultNamespace}, createdApp2)).Should(Succeed())
+
+				if verbose {
+					fmt.Printf("app1 updated app2 STATUS: %v\n", createdApp1.Status)
+				}
+
+				g.Expect(updatedService.Status.ProvisionedApps).Should(ContainElement(Equal(AppIdentityWithBoundGeneration(createdApp2))))
+				// app2 bound generation should be gen 1 (the last valid spec)
+				g.Expect(createdApp2.Generation).Should(Equal(int64(2)))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				createdApp1 := &broker.BrokerApp{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: app1Name, Namespace: defaultNamespace}, createdApp1)).Should(Succeed())
+
+				deployedCond := meta.FindStatusCondition(createdApp1.Status.Conditions, broker.DeployedConditionType)
+				g.Expect(deployedCond).ShouldNot(BeNil())
+				g.Expect(deployedCond.Status).Should(Equal(metav1.ConditionTrue))
+
+				validCond := meta.FindStatusCondition(createdApp1.Status.Conditions, broker.ValidConditionType)
+				g.Expect(validCond).ShouldNot(BeNil())
+				g.Expect(validCond.Status).Should(Equal(metav1.ConditionTrue))
+
+				// BoundSpec should reflect the updated spec
+				g.Expect(createdApp1.Status.BoundSpec).ShouldNot(BeNil())
+				g.Expect(createdApp1.Status.BoundSpec.Spec.Resources.Requests[corev1.ResourceMemory]).Should(Equal(resource.MustParse("513Mi")))
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("cleaning up")
 			Expect(k8sClient.Delete(ctx, &app2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, &app1)).Should(Succeed())
+
+			By("waiting on server to quesce/drain before whacking certs")
+			Eventually(func(g Gomega) {
+				updatedService := &broker.BrokerService{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, updatedService)).Should(Succeed())
+
+				g.Expect(len(updatedService.Status.ProvisionedApps)).Should(Equal(0))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
 			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
-			UninstallCert(app2CertName, defaultNamespace)
-			UninstallCert(app1CertName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
-			UninstallCert(sharedOperandCertName, defaultNamespace)
+			// let drain complete before cert cleanup
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{})).ToNot(BeNil())
+			}, timeout, interval).Should(Succeed())
+			CleanupAppCerts(app2Name, defaultNamespace)
+			CleanupAppCerts(app1Name, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
+		})
+	})
+
+	Context("address lifecycle through jolokia", func() {
+
+		It("Scenario 5: queue appears in jolokia when app is added and disappears when deleted", Label("verySlow"), func() {
+
+			// needs extra address settings to ensure config update deletes
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				return
+			}
+
+			ctx := context.Background()
+			serviceName := NextSpecResourceName()
+
+			sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
+			By("installing broker cert")
+			InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = sharedOperandCertName
+				candidate.Spec.CommonName = serviceName
+				candidate.Spec.DNSNames = []string{serviceName, fmt.Sprintf("%s.%s", serviceName, defaultNamespace), fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()), common.ClusterDNSWildCard(serviceName, defaultNamespace)}
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
+
+			prometheusCertName := common.DefaultPrometheusCertSecretName
+			By("installing prometheus cert")
+			InstallCert(prometheusCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = prometheusCertName
+				candidate.Spec.CommonName = "prometheus"
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
+
+			By("creating BrokerService")
+			service := broker.BrokerService{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "BrokerService",
+					APIVersion: broker.GroupVersion.Identifier(),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      serviceName,
+					Namespace: defaultNamespace,
+					Labels: map[string]string{
+						"test": "address-lifecycle",
+					},
+				},
+				Spec: broker.BrokerServiceSpec{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							corev1.ResourceMemory: resource.MustParse("2Gi"),
+						},
+					},
+
+					Env: []corev1.EnvVar{
+						{
+							Name:  "JAVA_ARGS_APPEND",
+							Value: "-Dlog4j2.level=DEBUG",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
+
+			appName := NextSpecResourceName()
+			appCertName := appName + "-" + common.DefaultOperandCertSecretName
+			By("installing app cert")
+			InstallCert(appCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
+				candidate.Spec.SecretName = appCertName
+				candidate.Spec.CommonName = appName
+				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+					Name: caIssuer.Name,
+					Kind: "ClusterIssuer",
+				}
+			})
+
+			By("creating app with address 'orders'")
+			app := broker.BrokerApp{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "BrokerApp",
+					APIVersion: broker.GroupVersion.Identifier(),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      appName,
+					Namespace: defaultNamespace,
+				},
+				Spec: broker.BrokerAppSpec{
+					ServiceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"test": "address-lifecycle",
+						},
+					},
+					Addresses: []broker.AddressType{
+						{Address: "orders"},
+					},
+					Capabilities: []broker.AppCapabilityType{
+						{
+							ProducerOf: []broker.AddressRef{
+								{Address: "orders"},
+							},
+						},
+					},
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+				},
+			}
+			InstallAppCert(&app)
+			Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+
+			By("waiting for app to be deployed")
+			Eventually(func(g Gomega) {
+				createdApp := &broker.BrokerApp{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appName, Namespace: defaultNamespace}, createdApp)).Should(Succeed())
+				deployedCond := meta.FindStatusCondition(createdApp.Status.Conditions, broker.DeployedConditionType)
+				g.Expect(deployedCond).ShouldNot(BeNil())
+				g.Expect(deployedCond.Status).Should(Equal(metav1.ConditionTrue))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			serverName := common.OrdinalFQDNS(serviceName, defaultNamespace, 0)
+			brokerName := environments.ResolveBrokerNameFromEnvs(nil, serviceName)
+			jolokiaAgent := artemis.GetArtemisAgentForRestricted(k8sClient, brokerName, serverName, ctrl.Log)
+
+			By("querying jolokia and verifying 'orders' queue exists on the broker")
+			Eventually(func(g Gomega) {
+				counts, err := jolokiaAgent.GetAllQueueMessageCounts()
+				g.Expect(err).ShouldNot(HaveOccurred())
+				found := false
+				for _, qc := range counts {
+					if qc.Queue == "orders" {
+						found = true
+						break
+					}
+				}
+				g.Expect(found).Should(BeTrue(), "orders queue should exist on the broker")
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("deleting the app")
+			Expect(k8sClient.Delete(ctx, &app)).Should(Succeed())
+
+			By("waiting for app to be fully removed from service")
+			Eventually(func(g Gomega) {
+				updatedService := &broker.BrokerService{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, updatedService)).Should(Succeed())
+				g.Expect(updatedService.Status.ProvisionedApps).Should(BeEmpty())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("querying jolokia and verifying 'orders' queue is gone from the broker")
+			Eventually(func(g Gomega) {
+				counts, err := jolokiaAgent.GetAllQueueMessageCounts()
+
+				if verbose {
+					fmt.Printf("jolokia after gone, counts: %v, error: %v\n", counts, err)
+				}
+				if err != nil {
+					// no queue MBeans at all — pattern read returns a jolokia
+					// 404 which is the expected state when all queues are gone
+					g.Expect(err.Error()).Should(ContainSubstring("404"))
+					return
+				}
+				for _, qc := range counts {
+					g.Expect(qc.Queue).ShouldNot(Equal("orders"),
+						"orders queue should no longer exist on the broker after app deletion")
+				}
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("cleaning up")
+			Expect(k8sClient.Delete(ctx, &service)).Should(Succeed())
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, &broker.BrokerService{})).ToNot(BeNil())
+			}, timeout, interval).Should(Succeed())
+			CleanupAppCerts(appName, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 	})
 })

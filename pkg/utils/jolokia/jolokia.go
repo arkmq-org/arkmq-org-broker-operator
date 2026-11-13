@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/go-logr/logr"
 	rtclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -43,6 +44,7 @@ func (j *JolokiaError) Error() string {
 
 type IJolokia interface {
 	Read(path string) (*ResponseData, error)
+	ReadMap(path string) (map[string]interface{}, error)
 	Exec(path, postJsonString string) (*ResponseData, error)
 	ExecWithClient(httpClient *http.Client, path, postJsonString string) (*ResponseData, error)
 	GetProtocol() string
@@ -58,9 +60,10 @@ type Jolokia struct {
 	protocol   string
 	restricted bool
 	client     rtclient.Client
+	log        logr.Logger
 }
 
-func GetRestrictedJolokia(client rtclient.Client, _ip string, _port string, _path string) *Jolokia {
+func GetRestrictedJolokia(client rtclient.Client, _ip string, _port string, _path string, logger logr.Logger) *Jolokia {
 	j := Jolokia{
 		ip:         _ip,
 		port:       _port,
@@ -68,11 +71,12 @@ func GetRestrictedJolokia(client rtclient.Client, _ip string, _port string, _pat
 		protocol:   "https",
 		restricted: true,
 		client:     client,
+		log:        logger,
 	}
 	return &j
 }
 
-func GetJolokia(_client rtclient.Client, _ip string, _port string, _path string, _user string, _password string, _protocol string) *Jolokia {
+func GetJolokia(_client rtclient.Client, _ip string, _port string, _path string, _user string, _password string, _protocol string, logger logr.Logger) *Jolokia {
 
 	j := Jolokia{
 		ip:         _ip,
@@ -82,6 +86,7 @@ func GetJolokia(_client rtclient.Client, _ip string, _port string, _path string,
 		password:   _password,
 		protocol:   _protocol,
 		client:     _client,
+		log:        logger,
 	}
 	if j.user == "" {
 		j.user = "admin"
@@ -118,14 +123,14 @@ func (j *Jolokia) GetClientWithTimeout(timeout time.Duration) *http.Client {
 			InsecureSkipVerify: true,
 			ServerName:         j.ip,
 		}
-		if common.OperatorHasCertAndTrustBundle(j.client) {
+		if common.OperatorHasCertAndTrustBundle(j.client, j.log) {
 			httpClientTransport.TLSClientConfig.InsecureSkipVerify = false
 			httpClientTransport.TLSClientConfig.GetClientCertificate =
 				func(cri *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-					return common.GetOperatorClientCertificate(j.client, cri)
+					return common.GetOperatorClientCertificate(j.client, cri, j.log)
 				}
 		}
-		if rootCas, err := common.GetRootCAs(j.client); err == nil {
+		if rootCas, err := common.GetRootCAs(j.client, j.log); err == nil {
 			httpClientTransport.TLSClientConfig.RootCAs = rootCas
 		}
 	}
@@ -154,7 +159,9 @@ func (j *Jolokia) Read(_path string) (*ResponseData, error) {
 			respError = err
 			break
 		}
-		defer res.Body.Close()
+		defer func() {
+			_ = res.Body.Close()
+		}()
 
 		if !isResponseSuccessful(res.StatusCode) {
 			return nil, &JolokiaError{
@@ -185,6 +192,49 @@ func (j *Jolokia) Read(_path string) (*ResponseData, error) {
 	return jdata, respError
 }
 
+func (j *Jolokia) ReadMap(_path string) (map[string]interface{}, error) {
+
+	url := j.protocol + "://" + j.user + ":" + j.password + "@" + j.jolokiaURL + "/read/" + _path
+
+	jolokiaClient := j.getClient()
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "arkmq-org-broker-management")
+	res, err := jolokiaClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = res.Body.Close()
+	}()
+
+	if !isResponseSuccessful(res.StatusCode) {
+		return nil, &JolokiaError{
+			HttpCode: res.StatusCode,
+			Message:  "error: " + res.Status,
+		}
+	}
+
+	result, rawData, err := decodeResponseData(res)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckResponse(res, result); err != nil {
+		return nil, err
+	}
+
+	if v, ok := rawData["value"]; ok && v != nil {
+		if m, ok := v.(map[string]interface{}); ok {
+			return m, nil
+		}
+	}
+
+	return nil, nil
+}
+
 func (j *Jolokia) Exec(_path string, _postJsonString string) (*ResponseData, error) {
 	return j.ExecWithClient(j.getClient(), _path, _postJsonString)
 }
@@ -210,8 +260,9 @@ func (j *Jolokia) ExecWithClient(jolokiaClient *http.Client, _path string, _post
 			execErr = err
 			break
 		}
-
-		defer res.Body.Close()
+		defer func() {
+			_ = res.Body.Close()
+		}()
 
 		//decoding
 		result, _, err := decodeResponseData(res)

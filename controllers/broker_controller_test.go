@@ -42,6 +42,7 @@ import (
 	v1beta2 "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/namer"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 var _ = Describe("minimal", func() {
@@ -335,10 +336,10 @@ var _ = Describe("minimal", func() {
 			}
 			httpClientTransport.TLSClientConfig.GetClientCertificate =
 				func(cri *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-					return common.GetOperatorClientCertificate(k8sClient, cri)
+					return common.GetOperatorClientCertificate(k8sClient, cri, ctrl.Log)
 				}
 
-			if rootCas, err := common.GetRootCAs(k8sClient); err == nil {
+			if rootCas, err := common.GetRootCAs(k8sClient, ctrl.Log); err == nil {
 				httpClientTransport.TLSClientConfig.RootCAs = rootCas
 			}
 
@@ -518,10 +519,10 @@ hawtio=hawtio
 				}
 				httpClientTransport.TLSClientConfig.GetClientCertificate =
 					func(cri *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-						return common.GetOperatorClientCertificate(k8sClient, cri)
+						return common.GetOperatorClientCertificate(k8sClient, cri, ctrl.Log)
 					}
 
-				if rootCas, err := common.GetRootCAs(k8sClient); err == nil {
+				if rootCas, err := common.GetRootCAs(k8sClient, ctrl.Log); err == nil {
 					httpClientTransport.TLSClientConfig.RootCAs = rootCas
 				}
 
@@ -581,7 +582,7 @@ hawtio=hawtio
 						return &cert, nil
 					}
 
-				if rootCas, err := common.GetRootCAs(k8sClient); err == nil {
+				if rootCas, err := common.GetRootCAs(k8sClient, ctrl.Log); err == nil {
 					httpClientTransport.TLSClientConfig.RootCAs = rootCas
 				}
 
@@ -641,7 +642,7 @@ hawtio=hawtio
 						return &cert, nil
 					}
 
-				if rootCas, err := common.GetRootCAs(k8sClient); err == nil {
+				if rootCas, err := common.GetRootCAs(k8sClient, ctrl.Log); err == nil {
 					httpClientTransport.TLSClientConfig.RootCAs = rootCas
 				}
 

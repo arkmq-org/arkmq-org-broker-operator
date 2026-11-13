@@ -146,12 +146,12 @@ func (reconciler *ReconcilerLoop) SyncDesiredWithDeployed(owner client.Object) e
 
 func (reconciler *ReconcilerLoop) CreateRequestedResource(owner client.Object, scheme *runtime.Scheme, requested client.Object, kind reflect.Type) error {
 	reconciler.log.V(1).Info("Creating ", "kind ", kind, "named ", requested.GetName())
-	return resources.Create(owner, reconciler.Client, scheme, requested)
+	return resources.CreateWithLog(reconciler.log, owner, reconciler.Client, scheme, requested)
 }
 
 func (reconciler *ReconcilerLoop) UpdateRequestedResource(requested client.Object, kind reflect.Type) error {
 	var updateError error
-	if updateError = resources.Update(reconciler.Client, requested); updateError == nil {
+	if updateError = resources.UpdateWithLog(reconciler.log, reconciler.Client, requested); updateError == nil {
 		reconciler.log.V(2).Info("updated", "kind ", kind, "named ", requested.GetName())
 	} else {
 		reconciler.log.V(0).Info("updated Failed", "kind ", kind, "named ", requested.GetName(), "error ", updateError)
@@ -162,7 +162,7 @@ func (reconciler *ReconcilerLoop) UpdateRequestedResource(requested client.Objec
 func (reconciler *ReconcilerLoop) DeleteRequestedResource(requested client.Object, kind reflect.Type) error {
 
 	var deleteError error
-	if deleteError := resources.Delete(reconciler.Client, requested); deleteError == nil {
+	if deleteError := resources.DeleteWithLog(reconciler.log, reconciler.Client, requested); deleteError == nil {
 		reconciler.log.V(2).Info("deleted", "kind", kind, " named ", requested.GetName())
 	} else {
 		reconciler.log.V(0).Error(deleteError, "delete Failed", "kind", kind, " named ", requested.GetName())

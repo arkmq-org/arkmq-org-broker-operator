@@ -25,7 +25,8 @@ import (
 )
 
 func parseCapabilities(secret *corev1.Secret, appName string) brokerproperties.CapabilitiesJSON {
-	key := "test-" + appName + "-capabilities.json"
+	app := NewBrokerApp(appName, "test").Build()
+	key := AppIdentityPrefixed(app, "capabilities.json")
 	data := secret.Data[key]
 	Expect(data).NotTo(BeEmpty(), fmt.Sprintf("no capabilities JSON for key %q", key))
 	var result brokerproperties.CapabilitiesJSON
@@ -46,7 +47,9 @@ func testAddressRegistryNoCapabilities() {
 		).
 		Build()
 
-	err := reconciler.processCapabilities(secret, app)
+	tracker, err := reconciler.buildAddressTracker(app)
+	Expect(err).NotTo(HaveOccurred())
+	err = reconciler.processCapabilities(secret, app, tracker)
 	Expect(err).NotTo(HaveOccurred())
 
 	caps := parseCapabilities(secret, "address-registry")
@@ -72,7 +75,9 @@ func testSpecAddressesWithCapabilities() {
 		WithProducerOf(NewAddressRef("events").Build()).
 		Build()
 
-	err := reconciler.processCapabilities(secret, app)
+	tracker, err := reconciler.buildAddressTracker(app)
+	Expect(err).NotTo(HaveOccurred())
+	err = reconciler.processCapabilities(secret, app, tracker)
 	Expect(err).NotTo(HaveOccurred())
 
 	caps := parseCapabilities(secret, "producer")
@@ -95,7 +100,9 @@ var _ = Describe("brokerservice capabilities", func() {
 			WithProducerOf(NewAddressRef("orders").Build()).
 			Build()
 
-		err := reconciler.processCapabilities(secret, app)
+		tracker, err := reconciler.buildAddressTracker(app)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app, tracker)
 		Expect(err).NotTo(HaveOccurred())
 
 		caps := parseCapabilities(secret, "owner")
@@ -112,7 +119,9 @@ var _ = Describe("brokerservice capabilities", func() {
 			WithConsumerOf(NewAddressRef("orders").WithAppRef("other", "owner").Build()).
 			Build()
 
-		err := reconciler.processCapabilities(secret, app)
+		tracker, err := reconciler.buildAddressTracker(app)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app, tracker)
 		Expect(err).NotTo(HaveOccurred())
 
 		caps := parseCapabilities(secret, "consumer")
@@ -135,7 +144,9 @@ var _ = Describe("brokerservice capabilities", func() {
 			WithConsumerOf(NewAddressRef("shared-queue").WithAppRef("other", "owner").Build()).
 			Build()
 
-		err := reconciler.processCapabilities(secret, app)
+		tracker, err := reconciler.buildAddressTracker(app)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app, tracker)
 		Expect(err).NotTo(HaveOccurred())
 
 		caps := parseCapabilities(secret, "mixed")
@@ -171,7 +182,9 @@ var _ = Describe("brokerservice capabilities", func() {
 			WithConsumerOf(NewAddressRef("orders").WithAppRef("other", "producer").Build()).
 			Build()
 
-		err := reconciler.processCapabilities(secret, app)
+		tracker, err := reconciler.buildAddressTracker(app)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app, tracker)
 		Expect(err).NotTo(HaveOccurred())
 
 		caps := parseCapabilities(secret, "consumer")
@@ -193,7 +206,9 @@ var _ = Describe("brokerservice capabilities", func() {
 			WithConsumerOf(NewAddressRef("events").WithAppRef("other", "producer").WithSubscriptions("joe").Build()).
 			Build()
 
-		err := reconciler.processCapabilities(secret, app)
+		tracker, err := reconciler.buildAddressTracker(app)
+		Expect(err).NotTo(HaveOccurred())
+		err = reconciler.processCapabilities(secret, app, tracker)
 		Expect(err).NotTo(HaveOccurred())
 
 		caps := parseCapabilities(secret, "subscriber")

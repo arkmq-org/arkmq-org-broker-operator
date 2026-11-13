@@ -104,6 +104,7 @@ Follow the `AI_documentation/contribution_guide.md`
   - E2E tests at start and end: `USE_EXISTING_CLUSTER=true go test -v
   ./controllers -ginkgo.focus="<pattern>" -timeout 10m`
   - Unit tests during implementation: `go test ./controllers -run <TestName>`
+  - Ginkgo unit tests (label-filtered): `go test ./controllers/ --ginkgo.label-filter="unit"`
 
 - **Fix Issues** → If tests fail, fix and re-run
 

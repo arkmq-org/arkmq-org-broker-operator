@@ -31,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -312,6 +311,11 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			By("cleanup")
 			Expect(k8sClient.Delete(ctx, createdApp2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdCrd)).Should(Succeed())
+
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, serviceKey, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+
 			UninstallCert(app1CertName, defaultNamespace)
 			UninstallCert(app2CertName, defaultNamespace)
 			UninstallCert(sharedOperandCertName, defaultNamespace)
@@ -515,6 +519,15 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			Expect(k8sClient.Delete(ctx, createdApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdService1)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdService2)).Should(Succeed())
+
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, service1Key, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, service2Key, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+
 			UninstallCert(appCertName, defaultNamespace)
 			UninstallCert(service1Name+"-"+common.DefaultOperandCertSecretName, defaultNamespace)
 			UninstallCert(service2Name+"-"+common.DefaultOperandCertSecretName, defaultNamespace)
@@ -632,6 +645,7 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 						Address:               "shared.address",
 						PubSub:                &[]bool{true}[0],
 						ConsumerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", otherNamespace),
+						ProducerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", defaultNamespace),
 					}},
 					Capabilities: []broker.AppCapabilityType{
 						{
@@ -1073,11 +1087,19 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			Expect(k8sClient.Delete(ctx, createdApp2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdApp3)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdService)).Should(Succeed())
+
+			By("Wating for drain before whacking certs that bound communication")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, serviceKey, createdService)).NotTo(BeNil())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
 			UninstallCert(app1CertName, defaultNamespace)
+			UninstallCert(app1.Name+common.AppCertSecretSuffix, defaultNamespace)
 			UninstallCert(app2CertName, otherNamespace)
+			UninstallCert(app2.Name+common.AppCertSecretSuffix, otherNamespace)
 			UninstallCert(app3CertName, defaultNamespace)
-			UninstallCert(certName, defaultNamespace)
-			UninstallCert(prometheusCertName, defaultNamespace)
+			UninstallCert(app3.Name+common.AppCertSecretSuffix, defaultNamespace)
+			CleanupServiceCerts(serviceName, defaultNamespace)
 		})
 	})
 
@@ -1378,145 +1400,16 @@ var _ = Describe("broker-service multi-app scenarios", func() {
 			Expect(k8sClient.Delete(ctx, createdApp1)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdApp2)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdService)).Should(Succeed())
+
+			// let drain complete before cert cleanup
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, serviceKey, &broker.BrokerService{}))
+			}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
+
 			UninstallCert(app1CertName, defaultNamespace)
 			UninstallCert(app2CertName, defaultNamespace)
 			UninstallCert(certName, defaultNamespace)
 			UninstallCert(prometheusCertName, defaultNamespace)
-		})
-	})
-
-	Context("CEL Expression Validation", func() {
-		It("sets Valid=False when appSelectorExpression has syntax error", func() {
-			ctx := context.Background()
-
-			// Create namespace
-			ns := &corev1.Namespace{
-				ObjectMeta: v1.ObjectMeta{
-					Name: "test-invalid-cel",
-				},
-			}
-			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
-
-			// Create BrokerService with invalid CEL expression
-			service := &broker.BrokerService{
-				ObjectMeta: v1.ObjectMeta{
-					Name:      "invalid-cel-service",
-					Namespace: ns.Name,
-				},
-				Spec: broker.BrokerServiceSpec{
-					AppSelectorExpression: `app.metadata.namespace ==`, // Syntax error
-				},
-			}
-			Expect(k8sClient.Create(ctx, service)).Should(Succeed())
-
-			// Check status - should have Valid=False
-			Eventually(func(g Gomega) {
-				updatedService := &broker.BrokerService{}
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
-					Name:      service.Name,
-					Namespace: service.Namespace,
-				}, updatedService)).Should(Succeed())
-
-				// Find Valid condition
-				validCondition := meta.FindStatusCondition(updatedService.Status.Conditions, broker.ValidConditionType)
-				g.Expect(validCondition).NotTo(BeNil())
-				g.Expect(validCondition.Status).To(Equal(v1.ConditionFalse))
-				g.Expect(validCondition.Reason).To(Equal(broker.ValidConditionSpecSelectorError))
-				g.Expect(validCondition.Message).To(ContainSubstring("invalid appSelectorExpression"))
-				g.Expect(validCondition.Message).To(ContainSubstring("failed to compile CEL expression"))
-			}, timeout, interval).Should(Succeed())
-
-			// Cleanup
-			Expect(k8sClient.Delete(ctx, service)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, ns)).Should(Succeed())
-		})
-
-		It("sets Valid=False when appSelectorExpression returns non-boolean", func() {
-			ctx := context.Background()
-
-			// Create namespace
-			ns := &corev1.Namespace{
-				ObjectMeta: v1.ObjectMeta{
-					Name: "test-nonbool-cel",
-				},
-			}
-			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
-
-			// Create BrokerService with expression that returns string
-			service := &broker.BrokerService{
-				ObjectMeta: v1.ObjectMeta{
-					Name:      "nonbool-cel-service",
-					Namespace: ns.Name,
-				},
-				Spec: broker.BrokerServiceSpec{
-					AppSelectorExpression: `app.metadata.namespace`, // Returns string, not bool
-				},
-			}
-			Expect(k8sClient.Create(ctx, service)).Should(Succeed())
-
-			// Check status - should have Valid=False
-			Eventually(func(g Gomega) {
-				updatedService := &broker.BrokerService{}
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
-					Name:      service.Name,
-					Namespace: service.Namespace,
-				}, updatedService)).Should(Succeed())
-
-				// Find Valid condition
-				validCondition := meta.FindStatusCondition(updatedService.Status.Conditions, broker.ValidConditionType)
-				g.Expect(validCondition).NotTo(BeNil())
-				g.Expect(validCondition.Status).To(Equal(v1.ConditionFalse))
-				g.Expect(validCondition.Reason).To(Equal(broker.ValidConditionSpecSelectorError))
-				g.Expect(validCondition.Message).To(ContainSubstring("invalid appSelectorExpression"))
-				g.Expect(validCondition.Message).To(ContainSubstring("must return boolean"))
-			}, timeout, interval).Should(Succeed())
-
-			// Cleanup
-			Expect(k8sClient.Delete(ctx, service)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, ns)).Should(Succeed())
-		})
-
-		It("sets Valid=True when appSelectorExpression is valid", func() {
-			ctx := context.Background()
-
-			// Create namespace
-			ns := &corev1.Namespace{
-				ObjectMeta: v1.ObjectMeta{
-					Name: "test-valid-cel",
-				},
-			}
-			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
-
-			// Create BrokerService with valid CEL expression
-			service := &broker.BrokerService{
-				ObjectMeta: v1.ObjectMeta{
-					Name:      "valid-cel-service",
-					Namespace: ns.Name,
-				},
-				Spec: broker.BrokerServiceSpec{
-					AppSelectorExpression: `app.metadata.namespace.startsWith("team-")`,
-				},
-			}
-			Expect(k8sClient.Create(ctx, service)).Should(Succeed())
-
-			// Check status - should have Valid=True
-			Eventually(func(g Gomega) {
-				updatedService := &broker.BrokerService{}
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
-					Name:      service.Name,
-					Namespace: service.Namespace,
-				}, updatedService)).Should(Succeed())
-
-				// Find Valid condition
-				validCondition := meta.FindStatusCondition(updatedService.Status.Conditions, broker.ValidConditionType)
-				g.Expect(validCondition).NotTo(BeNil())
-				g.Expect(validCondition.Status).To(Equal(v1.ConditionTrue))
-				g.Expect(validCondition.Reason).To(Equal(broker.ValidConditionSuccessReason))
-			}, timeout, interval).Should(Succeed())
-
-			// Cleanup
-			Expect(k8sClient.Delete(ctx, service)).Should(Succeed())
-			Expect(k8sClient.Delete(ctx, ns)).Should(Succeed())
 		})
 	})
 })

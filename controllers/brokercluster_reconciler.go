@@ -137,7 +137,7 @@ type BrokerClusterReconcilerImpl struct {
 
 func NewBrokerClusterReconcilerImpl(customResource *v1beta2.BrokerCluster, parent *BrokerClusterReconciler) *BrokerClusterReconcilerImpl {
 	return &BrokerClusterReconcilerImpl{
-		log:                       withCRContext(parent.log, customResource.Kind, customResource.Name, customResource.Namespace),
+		log:                       parent.log.WithValues("CR", customResource.Namespace+"/"+customResource.Name),
 		customResource:            customResource,
 		scheme:                    parent.Scheme,
 		requestedResources:        make(map[reflect.Type]map[string]rtclient.Object),
@@ -1824,6 +1824,7 @@ func equalObjectMeta(deployed, requested rtclient.Object) (isEqual bool) {
 	var pairs [][2]interface{}
 	pairs = append(pairs, [2]interface{}{deployed.GetLabels(), requested.GetLabels()})
 	pairs = append(pairs, [2]interface{}{deployed.GetAnnotations(), requested.GetAnnotations()})
+	pairs = append(pairs, [2]interface{}{deployed.GetFinalizers(), requested.GetFinalizers()})
 	isEqual = compare.EqualPairs(pairs)
 	return isEqual
 }
@@ -2169,7 +2170,7 @@ func (reconciler *BrokerClusterReconcilerImpl) PodTemplateSpecForCR(customResour
 
 	podSpec.ImagePullSecrets = customResource.Spec.DeploymentPlan.ImagePullSecrets
 
-	container := containers.MakeContainer(podSpec, customResource.Name, common.ResolveImage(customResource, common.BrokerImageKey), MakeEnvVarArrayForCR(customResource, namer))
+	container := containers.MakeContainer(podSpec, customResource.Name, common.ResolveImage(customResource, common.BrokerImageKey, reconciler.log), MakeEnvVarArrayForCR(customResource, namer))
 
 	container.Resources = customResource.Spec.DeploymentPlan.Resources
 
@@ -2286,7 +2287,7 @@ func (reconciler *BrokerClusterReconcilerImpl) PodTemplateSpecForCR(customResour
 	podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, volumeMountForCfg)
 
 	reqLogger.V(2).Info("Creating init container for broker configuration")
-	initContainer := containers.MakeInitContainer(podSpec, customResource.Name, common.ResolveImage(customResource, common.InitImageKey), MakeEnvVarArrayForCR(customResource, namer))
+	initContainer := containers.MakeInitContainer(podSpec, customResource.Name, common.ResolveImage(customResource, common.InitImageKey, reconciler.log), MakeEnvVarArrayForCR(customResource, namer))
 	initContainer.Resources = customResource.Spec.DeploymentPlan.Resources
 
 	reconciler.configureContianerSecurityContext(initContainer, customResource.Spec.DeploymentPlan.ContainerSecurityContext)
@@ -3139,7 +3140,7 @@ func (reconciler *BrokerClusterReconcilerImpl) ProcessBrokerClusterStatus(cr *v1
 	// we need to requeue till stable
 	retry = meta.IsStatusConditionTrue(cr.Status.Conditions, v1beta2.ScaleDownPendingConditionType)
 
-	err := AssertBrokersAvailable(cr, client)
+	err := reconciler.AssertBrokersAvailable(cr, client)
 	if err != nil {
 		condition = trapErrorAsCondition(err, v1beta2.ConfigAppliedConditionType)
 		meta.SetStatusCondition(&cr.Status.Conditions, condition)
@@ -3306,13 +3307,12 @@ type propertyFile struct {
 	FileAlder32 string
 }
 
-func AssertBrokersAvailable(cr *v1beta2.BrokerCluster, client rtclient.Client) ArtemisError {
-	reqLogger := withCRContext(ctrl.Log, cr.Kind, cr.Name, cr.Namespace)
+func (reconciler *BrokerClusterReconcilerImpl) AssertBrokersAvailable(cr *v1beta2.BrokerCluster, client rtclient.Client) ArtemisError {
 
 	// pre-condition, we must be deployed, avoid broker status roundtrip till ready
 	DeployedCondition := meta.FindStatusCondition(cr.Status.Conditions, v1beta2.DeployedConditionType)
 	if DeployedCondition == nil || DeployedCondition.Status == metav1.ConditionFalse {
-		reqLogger.V(2).Info("There are no available brokers from DeployedCondition", "condition", DeployedCondition)
+		reconciler.log.V(2).Info("There are no available brokers from DeployedCondition", "condition", DeployedCondition)
 		return NewArtemisStatusError(errors.New("no available brokers from deployed condition"), false)
 	}
 	return nil
@@ -3503,7 +3503,7 @@ func (reconciler *BrokerClusterReconcilerImpl) resolveJolokiaEndpoints(cr *v1bet
 				NamespacedName: types.NamespacedName{Name: namer.CrToSS(cr.Name), Namespace: cr.Namespace},
 				Replicas:       cr.Status.DeploymentPlanSize,
 				Labels:         nil,
-			}}, client)
+			}}, client, reconciler.log)
 	}
 }
 

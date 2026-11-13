@@ -1830,10 +1830,10 @@ var _ = Describe("artemis controller", func() {
 			crd := generateArtemisSpec(defaultNamespace)
 			brokerObj, convErr := ConvertArtemisToBrokerCluster(&crd)
 			Expect(convErr).To(BeNil())
-			imageToUse := common.DetermineImageToUse(brokerObj, "KUBERNETES")
+			imageToUse := common.DetermineImageToUse(brokerObj, "KUBERNETES", ctrl.Log)
 			Expect(imageToUse).To(Equal(version.GetDefaultKubeImage()), "actual", imageToUse)
 
-			imageToUse = common.DetermineImageToUse(brokerObj, "INIT")
+			imageToUse = common.DetermineImageToUse(brokerObj, "INIT", ctrl.Log)
 			Expect(imageToUse).To(Equal(version.GetDefaultInitImage()), "actual", imageToUse)
 			compactVersionToUse, verr := common.DetermineCompactVersionToUse(brokerObj)
 			Expect(verr).To(BeNil())
@@ -2854,11 +2854,15 @@ var _ = Describe("artemis controller", func() {
 				By("check acceptor is reachable")
 				Eventually(func(g Gomega) {
 					url := "amqps://" + clusterIngressHost + ":443"
-					connTLSConfig := amqp.ConnTLSConfig(&tls.Config{ServerName: host, InsecureSkipVerify: true})
-					client, err := amqp.Dial(url, amqp.ConnSASLPlain("dummy-user", "dummy-pass"), amqp.ConnTLS(true), connTLSConfig)
+					conn, err := amqp.Dial(context.Background(), url, &amqp.ConnOptions{
+						SASLType:  amqp.SASLTypePlain("dummy-user", "dummy-pass"),
+						TLSConfig: &tls.Config{ServerName: host, InsecureSkipVerify: true},
+					})
 					g.Expect(err).Should(BeNil())
-					g.Expect(client).ShouldNot(BeNil())
-					defer client.Close()
+					g.Expect(conn).ShouldNot(BeNil())
+					defer func() {
+						_ = conn.Close()
+					}()
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 			}
 
@@ -3225,20 +3229,23 @@ var _ = Describe("artemis controller", func() {
 		produceMessage := func(serverName string, clientId string, linkAddress string, messageId int, g Gomega) {
 
 			url := "amqps://" + clusterIngressHost + ":443"
-			connTLSConfig := amqp.ConnTLSConfig(&tls.Config{ServerName: serverName, InsecureSkipVerify: true})
-			client, err := amqp.Dial(url, amqp.ConnContainerID(clientId), amqp.ConnSASLPlain("dummy-user", "dummy-pass"), amqp.ConnTLS(true), connTLSConfig)
+			conn, err := amqp.Dial(context.Background(), url, &amqp.ConnOptions{
+				ContainerID: clientId,
+				SASLType:    amqp.SASLTypePlain("dummy-user", "dummy-pass"),
+				TLSConfig:   &tls.Config{ServerName: serverName, InsecureSkipVerify: true},
+			})
 			g.Expect(err).Should(BeNil())
-			g.Expect(client).ShouldNot(BeNil())
-			defer client.Close()
+			g.Expect(conn).ShouldNot(BeNil())
+			defer func() {
+				_ = conn.Close()
+			}()
 
-			session, err := client.NewSession()
+			session, err := conn.NewSession(context.Background(), nil)
 
 			g.Expect(err).Should(BeNil())
 			g.Expect(session).ShouldNot(BeNil())
 
-			sender, err := session.NewSender(
-				amqp.LinkTargetAddress(linkAddress),
-			)
+			sender, err := session.NewSender(context.Background(), linkAddress, nil)
 			g.Expect(err).Should(BeNil())
 			ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 
@@ -3250,29 +3257,33 @@ var _ = Describe("artemis controller", func() {
 			msg.ApplicationProperties["MessageID"] = messageId
 			msg.ApplicationProperties["ClientID"] = clientId
 
-			err = sender.Send(ctx, msg)
+			err = sender.Send(ctx, msg, nil)
 			g.Expect(err).Should(BeNil())
 		}
 
 		consumeMatchingMessage := func(serverName string, linkAddress string, receivedTracker map[string]*list.List, g Gomega) {
 
 			url := "amqps://" + clusterIngressHost + ":443"
-			connTLSConfig := amqp.ConnTLSConfig(&tls.Config{ServerName: serverName, InsecureSkipVerify: true})
-			client, err := amqp.Dial(url, amqp.ConnContainerID("$.artemis.internal.router.client.dummy"), amqp.ConnSASLPlain("dummy-user", "dummy-pass"), amqp.ConnTLS(true), connTLSConfig)
+			conn, err := amqp.Dial(context.Background(), url, &amqp.ConnOptions{
+				ContainerID: "$.artemis.internal.router.client.dummy",
+				SASLType:    amqp.SASLTypePlain("dummy-user", "dummy-pass"),
+				TLSConfig:   &tls.Config{ServerName: serverName, InsecureSkipVerify: true},
+			})
 			g.Expect(err).Should(BeNil())
-			g.Expect(client).ShouldNot(BeNil())
+			g.Expect(conn).ShouldNot(BeNil())
 
-			defer client.Close()
+			defer func() {
+				_ = conn.Close()
+			}()
 
-			session, err := client.NewSession()
+			session, err := conn.NewSession(context.Background(), nil)
 			g.Expect(err).Should(BeNil())
 			g.Expect(session).ShouldNot(BeNil())
 
-			receiver, err := session.NewReceiver(
-				amqp.LinkSourceAddress(linkAddress),
-				amqp.LinkSourceCapabilities("queue"),
-				amqp.LinkCredit(50),
-			)
+			receiver, err := session.NewReceiver(context.Background(), linkAddress, &amqp.ReceiverOptions{
+				Capabilities: []string{"queue"},
+				Credit:       50,
+			})
 			g.Expect(err).Should(BeNil())
 			g.Expect(receiver).ShouldNot(BeNil())
 
@@ -3282,7 +3293,7 @@ var _ = Describe("artemis controller", func() {
 
 			// Receive messages till error or nil
 			for {
-				msg, err := receiver.Receive(ctx)
+				msg, err := receiver.Receive(ctx, nil)
 
 				if err != nil || msg == nil {
 					break
@@ -4930,13 +4941,13 @@ var _ = Describe("artemis controller", func() {
 
 			crd0 := brokerCR.DeepCopy()
 			By("Processing status 0")
-			common.ProcessStatus(crd0, k8sClient, namespacedName, *namers, nil)
+			common.ProcessStatus(crd0, k8sClient, namespacedName, *namers, nil, ctrl.Log)
 			Expect(crd0.Status.ScaleLabelSelector).ShouldNot(BeEmpty())
 			Expect(sort.StringsAreSorted(strings.Split(crd0.Status.ScaleLabelSelector, ","))).Should(BeTrue())
 
 			crd1 := brokerCR.DeepCopy()
 			By("Processing status 1")
-			common.ProcessStatus(crd1, k8sClient, namespacedName, *namers, nil)
+			common.ProcessStatus(crd1, k8sClient, namespacedName, *namers, nil, ctrl.Log)
 			Expect(crd1.Status.ScaleLabelSelector).ShouldNot(BeEmpty())
 			Expect(sort.StringsAreSorted(strings.Split(crd1.Status.ScaleLabelSelector, ","))).Should(BeTrue())
 
@@ -10948,7 +10959,7 @@ var _ = Describe("artemis controller", func() {
 					g.Expect(condition.Status).To(Equal(metav1.ConditionTrue))
 				}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
-				jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-ss-0."+crd.Name+"-hdls-svc.test.svc.cluster.local", "8161", "/console/jolokia", "", "", "http")
+				jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-ss-0."+crd.Name+"-hdls-svc.test.svc.cluster.local", "8161", "/console/jolokia", "", "", "http", ctrl.Log)
 
 				var hasFileChecksum bool = false
 				By("verify file checksum")
@@ -11351,7 +11362,7 @@ var _ = Describe("artemis controller", func() {
 
 				By("validating jolokia ordinal 0")
 				Eventually(func(g Gomega) {
-					jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-ss-0."+crd.Name+"-hdls-svc.test.svc.cluster.local", "8161", "/console/jolokia", "", "", "http")
+					jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-ss-0."+crd.Name+"-hdls-svc.test.svc.cluster.local", "8161", "/console/jolokia", "", "", "http", ctrl.Log)
 					data, err := jolokia.Read("org.apache.activemq.artemis:broker=\"amq-broker\",component=cluster-connections,name=\"my-cluster\"/Nodes")
 					g.Expect(err).To(BeNil())
 					g.Expect(data.Value).Should(ContainSubstring(crd.Name+"-ss-1"), data.Value)
@@ -11360,7 +11371,7 @@ var _ = Describe("artemis controller", func() {
 
 				By("validating jolokia ordinal 1")
 				Eventually(func(g Gomega) {
-					jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-ss-1."+crd.Name+"-hdls-svc.test.svc.cluster.local", "8161", "/console/jolokia", "", "", "http")
+					jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-ss-1."+crd.Name+"-hdls-svc.test.svc.cluster.local", "8161", "/console/jolokia", "", "", "http", ctrl.Log)
 					data, err := jolokia.Read("org.apache.activemq.artemis:broker=\"amq-broker\",component=cluster-connections,name=\"my-cluster\"/Nodes")
 					g.Expect(err).To(BeNil())
 					g.Expect(data.Value).Should(ContainSubstring(crd.Name+"-ss-0"), data.Value)
@@ -11369,7 +11380,7 @@ var _ = Describe("artemis controller", func() {
 
 				By("validating jolokia service")
 				Eventually(func(g Gomega) {
-					jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-hdls-svc.test.svc.cluster.local", "8161", "/console/jolokia", "", "", "http")
+					jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-hdls-svc.test.svc.cluster.local", "8161", "/console/jolokia", "", "", "http", ctrl.Log)
 					data, err := jolokia.Read("org.apache.activemq.artemis:broker=\"amq-broker\",component=cluster-connections,name=\"my-cluster\"/Nodes")
 					g.Expect(err).To(BeNil())
 					g.Expect(data.Value).Should(ContainSubstring(crd.Name+"-ss-"), data.Value)
@@ -11419,7 +11430,7 @@ var _ = Describe("artemis controller", func() {
 				Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
 
 				Eventually(func(g Gomega) {
-					jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-ss-0."+crd.Name+"-hdls-svc."+defaultNamespace+".svc.cluster.local", "8161", "/console/jolokia", "", "", "http")
+					jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-ss-0."+crd.Name+"-hdls-svc."+defaultNamespace+".svc.cluster.local", "8161", "/console/jolokia", "", "", "http", ctrl.Log)
 					data, err := jolokia.Read("org.apache.activemq.artemis:broker=\"amq-broker\",component=cluster-connections,name=\"my-cluster\"/Nodes")
 					g.Expect(err).To(BeNil())
 					g.Expect(data.Value).Should(ContainSubstring(crd.Name+"-ss-1"), data.Value)
@@ -11463,7 +11474,7 @@ var _ = Describe("artemis controller", func() {
 				Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
 
 				Eventually(func(g Gomega) {
-					jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-ss-0."+crd.Name+"-hdls-svc."+defaultNamespace+".svc.cluster.local", "8161", "/console/jolokia", "", "", "http")
+					jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-ss-0."+crd.Name+"-hdls-svc."+defaultNamespace+".svc.cluster.local", "8161", "/console/jolokia", "", "", "http", ctrl.Log)
 					data, err := jolokia.Read("org.apache.activemq.artemis:broker=\"amq-broker\",component=cluster-connections,name=\"my-cluster\"/Nodes")
 					g.Expect(err).To(BeNil())
 					g.Expect(data.Value).Should(ContainSubstring(crd.Name+"-ss-1"), data.Value)
@@ -11506,7 +11517,7 @@ var _ = Describe("artemis controller", func() {
 				Expect(k8sClient.Create(ctx, &crd)).Should(Succeed())
 
 				Eventually(func(g Gomega) {
-					jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-ss-0."+crd.Name+"-hdls-svc."+defaultNamespace+".svc.cluster.local", "8161", "/console/jolokia", "", "", "http")
+					jolokia := jolokia.GetJolokia(k8sClient, crd.Name+"-ss-0."+crd.Name+"-hdls-svc."+defaultNamespace+".svc.cluster.local", "8161", "/console/jolokia", "", "", "http", ctrl.Log)
 					data, err := jolokia.Read("org.apache.activemq.artemis:broker=\"amq-broker\",component=cluster-connections,name=\"my-cluster\"/Nodes")
 					g.Expect(err).To(BeNil())
 					g.Expect(data.Value).Should(ContainSubstring(crd.Name+"-ss-1"), data.Value)

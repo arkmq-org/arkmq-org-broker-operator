@@ -25,8 +25,10 @@ import (
 	cmmetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,7 +38,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
-var _ = Describe("broker-service edge cases and concurrent operations", func() {
+var _ = Describe("broker-service edge cases and concurrent operations", Label("verySlow"), func() {
 
 	BeforeEach(func() {
 		BeforeEachSpec()
@@ -229,6 +231,13 @@ var _ = Describe("broker-service edge cases and concurrent operations", func() {
 
 			By("final cleanup")
 			Expect(k8sClient.Delete(ctx, createdCrd)).Should(Succeed())
+
+			By("wait for deletion to ensure finalizer is gone before cert cleanup")
+			Eventually(func(g Gomega) {
+				g.Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(createdCrd), &broker.BrokerService{}))).Should(BeTrue(),
+					"service deletion completed, finalizer removed")
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
 			for i := 0; i < numApps; i++ {
 				UninstallCert(appCerts[i], defaultNamespace)
 			}
@@ -371,6 +380,13 @@ var _ = Describe("broker-service edge cases and concurrent operations", func() {
 			By("cleanup")
 			Expect(k8sClient.Delete(ctx, createdApp)).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, createdCrd)).Should(Succeed())
+
+			By("wait for deletion to ensure finalizer is gone before cert cleanup")
+			Eventually(func(g Gomega) {
+				g.Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(createdCrd), &broker.BrokerService{}))).Should(BeTrue(),
+					"service deletion completed, finalizer removed")
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
 			UninstallCert(appCertName, defaultNamespace)
 			UninstallCert(sharedOperandCertName, defaultNamespace)
 			UninstallCert(prometheusCertName, defaultNamespace)
@@ -506,6 +522,13 @@ var _ = Describe("broker-service edge cases and concurrent operations", func() {
 
 			By("cleanup")
 			Expect(k8sClient.Delete(ctx, createdApp)).Should(Succeed())
+
+			By("wait for deletion to ensure finalizer is gone before whacking certs")
+			Eventually(func(g Gomega) {
+				g.Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKeyFromObject(createdApp), createdApp))).Should(BeTrue(),
+					"app deletion completed")
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
 			UninstallCert(appCertName, defaultNamespace)
 			UninstallCert(sharedOperandCertName, defaultNamespace)
 			UninstallCert(prometheusCertName, defaultNamespace)

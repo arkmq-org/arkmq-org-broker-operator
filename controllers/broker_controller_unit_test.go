@@ -23,6 +23,7 @@ import (
 	"encoding/pem"
 	"math/big"
 	"path"
+	"reflect"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -86,7 +88,7 @@ var _ = Describe("broker controller unit", func() {
 		namer := MakeNamersForBroker(cr)
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
+		ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 
 		var times = 0
 		interceptorFuncs := interceptor.Funcs{
@@ -139,7 +141,7 @@ var _ = Describe("broker controller unit", func() {
 			r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
 			namer := MakeNamersForBroker(cr)
 
-			reconciler1 := NewBrokerReconcilerImpl(cr, r)
+			reconciler1 := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 			firstPTS, err := reconciler1.PodTemplateSpecForCR(cr, *namer, &appsv1.StatefulSet{}, localClient)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(firstPTS.Spec.InitContainers).To(HaveLen(1), "should have one sidecar init container")
@@ -167,7 +169,7 @@ var _ = Describe("broker controller unit", func() {
 			applyServerSideDefaults(deployed.Spec.Template.Spec.Containers)
 
 			currentClone := deployed.DeepCopy()
-			reconciler2 = NewBrokerReconcilerImpl(cr, r)
+			reconciler2 = NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 			secondPTS, err := reconciler2.PodTemplateSpecForCR(cr, *namer, currentClone, localClient)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -214,7 +216,7 @@ var _ = Describe("broker controller unit", func() {
 		}
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
+		ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 
 		fakeSecrets := map[string]client.Object{}
 		interceptorFuncs := interceptor.Funcs{
@@ -658,7 +660,7 @@ var _ = Describe("broker controller unit", func() {
 			DeferCleanup(common.UnsetOperatorNameSpace)
 
 			localClient := fake.NewClientBuilder().WithObjects(operandSecret, operatorCert, operatorCA).Build()
-			reconciler := NewBrokerReconcilerImpl(cr, NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift))
+			reconciler := NewBrokerReconcilerImpl(cr, NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift), ctrl.Log)
 			namer := MakeNamersForBroker(cr)
 
 			var err error
@@ -787,7 +789,7 @@ var _ = Describe("broker controller unit", func() {
 		}
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
+		ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 		Expect(strings.Contains(result, "EXTRA_BROKER_PROPERTIES")).To(BeFalse(),
 			"brokerPropertiesConfigSystemPropValue must not contain the token when EXTRA_BROKER_PROPERTIES is unset")
@@ -822,7 +824,7 @@ var _ = Describe("broker controller unit", func() {
 		Expect(found).To(BeTrue(), "EXTRA_BROKER_PROPERTIES with user value must be in env array")
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
+		ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 		Expect(strings.HasSuffix(result, ",${EXTRA_BROKER_PROPERTIES}")).To(BeTrue(),
 			"brokerPropertiesConfigSystemPropValue must end with ,${EXTRA_BROKER_PROPERTIES} when user has set it")
@@ -834,7 +836,7 @@ var _ = Describe("broker controller unit", func() {
 		}
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
+		ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 		Expect(result).To(Equal("-Dbroker.properties=/config/my-resource/"),
 			"the directory must be loaded so the restricted *.json entries next to broker.properties apply")
@@ -851,7 +853,7 @@ var _ = Describe("broker controller unit", func() {
 		}
 
 		r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-		ri := NewBrokerReconcilerImpl(cr, r)
+		ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 		result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 		Expect(result).To(Equal("-Dbroker.properties=/config/my-resource/," + common.SecretPathBase + "my" + common.BrokerPropsSuffix + "/"))
 		Expect(result).NotTo(ContainSubstring("STATEFUL_SET_ORDINAL"))
@@ -926,7 +928,7 @@ var _ = Describe("broker controller unit", func() {
 				Expect(found).To(BeTrue(), "EXTRA_BROKER_PROPERTIES with valueFrom must be in env array")
 
 				r := NewBrokerReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
-				ri := NewBrokerReconcilerImpl(cr, r)
+				ri := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
 				result := ri.brokerPropertiesConfigSystemPropValue("/config/", "my-resource")
 				Expect(strings.HasSuffix(result, ",${EXTRA_BROKER_PROPERTIES}")).To(BeTrue(),
 					"brokerPropertiesConfigSystemPropValue must end with ,${EXTRA_BROKER_PROPERTIES}")
@@ -996,5 +998,127 @@ var _ = Describe("broker controller unit", func() {
 			"Reconcile must requeue when ProcessBrokerStatus returns true "+
 				"(jolokia unreachable); the if block at broker_controller.go:148 "+
 				"captures this retry signal into requeueRequest")
+	})
+
+	It("sidecar secret preserves server-side annotations from deployed state", Label(unitLabel), func() {
+		ns := "test"
+		crName := "my-broker"
+		cr := &v1beta2.Broker{
+			ObjectMeta: v1.ObjectMeta{Name: crName, Namespace: ns},
+		}
+
+		s := runtime.NewScheme()
+		_ = v1beta2.AddToScheme(s)
+		_ = corev1.AddToScheme(s)
+		_ = rbacv1.AddToScheme(s)
+
+		cl := fake.NewClientBuilder().WithScheme(s).Build()
+
+		r := &BrokerReconciler{
+			Scheme: s,
+			log:    ctrl.Log,
+		}
+		reconciler := NewBrokerReconcilerImpl(cr, r, ctrl.Log)
+
+		sidecarName := crName + sidecarSecretSuffix
+		deployedSecret := &corev1.Secret{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      sidecarName,
+				Namespace: ns,
+				Annotations: map[string]string{
+					"kubectl.kubernetes.io/last-applied-configuration": `{"old":"data"}`,
+					"server-side-annotation":                           "preserved",
+				},
+				ResourceVersion: "42",
+			},
+			Data: map[string][]byte{"old-key": []byte("old-value")},
+		}
+
+		secretType := reflect.TypeFor[corev1.Secret]()
+		reconciler.deployed = map[reflect.Type][]client.Object{
+			secretType: {deployedSecret},
+		}
+
+		err := reconciler.ensureSidecarConfig(cl)
+		Expect(err).NotTo(HaveOccurred())
+
+		desired := reconciler.getFromDesired(reflect.TypeOf(&corev1.Secret{}), sidecarName)
+		Expect(desired).NotTo(BeNil(), "sidecar secret should be tracked as desired")
+
+		desiredSecret := desired.(*corev1.Secret)
+		Expect(desiredSecret.Annotations).To(HaveKeyWithValue(
+			"kubectl.kubernetes.io/last-applied-configuration", `{"old":"data"}`),
+			"server-side annotation should be preserved from deployed secret")
+		Expect(desiredSecret.Annotations).To(HaveKeyWithValue(
+			"server-side-annotation", "preserved"),
+			"custom server-side annotation should be preserved")
+
+		Expect(desiredSecret.Data).To(HaveKey(brokerStatusScriptKey),
+			"data should be overwritten with current sidecar config")
+		Expect(desiredSecret.Data).NotTo(HaveKey("old-key"),
+			"old data keys should not persist")
+	})
+
+	Context("equalObjectMeta", func() {
+		It("returns true when labels annotations and finalizers match", Label(unitLabel), func() {
+			deployed := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:        "s1",
+					Labels:      map[string]string{"app": "broker"},
+					Annotations: map[string]string{"note": "yes"},
+					Finalizers:  []string{"fin-a"},
+				},
+			}
+			requested := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:        "s1",
+					Labels:      map[string]string{"app": "broker"},
+					Annotations: map[string]string{"note": "yes"},
+					Finalizers:  []string{"fin-a"},
+				},
+			}
+			Expect(equalObjectMeta(deployed, requested)).To(BeTrue())
+		})
+
+		It("returns false when finalizers differ", Label(unitLabel), func() {
+			deployed := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:       "s1",
+					Finalizers: []string{"fin-a"},
+				},
+			}
+			requested := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:       "s1",
+					Finalizers: []string{"fin-b"},
+				},
+			}
+			Expect(equalObjectMeta(deployed, requested)).To(BeFalse(),
+				"differing finalizers should make equalObjectMeta return false")
+		})
+
+		It("returns true when both have empty finalizers", Label(unitLabel), func() {
+			deployed := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{Name: "s1"},
+			}
+			requested := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{Name: "s1"},
+			}
+			Expect(equalObjectMeta(deployed, requested)).To(BeTrue())
+		})
+
+		It("returns false when only one has finalizers", Label(unitLabel), func() {
+			deployed := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:       "s1",
+					Finalizers: []string{"fin-a"},
+				},
+			}
+			requested := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{Name: "s1"},
+			}
+			Expect(equalObjectMeta(deployed, requested)).To(BeFalse(),
+				"deployed has finalizer but requested does not")
+		})
 	})
 })

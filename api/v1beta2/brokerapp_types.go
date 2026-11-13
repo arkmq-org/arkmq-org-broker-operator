@@ -136,6 +136,19 @@ type BrokerAppStatus struct {
 	// Service references the BrokerService this app is bound to and its binding secret
 	//+optional
 	Service *BrokerServiceBindingStatus `json:"service,omitempty"`
+
+	// BoundSpec holds the last successfully validated spec and the generation it
+	// was captured from. The BrokerService controller reads this instead of Spec
+	// to ensure it only operates on validated configuration.
+	//+optional
+	BoundSpec *AppBoundSpec `json:"boundSpec,omitempty"`
+}
+
+// AppBoundSpec is a snapshot of the app spec at a particular generation,
+// captured when the app successfully validates while bound to a service.
+type AppBoundSpec struct {
+	Spec       BrokerAppSpec `json:"spec"`
+	Generation int64         `json:"generation"`
 }
 
 //+kubebuilder:object:root=true
@@ -167,5 +180,17 @@ func init() {
 }
 
 const (
+	DeployedConditionNoMatchingServiceReason      = "NoMatchingService"
+	DeployedConditionNoServiceCapacityReason      = "NoServiceCapacity"
+	DeployedConditionMatchedServiceNotFoundReason = "MatchedServiceNotFound"
+	DeployedConditionBindingReason                = "Binding"
+	DeployedConditionBoundReason                  = "Bound"
+	DeployedConditionSelectorEvaluationError      = "AppSelectorEvaluationError"
+	DeployedConditionMissingAppCertReason         = "MissingAppCert"
+	DeployedConditionUnbindingReason              = "Unbinding"
+
 	ValidConditionServiceSelectorError = "ServiceSelectorError"
+	ValidConditionAddressTypeError     = "AddressTypeError"
+
+	ReadyConditionUnbindingReason = "Unbinding"
 )

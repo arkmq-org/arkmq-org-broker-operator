@@ -36,6 +36,7 @@ type RolePermissions struct {
 type QueueConfig struct {
 	RoutingType string `json:"routingType"`
 	Address     string `json:"address,omitempty"`
+	Enabled     *bool  `json:"enabled,omitempty"`
 }
 
 type AddressConfiguration struct {
@@ -119,16 +120,22 @@ type AcceptorJSON struct {
 	JaasConfigs            map[string]*JaasRealmConfig       `json:"jaasConfigs"`
 }
 
+type addressSettingEntry struct {
+	ConfigDeleteAddresses string `json:"configDeleteAddresses"`
+	ConfigDeleteQueues    string `json:"configDeleteQueues"`
+}
+
 type restrictedConfig struct {
-	Name                    string `json:"name"`
-	CriticalAnalyzer        bool   `json:"criticalAnalyzer"`
-	LiteralMatchMarkers     string `json:"literalMatchMarkers"`
-	AuthenticationCacheSize int    `json:"authenticationCacheSize"`
-	MessageCounterEnabled   bool   `json:"messageCounterEnabled"`
-	JournalDirectory        string `json:"journalDirectory"`
-	BindingsDirectory       string `json:"bindingsDirectory"`
-	LargeMessagesDirectory  string `json:"largeMessagesDirectory"`
-	PagingDirectory         string `json:"pagingDirectory"`
+	Name                    string                         `json:"name"`
+	CriticalAnalyzer        bool                           `json:"criticalAnalyzer"`
+	LiteralMatchMarkers     string                         `json:"literalMatchMarkers"`
+	AuthenticationCacheSize int                            `json:"authenticationCacheSize"`
+	MessageCounterEnabled   bool                           `json:"messageCounterEnabled"`
+	JournalDirectory        string                         `json:"journalDirectory"`
+	BindingsDirectory       string                         `json:"bindingsDirectory"`
+	LargeMessagesDirectory  string                         `json:"largeMessagesDirectory"`
+	PagingDirectory         string                         `json:"pagingDirectory"`
+	AddressSettings         map[string]addressSettingEntry `json:"addressSettings"`
 }
 
 func RestrictedConfigData(brokerName string) ([]byte, error) {
@@ -139,6 +146,12 @@ func RestrictedConfigData(brokerName string) ([]byte, error) {
 		BindingsDirectory:      "/app/data/bindings",
 		LargeMessagesDirectory: "/app/data/largemessages",
 		PagingDirectory:        "/app/data/paging",
+		AddressSettings: map[string]addressSettingEntry{
+			"#": {
+				ConfigDeleteAddresses: "FORCE",
+				ConfigDeleteQueues:    "FORCE",
+			},
+		},
 	})
 }
 
@@ -149,7 +162,9 @@ type rbacConfig struct {
 func RBACConfigData() ([]byte, error) {
 	return json.Marshal(rbacConfig{
 		SecurityRoles: map[string]map[string]map[string]bool{
-			"mops.broker.getStatus":                    {"status": {"view": true}},
+			"mops.broker.getStatus": {"status": {"view": true}},
+			// for drain checks
+			"mops.mbeanserver.queryNames":              {"metrics": {"view": true}},
 			"mops.mbeanserver.queryMBeans":             {"metrics": {"view": true}},
 			"mops.broker":                              {"metrics": {"view": true}},
 			"mops.broker.getTotalMessageCount":         {"metrics": {"view": true}},
