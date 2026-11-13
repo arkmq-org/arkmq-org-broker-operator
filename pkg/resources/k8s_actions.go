@@ -22,7 +22,7 @@ func Create(owner v1.Object, client client.Client, scheme *runtime.Scheme, clien
 func CreateWithLog(log logr.Logger, owner v1.Object, k8sClient client.Client, scheme *runtime.Scheme, clientObject client.Object) error {
 	objectTypeString := reflect.TypeOf(clientObject.(runtime.Object)).String()
 	reqLogger := log.WithValues("Type", objectTypeString, "key", client.ObjectKeyFromObject(clientObject))
-	reqLogger.V(1).Info("Creating new")
+	reqLogger.V(2).Info("Creating new")
 
 	SetOwnerAndControllerWithLog(reqLogger, owner, clientObject)
 
@@ -56,7 +56,7 @@ func SetOwnerAndControllerWithLog(log logr.Logger, owner v1.Object, clientObject
 		Controller: &isController, // ControllerManager.Owns watches match on Controller=true
 	}
 	clientObject.SetOwnerReferences([]v1.OwnerReference{ref})
-	log.V(1).Info("set owner-controller reference", "owner", ref)
+	log.V(2).Info("set owner-controller reference", "owner", ref)
 }
 
 func Retrieve(namespacedName types.NamespacedName, client client.Client, objectDefinition client.Object) error {
@@ -64,8 +64,8 @@ func Retrieve(namespacedName types.NamespacedName, client client.Client, objectD
 }
 
 func RetrieveWithLog(log logr.Logger, namespacedName types.NamespacedName, k8sClient client.Client, objectDefinition client.Object) error {
-	reqLogger := log.WithValues("Type", reflect.TypeOf(objectDefinition.(runtime.Object)).String(), "key", client.ObjectKeyFromObject(objectDefinition))
-	reqLogger.V(1).Info("Retrieving")
+	reqLogger := log.WithValues("Type", reflect.TypeOf(objectDefinition.(runtime.Object)).String(), "key", namespacedName.String())
+	reqLogger.V(2).Info("Retrieving")
 
 	return k8sClient.Get(context.TODO(), namespacedName, objectDefinition)
 }
@@ -77,7 +77,7 @@ func Update(client client.Client, clientObject client.Object) error {
 func UpdateWithLog(log logr.Logger, k8sClient client.Client, clientObject client.Object) error {
 	objectTypeString := reflect.TypeOf(clientObject.(runtime.Object)).String()
 	reqLogger := log.WithValues("Type", objectTypeString, "Key", client.ObjectKeyFromObject(clientObject))
-	reqLogger.V(1).Info("Updating", "resource version", clientObject.GetResourceVersion(), "gen", clientObject.GetGeneration(), "obj", clientObject)
+	reqLogger.V(2).Info("Updating", "resource version", clientObject.GetResourceVersion(), "gen", clientObject.GetGeneration())
 
 	var err error = nil
 	if err = k8sClient.Update(context.TODO(), clientObject); err != nil {
@@ -89,7 +89,7 @@ func UpdateWithLog(log logr.Logger, k8sClient client.Client, clientObject client
 
 				// TODO: limit to just stateful set type
 				// "StatefulSet.apps is invalid: spec: Forbidden: updates to statefulset spec for fields other than 'replicas', 'template', 'updateStrategy' and 'minReadySeconds' are forbidden"}
-				reqLogger.V(1).Info("Deleting on failed updating", "Forbidden", err)
+				reqLogger.V(2).Info("Deleting on failed updating", "Forbidden", err)
 				err = DeleteWithLog(reqLogger, k8sClient, clientObject)
 			} else if statusError.ErrStatus.Status == v1.StatusFailure &&
 				statusError.ErrStatus.Code == http.StatusConflict &&

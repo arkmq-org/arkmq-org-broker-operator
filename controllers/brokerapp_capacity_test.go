@@ -598,6 +598,7 @@ var _ = Describe("brokerapp capacity", func() {
 					objs = append(objs, &tt.services[i])
 				}
 				for i := range tt.existingApps {
+					WithBoundSpec(&tt.existingApps[i])
 					objs = append(objs, &tt.existingApps[i])
 				}
 

@@ -85,6 +85,7 @@ var _ = Describe("brokerservice security", func() {
 				},
 			},
 		}
+		WithBoundSpec(legitimateApp)
 
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
@@ -169,6 +170,7 @@ var _ = Describe("brokerservice security", func() {
 				},
 			},
 		}
+		WithBoundSpec(matchingApp1)
 
 		matchingApp2 := &v1beta2.BrokerApp{
 			ObjectMeta: v1.ObjectMeta{
@@ -185,6 +187,7 @@ var _ = Describe("brokerservice security", func() {
 				},
 			},
 		}
+		WithBoundSpec(matchingApp2)
 
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
@@ -278,6 +281,7 @@ var _ = Describe("brokerservice security", func() {
 				},
 			},
 		}
+		WithBoundSpec(app)
 
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).

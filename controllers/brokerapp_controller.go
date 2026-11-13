@@ -73,18 +73,21 @@ func extractBaseAddress(address string) string {
 	return address
 }
 
-// collectOwnedAddresses returns all addresses owned by this app (lifecycle tied to this app).
+// collectOwnedAddressesFromSpec returns all addresses owned by the given spec (lifecycle tied to this app).
 // This is the union of:
 //   - spec.addresses (private or shared, depending on sharing selectors)
 //   - addresses declared inline in capabilities (local addresses only, where App is nil)
-func collectOwnedAddresses(app *broker.BrokerApp) map[string]bool {
+func collectOwnedAddressesFromSpec(spec *broker.BrokerAppSpec) map[string]bool {
 	addresses := make(map[string]bool)
+	if spec == nil {
+		return addresses
+	}
 
-	for _, addr := range app.Spec.Addresses {
+	for _, addr := range spec.Addresses {
 		addresses[addr.Address] = true
 	}
 
-	for _, capability := range app.Spec.Capabilities {
+	for _, capability := range spec.Capabilities {
 		for _, addrList := range [][]broker.AddressRef{
 			capability.ProducerOf,
 			capability.ConsumerOf,
@@ -99,6 +102,17 @@ func collectOwnedAddresses(app *broker.BrokerApp) map[string]bool {
 	}
 
 	return addresses
+}
+
+func collectOwnedAddresses(app *broker.BrokerApp) map[string]bool {
+	return collectOwnedAddressesFromSpec(&app.Spec)
+}
+
+func collectBoundOwnedAddresses(app *broker.BrokerApp) map[string]bool {
+	if app.Status.BoundSpec == nil {
+		return nil
+	}
+	return collectOwnedAddressesFromSpec(&app.Status.BoundSpec.Spec)
 }
 
 type BrokerAppReconciler struct {
@@ -262,7 +276,7 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 			Client: reconciler.Client,
 			Scheme: reconciler.Scheme,
 			Config: reconciler.Config,
-			log:    reconciler.log.WithValues("Reconciling", request.Namespace+"/"+request.Name),
+			log:    reconciler.log.WithValues("CR", request.Namespace+"/"+request.Name),
 		},
 		ReconcilerLoopType: reconciler,
 	}
@@ -273,7 +287,7 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 		status:              instance.Status.DeepCopy(),
 	}
 
-	processor.log.V(2).Info("Processing...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation)
+	processor.log.V(1).Info("Processing...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation)
 	if err = processor.checkServiceAcceptance(); err == nil {
 		if processor.unbindingReason != "" {
 			processor.handleUnbinding(nil)
@@ -281,9 +295,11 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 		if err = processor.validateSpec(); err == nil {
 			if err = processor.verifyAppCert(); err == nil {
 				if err = processor.resolveBrokerService(); err == nil {
-					if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
-						if err = processor.processBindingSecret(); err == nil {
-							err = processor.SyncDesiredWithDeployed(processor.instance)
+					if err = processor.validatePostBinding(); err == nil {
+						if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
+							if err = processor.processBindingSecret(); err == nil {
+								err = processor.SyncDesiredWithDeployed(processor.instance)
+							}
 						}
 					}
 				}
@@ -293,7 +309,7 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 
 	// Update status with conditions
 	statusErr := processor.processStatus(err)
-	processor.log.V(2).Info("Processed...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation, "error", err)
+	processor.log.V(1).Info("Processed...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation, "error", err)
 
 	if processor.unbindingReason != "" && processor.status.Service != nil {
 		if statusErr != nil {
@@ -322,11 +338,14 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 	return ctrl.Result{}, nil
 }
 
-func hasOwnedContent(instance *broker.BrokerApp) bool {
-	if len(instance.Spec.Addresses) > 0 {
+func hasOwnedContentInSpec(spec *broker.BrokerAppSpec) bool {
+	if spec == nil {
+		return false
+	}
+	if len(spec.Addresses) > 0 {
 		return true
 	}
-	for _, capability := range instance.Spec.Capabilities {
+	for _, capability := range spec.Capabilities {
 		for _, ref := range capability.ProducerOf {
 			if ref.AppNamespace == "" && ref.AppName == "" {
 				return true
@@ -339,6 +358,13 @@ func hasOwnedContent(instance *broker.BrokerApp) bool {
 		}
 	}
 	return false
+}
+
+func hasBoundOwnedContent(instance *broker.BrokerApp) bool {
+	if instance.Status.BoundSpec == nil {
+		return false
+	}
+	return hasOwnedContentInSpec(&instance.Status.BoundSpec.Spec)
 }
 
 // instance specifics for a reconciler loop
@@ -500,10 +526,20 @@ func (reconciler *BrokerAppInstanceReconciler) unbindingCheck(service *broker.Br
 	if err := reconciler.checkAddressRefCapacity(service); err != nil {
 		return fmt.Sprintf("AddressRef dependencies no longer valid, %v", err)
 	}
-	if err := reconciler.checkAddressClashOnService(service); err != nil {
-		return fmt.Sprintf("Address clash detected, %v", err)
-	}
 	return ""
+}
+
+// validatePostBinding checks for address clashes after binding is resolved.
+// Unlike unbindingCheck, a clash here produces a ValidationError — the app
+// stays bound and the service controller keeps using BoundSpec.
+func (reconciler *BrokerAppInstanceReconciler) validatePostBinding() error {
+	if reconciler.service == nil {
+		return nil
+	}
+	if err := reconciler.checkAddressClashOnService(reconciler.service); err != nil {
+		return NewValidationError(broker.ValidConditionAddressTypeError, "%v", err)
+	}
+	return nil
 }
 
 // handleUnbinding clears the service binding unless the pending-empty finalizer
@@ -522,6 +558,7 @@ func (reconciler *BrokerAppInstanceReconciler) handleUnbinding(service *broker.B
 	reconciler.log.V(1).Info("Unbinding, clearing binding",
 		"app", reconciler.instance.Name, "binding", binding, "reason", reconciler.unbindingReason)
 	reconciler.status.Service = nil
+	reconciler.status.BoundSpec = nil
 	return nil, true
 }
 
@@ -921,12 +958,12 @@ func (reconciler *BrokerAppInstanceReconciler) getAvailableMemory(service *broke
 	return available, nil
 }
 
-// collectSubscriptions returns the subscription queues an app consumes from, as
-// FQQNs. A subscription queue is named by its subscriber, so two apps naming the
-// same one on the same address would share it.
-func collectSubscriptions(app *broker.BrokerApp) map[string]bool {
+func collectSubscriptionsFromSpec(spec *broker.BrokerAppSpec) map[string]bool {
 	subscriptions := make(map[string]bool)
-	for _, capability := range app.Spec.Capabilities {
+	if spec == nil {
+		return subscriptions
+	}
+	for _, capability := range spec.Capabilities {
 		for _, addressRef := range capability.ConsumerOf {
 			if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
 				continue
@@ -937,6 +974,17 @@ func collectSubscriptions(app *broker.BrokerApp) map[string]bool {
 		}
 	}
 	return subscriptions
+}
+
+func collectSubscriptions(app *broker.BrokerApp) map[string]bool {
+	return collectSubscriptionsFromSpec(&app.Spec)
+}
+
+func collectBoundSubscriptions(app *broker.BrokerApp) map[string]bool {
+	if app.Status.BoundSpec == nil {
+		return nil
+	}
+	return collectSubscriptionsFromSpec(&app.Status.BoundSpec.Spec)
 }
 
 // checkAddressClashOnService checks if this app's direct addresses or
@@ -956,11 +1004,11 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressClashOnService(servic
 		return fmt.Errorf("failed to list apps for clash detection: %v", listErr)
 	}
 
-	// Check each provisioned app for address conflicts
+	// Check each provisioned app for address conflicts using their deployed
+	// (validated) spec, not their current spec which may be invalid.
 	for _, otherApp := range apps {
-		otherAddresses := collectOwnedAddresses(&otherApp)
+		otherAddresses := collectBoundOwnedAddresses(&otherApp)
 
-		// Check for clashes
 		for myAddr := range myDirectAddresses {
 			if otherAddresses[myAddr] {
 				return fmt.Errorf("address '%s' already declared by %s/%s (use addressRef to share addresses)",
@@ -968,8 +1016,7 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressClashOnService(servic
 			}
 		}
 
-		// a subscription shared between apps is not modelled yet, so it is a clash
-		otherSubscriptions := collectSubscriptions(&otherApp)
+		otherSubscriptions := collectBoundSubscriptions(&otherApp)
 		for mySubscription := range mySubscriptions {
 			if otherSubscriptions[mySubscription] {
 				return fmt.Errorf("subscription '%s' already declared by %s/%s (subscriptions cannot be shared between apps)",
@@ -1286,6 +1333,23 @@ func (reconciler *BrokerAppInstanceReconciler) processStatus(reconcilerError err
 	// Set Deployed condition (only updated when validation passes)
 	reconciler.setDeployedCondition(reconcilerError)
 
+	// Service and BoundSpec are the combined signal to the BrokerService
+	// controller. They must always be set together. On a successful reconcile
+	// of a bound app, snapshot the spec. On a failed first binding (Service
+	// was just set but reconcile didn't complete), clear Service so we don't
+	// persist a binding without a BoundSpec.
+	if reconcilerError == nil && reconciler.status.Service != nil {
+		reconciler.status.BoundSpec = &broker.AppBoundSpec{
+			Spec:       *reconciler.instance.Spec.DeepCopy(),
+			Generation: reconciler.instance.Generation,
+		}
+	} else if reconciler.status.Service != nil && reconciler.status.BoundSpec == nil &&
+		reconciler.instance.Status.Service == nil {
+		// First binding attempt failed — clear the new Service so we don't
+		// persist a binding without a BoundSpec.
+		reconciler.status.Service = nil
+	}
+
 	// Set Ready condition (always reflects current generation)
 	reconciler.setReadyCondition()
 
@@ -1408,6 +1472,12 @@ func (reconciler *BrokerAppInstanceReconciler) setDeployedCondition(err error) {
 			condition.Reason = broker.DeployedConditionUnbindingReason
 			condition.Message = reconciler.pendingEmptyDetailMessage()
 		} else {
+			existing := meta.FindStatusCondition(reconciler.status.Conditions, broker.DeployedConditionType)
+			if existing != nil && existing.Status == metav1.ConditionTrue {
+				// Previously deployed — keep the old condition while the
+				// service controller catches up with the new generation.
+				return
+			}
 			condition.Status = metav1.ConditionFalse
 			condition.Reason = broker.DeployedConditionBindingReason
 			condition.Message = "Waiting for broker to bind"
@@ -1478,18 +1548,25 @@ func (reconciler *BrokerAppInstanceReconciler) setReadyCondition() {
 	validCond := meta.FindStatusCondition(reconciler.status.Conditions, broker.ValidConditionType)
 	deployedCond := meta.FindStatusCondition(reconciler.status.Conditions, broker.DeployedConditionType)
 
-	// Ready = Valid AND Deployed, both at current generation
+	// Ready = Valid at current generation AND Deployed (at any generation).
+	// Deployed may lag behind the current generation while the service
+	// controller catches up — that is not a readiness issue since the
+	// previous spec is still running.
 	if validCond != nil && validCond.Status == metav1.ConditionTrue &&
 		validCond.ObservedGeneration == reconciler.instance.Generation &&
-		deployedCond != nil && deployedCond.Status == metav1.ConditionTrue &&
-		deployedCond.ObservedGeneration == reconciler.instance.Generation {
+		deployedCond != nil && deployedCond.Status == metav1.ConditionTrue {
 		condition.Status = metav1.ConditionTrue
 		condition.Reason = broker.ReadyConditionReason
 		condition.Message = "BrokerApp is ready"
 	} else {
 		condition.Status = metav1.ConditionFalse
 		condition.Reason = broker.NotReadyConditionReason
-		condition.Message = fmt.Sprintf("Waiting for Valid and Deployed conditions at current generation: %d", reconciler.instance.Generation)
+		if validCond == nil || validCond.Status != metav1.ConditionTrue ||
+			validCond.ObservedGeneration != reconciler.instance.Generation {
+			condition.Message = "Waiting for Valid condition"
+		} else {
+			condition.Message = "Waiting for Deployed condition"
+		}
 	}
 
 	meta.SetStatusCondition(&reconciler.status.Conditions, condition)

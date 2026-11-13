@@ -120,16 +120,22 @@ type AcceptorJSON struct {
 	JaasConfigs            map[string]*JaasRealmConfig       `json:"jaasConfigs"`
 }
 
+type addressSettingEntry struct {
+	ConfigDeleteAddresses string `json:"configDeleteAddresses"`
+	ConfigDeleteQueues    string `json:"configDeleteQueues"`
+}
+
 type restrictedConfig struct {
-	Name                    string `json:"name"`
-	CriticalAnalyzer        bool   `json:"criticalAnalyzer"`
-	LiteralMatchMarkers     string `json:"literalMatchMarkers"`
-	AuthenticationCacheSize int    `json:"authenticationCacheSize"`
-	MessageCounterEnabled   bool   `json:"messageCounterEnabled"`
-	JournalDirectory        string `json:"journalDirectory"`
-	BindingsDirectory       string `json:"bindingsDirectory"`
-	LargeMessagesDirectory  string `json:"largeMessagesDirectory"`
-	PagingDirectory         string `json:"pagingDirectory"`
+	Name                    string                         `json:"name"`
+	CriticalAnalyzer        bool                           `json:"criticalAnalyzer"`
+	LiteralMatchMarkers     string                         `json:"literalMatchMarkers"`
+	AuthenticationCacheSize int                            `json:"authenticationCacheSize"`
+	MessageCounterEnabled   bool                           `json:"messageCounterEnabled"`
+	JournalDirectory        string                         `json:"journalDirectory"`
+	BindingsDirectory       string                         `json:"bindingsDirectory"`
+	LargeMessagesDirectory  string                         `json:"largeMessagesDirectory"`
+	PagingDirectory         string                         `json:"pagingDirectory"`
+	AddressSettings         map[string]addressSettingEntry `json:"addressSettings"`
 }
 
 func RestrictedConfigData(brokerName string) ([]byte, error) {
@@ -140,6 +146,12 @@ func RestrictedConfigData(brokerName string) ([]byte, error) {
 		BindingsDirectory:      "/app/data/bindings",
 		LargeMessagesDirectory: "/app/data/largemessages",
 		PagingDirectory:        "/app/data/paging",
+		AddressSettings: map[string]addressSettingEntry{
+			"#": {
+				ConfigDeleteAddresses: "FORCE",
+				ConfigDeleteQueues:    "FORCE",
+			},
+		},
 	})
 }
 

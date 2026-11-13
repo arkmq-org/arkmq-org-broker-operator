@@ -104,6 +104,91 @@ var _ = Describe("brokerapp controller unit", func() {
 		Expect(updatedApp.Status.Service).NotTo(BeNil())
 	})
 
+	It("valid spec update preserves deployed while converging", Label(unitLabel), func() {
+		ns := "default"
+		svcName := "my-broker-service"
+		appName := "my-app"
+
+		svc := NewBrokerService(svcName, ns).Build()
+		app := NewBrokerApp(appName, ns).Build()
+
+		env := NewTestEnvironment(ns, svc, app)
+		r := env.Reconciler
+		cl := env.Client
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+
+		// Initial reconcile — binds to service
+		_, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Simulate service controller provisioning at gen 0
+		svc.Status.ProvisionedApps = []string{AppIdentityWithGeneration(app)}
+		err = cl.Status().Update(context.TODO(), svc)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Reconcile picks up provisioning — Deployed=True, Ready=True
+		_, err = r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		updatedApp := &v1beta2.BrokerApp{}
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(meta.IsStatusConditionTrue(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)).To(BeTrue())
+		Expect(meta.IsStatusConditionTrue(updatedApp.Status.Conditions, v1beta2.ReadyConditionType)).To(BeTrue())
+		Expect(updatedApp.Status.BoundSpec).NotTo(BeNil())
+
+		deployedCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
+		gen0 := deployedCond.ObservedGeneration
+
+		// Simulate a spec update by bumping the generation
+		updatedApp.Generation = gen0 + 1
+		err = cl.Update(context.TODO(), updatedApp)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Reconcile after spec update — ProvisionedApps still has old gen
+		_, err = r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Deployed should be preserved at the old generation (not flipped to False)
+		deployedCond = meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
+		Expect(deployedCond).NotTo(BeNil())
+		Expect(deployedCond.Status).To(Equal(v1.ConditionTrue))
+		Expect(deployedCond.ObservedGeneration).To(Equal(gen0))
+
+		// Valid should be True at the new generation
+		validCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.ValidConditionType)
+		Expect(validCond).NotTo(BeNil())
+		Expect(validCond.Status).To(Equal(v1.ConditionTrue))
+		Expect(validCond.ObservedGeneration).To(Equal(gen0 + 1))
+
+		// Ready should still be True (valid + deployed, even if at different generations)
+		Expect(meta.IsStatusConditionTrue(updatedApp.Status.Conditions, v1beta2.ReadyConditionType)).To(BeTrue())
+
+		// BoundSpec should have been updated to the new generation
+		Expect(updatedApp.Status.BoundSpec.Generation).To(Equal(gen0 + 1))
+
+		// Simulate service controller catching up with the new generation
+		svc.Status.ProvisionedApps = []string{AppIdentityWithGeneration(updatedApp)}
+		err = cl.Status().Update(context.TODO(), svc)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Reconcile converges — Deployed now at new generation
+		_, err = r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+		Expect(err).NotTo(HaveOccurred())
+
+		deployedCond = meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
+		Expect(deployedCond).NotTo(BeNil())
+		Expect(deployedCond.Status).To(Equal(v1.ConditionTrue))
+		Expect(deployedCond.ObservedGeneration).To(Equal(gen0 + 1))
+		Expect(meta.IsStatusConditionTrue(updatedApp.Status.Conditions, v1beta2.ReadyConditionType)).To(BeTrue())
+	})
+
 	It("no matching service", Label(unitLabel), func() {
 		ns := "default"
 		appName := "my-app"

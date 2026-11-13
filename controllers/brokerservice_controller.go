@@ -135,7 +135,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 			Client: reconciler.Client,
 			Scheme: reconciler.Scheme,
 			Config: reconciler.Config,
-			log:    reconciler.log.WithValues("Reconciling", request.Namespace+"/"+request.Name),
+			log:    reconciler.log.WithValues("CR", request.Namespace+"/"+request.Name),
 		},
 		ReconcilerLoopType: reconciler,
 	}
@@ -425,6 +425,9 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts
 	activeAppTrackers := make([]appWithTracker, 0, len(boundApps.Items))
 
 	for _, app := range boundApps.Items {
+		if app.Status.BoundSpec == nil {
+			continue
+		}
 		if err = common.ValidateResourceName(app.Name); err != nil {
 			reconciler.log.Error(err, "invalid app name", "app", app.Name)
 			break
@@ -923,9 +926,10 @@ func (t *AddressTracker) trackAddressType(addr *broker.AddressType) {
 	}
 }
 
-// buildAddressTracker creates an AddressTracker populated from the app's current
-// spec. For deleting or departing apps the tracker is left empty so that
-// detectDrainingAddresses treats all previously-deployed addresses as removed.
+// buildAddressTracker creates an AddressTracker populated from the app's
+// deployed spec. For deleting or departing apps the tracker is left empty so
+// that detectDrainingAddresses treats all previously-deployed addresses as
+// removed. Apps that have never been successfully validated are skipped.
 func (reconciler *BrokerServiceInstanceReconciler) buildAddressTracker(app *broker.BrokerApp) (*AddressTracker, error) {
 	addressTracker := newAddressTracker()
 
@@ -935,11 +939,13 @@ func (reconciler *BrokerServiceInstanceReconciler) buildAddressTracker(app *brok
 		return addressTracker, nil
 	}
 
-	for _, addr := range app.Spec.Addresses {
+	spec := &app.Status.BoundSpec.Spec
+
+	for _, addr := range spec.Addresses {
 		addressTracker.trackAddressType(&addr)
 	}
 
-	for _, capability := range app.Spec.Capabilities {
+	for _, capability := range spec.Capabilities {
 
 		var entry *AddressConfig
 
@@ -1000,7 +1006,7 @@ func (reconciler *BrokerServiceInstanceReconciler) buildAddressTracker(app *brok
 func (reconciler *BrokerServiceInstanceReconciler) processAddressDrain(app *broker.BrokerApp, tracker *AddressTracker, oldSecretData map[string][]byte) (complete bool, err error) {
 	role := AppIdentity(app)
 
-	if app.DeletionTimestamp == nil && hasOwnedContent(app) && controllerutil.AddFinalizer(app, broker.AddressesPendingEmptyFinalizer) {
+	if app.DeletionTimestamp == nil && hasBoundOwnedContent(app) && controllerutil.AddFinalizer(app, broker.AddressesPendingEmptyFinalizer) {
 		if updateErr := reconciler.Update(context.TODO(), app); updateErr != nil {
 			return false, fmt.Errorf("failed to add pending-empty finalizer to app %s: %v", app.Name, updateErr)
 		}
@@ -1087,8 +1093,8 @@ func (reconciler *BrokerServiceInstanceReconciler) processAddressDrain(app *brok
 		}
 	}
 
-	// live app no longer has owned content — clean up stale finalizer
-	if !hasOwnedContent(app) && controllerutil.RemoveFinalizer(app, broker.AddressesPendingEmptyFinalizer) {
+	// live app no longer has bound owned content — clean up stale finalizer
+	if !hasBoundOwnedContent(app) && controllerutil.RemoveFinalizer(app, broker.AddressesPendingEmptyFinalizer) {
 		if updateErr := reconciler.Update(context.TODO(), app); updateErr != nil {
 			return false, fmt.Errorf("failed to remove pending-empty finalizer from app %s: %v", app.Name, updateErr)
 		}
@@ -1108,7 +1114,9 @@ func (reconciler *BrokerServiceInstanceReconciler) filterCrossAppRoles(app *brok
 		return SlashPrefixValue(ownerNs, addressRef.AppName)
 	}
 
-	for _, capability := range app.Spec.Capabilities {
+	spec := &app.Status.BoundSpec.Spec
+
+	for _, capability := range spec.Capabilities {
 		for i := range capability.ProducerOf {
 			addressRef := &capability.ProducerOf[i]
 			if addressRef.AppName == "" {
@@ -1295,7 +1303,8 @@ func (reconciler *BrokerServiceInstanceReconciler) processAcceptor(serverConfigP
 	serverConfigPropertiesSecret.Data[certUsersCfgKey] = usersBuf.Bytes()
 
 	dedupMap := map[string]string{}
-	for _, capability := range app.Spec.Capabilities {
+	spec := &app.Status.BoundSpec.Spec
+	for _, capability := range spec.Capabilities {
 		if len(capability.ConsumerOf) > 0 {
 			dedupMap[fmt.Sprintf("%s=%s\n", consumerRole(namespacedName), namespacedName)] = ""
 		}
@@ -1424,6 +1433,16 @@ func AppIdentityWithGeneration(app *broker.BrokerApp) string {
 	return fmt.Sprintf("%s%d", AppIdentityPrefix(app), app.Generation)
 }
 
+// AppIdentityWithBoundGeneration returns the identity string using the
+// generation of the bound spec. Falls back to the CR generation when no
+// bound generation has been recorded yet.
+func AppIdentityWithBoundGeneration(app *broker.BrokerApp) string {
+	if app.Status.BoundSpec != nil && app.Status.BoundSpec.Generation > 0 {
+		return fmt.Sprintf("%s%d", AppIdentityPrefix(app), app.Status.BoundSpec.Generation)
+	}
+	return AppIdentityWithGeneration(app)
+}
+
 // provisionedAppIdentity returns the identity string to use in the secret
 // annotation. During drain, it holds the generation at the previously
 // provisioned value so that ProvisionedApps only advances once all pending
@@ -1440,7 +1459,7 @@ func (reconciler *BrokerServiceInstanceReconciler) provisionedAppIdentity(app *b
 			}
 		}
 	}
-	return AppIdentityWithGeneration(app)
+	return AppIdentityWithBoundGeneration(app)
 }
 
 func FileAppIdentity(app *broker.BrokerApp) string {
@@ -1850,8 +1869,9 @@ func queueOwners(validApps []broker.BrokerApp, log logr.Logger) map[string]templ
 	}
 
 	for _, app := range apps {
+		spec := &app.Status.BoundSpec.Spec
 		self := templates.QueueOwner{OwnerNamespace: app.Namespace, OwnerApp: app.Name}
-		for _, capability := range app.Spec.Capabilities {
+		for _, capability := range spec.Capabilities {
 			for _, refs := range [][]broker.AddressRef{capability.ConsumerOf, capability.ProducerOf} {
 				for _, addressRef := range refs {
 					if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {

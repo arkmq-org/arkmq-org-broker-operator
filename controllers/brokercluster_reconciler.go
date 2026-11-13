@@ -137,7 +137,7 @@ type BrokerClusterReconcilerImpl struct {
 
 func NewBrokerClusterReconcilerImpl(customResource *v1beta2.BrokerCluster, parent *BrokerClusterReconciler) *BrokerClusterReconcilerImpl {
 	return &BrokerClusterReconcilerImpl{
-		log:                       withCRContext(parent.log, customResource.Kind, customResource.Name, customResource.Namespace),
+		log:                       parent.log.WithValues("CR", customResource.Namespace+"/"+customResource.Name),
 		customResource:            customResource,
 		scheme:                    parent.Scheme,
 		requestedResources:        make(map[reflect.Type]map[string]rtclient.Object),
@@ -3140,7 +3140,7 @@ func (reconciler *BrokerClusterReconcilerImpl) ProcessBrokerClusterStatus(cr *v1
 	// we need to requeue till stable
 	retry = meta.IsStatusConditionTrue(cr.Status.Conditions, v1beta2.ScaleDownPendingConditionType)
 
-	err := AssertBrokersAvailable(cr, client)
+	err := reconciler.AssertBrokersAvailable(cr, client)
 	if err != nil {
 		condition = trapErrorAsCondition(err, v1beta2.ConfigAppliedConditionType)
 		meta.SetStatusCondition(&cr.Status.Conditions, condition)
@@ -3307,13 +3307,12 @@ type propertyFile struct {
 	FileAlder32 string
 }
 
-func AssertBrokersAvailable(cr *v1beta2.BrokerCluster, client rtclient.Client) ArtemisError {
-	reqLogger := withCRContext(ctrl.Log, cr.Kind, cr.Name, cr.Namespace)
+func (reconciler *BrokerClusterReconcilerImpl) AssertBrokersAvailable(cr *v1beta2.BrokerCluster, client rtclient.Client) ArtemisError {
 
 	// pre-condition, we must be deployed, avoid broker status roundtrip till ready
 	DeployedCondition := meta.FindStatusCondition(cr.Status.Conditions, v1beta2.DeployedConditionType)
 	if DeployedCondition == nil || DeployedCondition.Status == metav1.ConditionFalse {
-		reqLogger.V(2).Info("There are no available brokers from DeployedCondition", "condition", DeployedCondition)
+		reconciler.log.V(2).Info("There are no available brokers from DeployedCondition", "condition", DeployedCondition)
 		return NewArtemisStatusError(errors.New("no available brokers from deployed condition"), false)
 	}
 	return nil
