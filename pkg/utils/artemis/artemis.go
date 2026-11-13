@@ -1,9 +1,11 @@
 package artemis
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -220,4 +222,58 @@ func (artemis *Artemis) GetTotalMessageCount() (string, error) {
 		return "", fmt.Errorf("unable to retrieve TotalMessageCount %v", resp.Error)
 	}
 	return resp.Value, nil
+}
+
+// QuoteObjectNameValue quotes v the way javax.management.ObjectName.quote
+// does, which is how Artemis builds the address and queue keys of its MBeans.
+func QuoteObjectNameValue(v string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, c := range v {
+		switch c {
+		case '"', '*', '?', '\\':
+			b.WriteByte('\\')
+			b.WriteRune(c)
+		case '\n':
+			b.WriteString("\\n")
+		default:
+			b.WriteRune(c)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+func QueueMBeanName(brokerName, address, queue, routingType string) string {
+	return "org.apache.activemq.artemis:broker=" + QuoteObjectNameValue(brokerName) +
+		",component=addresses,address=" + QuoteObjectNameValue(address) +
+		",subcomponent=queues,routing-type=" + QuoteObjectNameValue(strings.ToLower(routingType)) +
+		",queue=" + QuoteObjectNameValue(queue)
+}
+
+// GetQueueMessageCount reads MessageCount of one queue. The MBean is named
+// exactly rather than matched from a pattern read, so a queue that is not on
+// the broker is an error, never a count of zero.
+func (artemis *Artemis) GetQueueMessageCount(address, queue, routingType string) (int64, error) {
+	body, err := json.Marshal(map[string]string{
+		"type":      "read",
+		"mbean":     QueueMBeanName(artemis.name, address, queue, routingType),
+		"attribute": "MessageCount",
+	})
+	if err != nil {
+		return 0, err
+	}
+	url := "org.apache.activemq.artemis:broker=\"" + artemis.name + "\""
+	resp, err := artemis.jolokia.Exec(url, string(body))
+	if err != nil {
+		return 0, err
+	}
+	if resp == nil || resp.Status != 200 {
+		return 0, fmt.Errorf("unable to read MessageCount of %s::%s, %v", address, queue, resp)
+	}
+	count, err := strconv.ParseFloat(resp.Value, 64)
+	if err != nil {
+		return 0, fmt.Errorf("unexpected MessageCount %q for %s::%s: %w", resp.Value, address, queue, err)
+	}
+	return int64(count), nil
 }

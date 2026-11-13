@@ -1,0 +1,211 @@
+# Refuses BrokerApp changes that would drop a queue still holding messages.
+#
+# The operator never drains. To retire an address: remove producerOf and any
+# producerOfAppSelector granting send to other apps, let the consumers empty the
+# queues, wait for status.addresses to report zero for the current generation,
+# then remove the address or delete the app.
+#
+# Send permission is read from the spec of the generation being changed, the
+# message counts from status written by the operator. The gate fails closed: a
+# queue with no observation, an unknown count (-1) or an observation of an
+# older generation blocks the change. Once the broker runs a generation that
+# grants no send, a zero observed for it stays true.
+#
+# Set the annotation broker.arkmq.org/allow-message-loss: "true" to bypass it.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: brokerapp-drain-gate
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["broker.arkmq.org"]
+      apiVersions: ["v1beta2"]
+      operations: ["UPDATE", "DELETE"]
+      resources: ["brokerapps"]
+  matchConditions:
+  - name: bound
+    expression: has(oldObject.status) && has(oldObject.status.service)
+  - name: not-overridden
+    expression: >-
+      oldObject.metadata.?annotations[?'broker.arkmq.org/allow-message-loss'].orValue('') != 'true' &&
+      (request.operation == 'DELETE' ||
+       object.metadata.?annotations[?'broker.arkmq.org/allow-message-loss'].orValue('') != 'true')
+  variables:
+  - name: observed
+    expression: oldObject.status.?addressesObservedGeneration.orValue(0) == oldObject.metadata.generation
+  - name: drain
+    expression: oldObject.status.?addresses.orValue([])
+  # moving to another service drops every queue from the current broker
+  - name: dropsAll
+    expression: >-
+      request.operation == 'DELETE' ||
+      object.spec.?serviceSelector.orValue({}) != oldObject.spec.?serviceSelector.orValue({})
+  - name: oldAddresses
+    expression: oldObject.spec.?addresses.orValue([])
+  - name: newAddresses
+    expression: "variables.dropsAll ? [] : object.spec.?addresses.orValue([])"
+  - name: oldCaps
+    expression: oldObject.spec.?capabilities.orValue([])
+  - name: newCaps
+    expression: "variables.dropsAll ? [] : object.spec.?capabilities.orValue([])"
+  # owned addresses that are removed, or change routing and so lose their queues,
+  # while the generation being changed still grants send or they hold messages
+  - name: blockedAddresses
+    expression: >-
+      variables.oldAddresses.filter(a,
+        !variables.newAddresses.exists(n, n.address == a.address &&
+          n.?pubSub.orValue(size(n.?subscriptions.orValue([])) > 0) ==
+          a.?pubSub.orValue(size(a.?subscriptions.orValue([])) > 0)) &&
+        (a.?producerOfAppSelector.orValue('') != '' ||
+         variables.oldCaps.exists(c, c.?producerOf.orValue([]).exists(r,
+           r.?appName.orValue('') == '' && r.address.split('::')[0] == a.address)) ||
+         !(variables.observed && variables.drain.exists(s, s.address == a.address &&
+           s.?queues.orValue([]).all(q, q.messageCount == 0))))
+      ).map(a, a.address)
+  # owned addresses losing a subscription queue that is not empty
+  - name: blockedSubscriptions
+    expression: >-
+      variables.oldAddresses.filter(a,
+        a.?subscriptions.orValue([]).exists(sub,
+          !variables.newAddresses.exists(n, n.address == a.address &&
+            n.?subscriptions.orValue([]).exists(x, x == sub)) &&
+          !(variables.observed && variables.drain.exists(s, s.address == a.address &&
+            !s.?sendGranted.orValue(false) &&
+            s.?queues.orValue([]).exists(q, q.name == sub && q.messageCount == 0))))
+      ).map(a, a.address)
+  # subscriptions this app declares on topics it consumes
+  - name: blockedConsumerSubscriptions
+    expression: >-
+      variables.oldCaps.filter(c, c.?consumerOf.orValue([]).exists(r,
+        r.?subscriptions.orValue([]).exists(sub,
+          !variables.newCaps.exists(nc, nc.?consumerOf.orValue([]).exists(nr,
+            nr.address.split('::')[0] == r.address.split('::')[0] &&
+            nr.?subscriptions.orValue([]).exists(x, x == sub))) &&
+          !(variables.observed && variables.drain.exists(s, s.address == r.address.split('::')[0] &&
+            !s.?sendGranted.orValue(false) &&
+            s.?queues.orValue([]).exists(q, q.name == sub && q.messageCount == 0)))))
+      ).map(c, c.?consumerOf.orValue([]).map(r, r.address)).map(l, l.join(', '))
+  # fully qualified queue references, address::queue
+  - name: blockedFqqns
+    expression: >-
+      variables.oldCaps.filter(c, (c.?producerOf.orValue([]) + c.?consumerOf.orValue([])).exists(r,
+        r.address.contains('::') &&
+        !variables.newCaps.exists(nc, (nc.?producerOf.orValue([]) + nc.?consumerOf.orValue([])).exists(nr, nr.address == r.address)) &&
+        !(variables.observed && variables.drain.exists(s, s.address == r.address.split('::')[0] &&
+          !s.?sendGranted.orValue(false) &&
+          s.?queues.orValue([]).exists(q, q.name == r.address.split('::')[1] && q.messageCount == 0))))
+      ).map(c, (c.?producerOf.orValue([]) + c.?consumerOf.orValue([])).filter(r, r.address.contains('::')).map(r, r.address)).map(l, l.join(', '))
+  - name: hint
+    expression: >-
+      variables.observed ?
+        ' Revoke producerOf and producerOfAppSelector, let consumers drain, retry once status.addresses reports zero.' :
+        ' Drain state is not observed for generation ' + string(oldObject.metadata.generation) +
+        ', wait for status.addressesObservedGeneration to catch up.'
+  validations:
+  - expression: size(variables.blockedAddresses) == 0
+    messageExpression: >-
+      'addresses still hold messages or grant send: ' + variables.blockedAddresses.join(', ') + '.' + variables.hint
+    reason: Forbidden
+  - expression: size(variables.blockedSubscriptions) == 0
+    messageExpression: >-
+      'subscriptions removed from addresses still hold messages or receive them: ' + variables.blockedSubscriptions.join(', ') + '.' + variables.hint
+    reason: Forbidden
+  - expression: size(variables.blockedConsumerSubscriptions) == 0
+    messageExpression: >-
+      'consumed subscriptions still hold messages or receive them, consumerOf: ' + variables.blockedConsumerSubscriptions.join('; ') + '.' + variables.hint
+    reason: Forbidden
+  - expression: size(variables.blockedFqqns) == 0
+    messageExpression: >-
+      'queues still hold messages or receive them: ' + variables.blockedFqqns.join('; ') + '.' + variables.hint
+    reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: brokerapp-drain-gate
+spec:
+  policyName: brokerapp-drain-gate
+  validationActions: [Deny]
+---
+# Apps select a service by its labels and its appSelectorExpression. Refuse a
+# change to either that could evict an app while the service provisions apps:
+# their queues would stay on the broker. Adding a label is allowed.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: brokerservice-eviction-gate
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["broker.arkmq.org"]
+      apiVersions: ["v1beta2"]
+      operations: ["UPDATE"]
+      resources: ["brokerservices"]
+  matchConditions:
+  - name: provisions-apps
+    expression: size(oldObject.status.?provisionedApps.orValue([])) > 0
+  - name: not-overridden
+    expression: object.metadata.?annotations[?'broker.arkmq.org/allow-message-loss'].orValue('') != 'true'
+  variables:
+  - name: oldLabels
+    expression: oldObject.metadata.?labels.orValue({})
+  - name: newLabels
+    expression: object.metadata.?labels.orValue({})
+  - name: changedLabels
+    expression: >-
+      variables.oldLabels.filter(k, !(k in variables.newLabels) || variables.newLabels[k] != variables.oldLabels[k])
+  validations:
+  - expression: >-
+      object.spec.?appSelectorExpression.orValue('') == oldObject.spec.?appSelectorExpression.orValue('')
+    messageExpression: >-
+      'appSelectorExpression cannot change while the service provisions apps: ' +
+      oldObject.status.provisionedApps.join(', ') + '. Move or delete them first.'
+    reason: Forbidden
+  - expression: size(variables.changedLabels) == 0
+    messageExpression: >-
+      'labels apps may select on cannot be removed or changed while the service provisions apps: ' +
+      variables.changedLabels.join(', ') + '. Move or delete them first.'
+    reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: brokerservice-eviction-gate
+spec:
+  policyName: brokerservice-eviction-gate
+  validationActions: [Deny]
+---
+# A BrokerService is deleted with its Broker. Refuse while it still provisions
+# apps: deleting or moving each app is gated on its own drain state.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: brokerservice-drain-gate
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["broker.arkmq.org"]
+      apiVersions: ["v1beta2"]
+      operations: ["DELETE"]
+      resources: ["brokerservices"]
+  matchConditions:
+  - name: not-overridden
+    expression: oldObject.metadata.?annotations[?'broker.arkmq.org/allow-message-loss'].orValue('') != 'true'
+  validations:
+  - expression: size(oldObject.status.?provisionedApps.orValue([])) == 0
+    messageExpression: >-
+      'service still provisions apps: ' + oldObject.status.provisionedApps.join(', ') +
+      '. Delete or move them first, each app is refused while its queues hold messages.'
+    reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: brokerservice-drain-gate
+spec:
+  policyName: brokerservice-drain-gate
+  validationActions: [Deny]

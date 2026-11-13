@@ -136,7 +136,48 @@ type BrokerAppStatus struct {
 	// Service references the BrokerService this app is bound to and its binding secret
 	//+optional
 	Service *BrokerServiceBindingStatus `json:"service,omitempty"`
+
+	// Addresses reports, for the queues this app's configuration declares on the
+	// broker, whether they still hold messages. The admission policy reads it to
+	// refuse removing a queue, or deleting the app, while messages would be lost.
+	//+optional
+	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Address Drain State"
+	Addresses []AddressDrainStatus `json:"addresses,omitempty"`
+
+	// AddressesObservedGeneration is the app generation that was provisioned on
+	// the broker when Addresses was read. Addresses describes the broker only
+	// when it equals metadata.generation.
+	//+optional
+	AddressesObservedGeneration int64 `json:"addressesObservedGeneration,omitempty"`
 }
+
+// AddressDrainStatus is the drain state of one address as seen on the broker
+type AddressDrainStatus struct {
+	// Address name
+	Address string `json:"address"`
+
+	// SendGranted reports that an app may send to the address, through the
+	// owner's producerOf or producerOfAppSelector. Its queue counts can then
+	// still grow and are not read.
+	//+optional
+	SendGranted bool `json:"sendGranted,omitempty"`
+
+	// Queues of this address that this app's configuration declares
+	//+optional
+	Queues []QueueDrainStatus `json:"queues,omitempty"`
+}
+
+// QueueDrainStatus is the message count of one queue
+type QueueDrainStatus struct {
+	// Name of the queue
+	Name string `json:"name"`
+
+	// MessageCount read from the broker, -1 when it could not be read
+	MessageCount int64 `json:"messageCount"`
+}
+
+// QueueDrainUnknown marks a message count that could not be read
+const QueueDrainUnknown int64 = -1
 
 //+kubebuilder:object:root=true
 //+kubebuilder:storageversion

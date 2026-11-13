@@ -258,6 +258,55 @@ spec:
             type: object
           status:
             properties:
+              addresses:
+                description: |-
+                  Addresses reports, for the queues this app's configuration declares on the
+                  broker, whether they still hold messages. The admission policy reads it to
+                  refuse removing a queue, or deleting the app, while messages would be lost.
+                items:
+                  description: AddressDrainStatus is the drain state of one address
+                    as seen on the broker
+                  properties:
+                    address:
+                      description: Address name
+                      type: string
+                    queues:
+                      description: Queues of this address that this app's configuration
+                        declares
+                      items:
+                        description: QueueDrainStatus is the message count of one
+                          queue
+                        properties:
+                          messageCount:
+                            description: MessageCount read from the broker, -1 when
+                              it could not be read
+                            format: int64
+                            type: integer
+                          name:
+                            description: Name of the queue
+                            type: string
+                        required:
+                        - messageCount
+                        - name
+                        type: object
+                      type: array
+                    sendGranted:
+                      description: |-
+                        SendGranted reports that an app may send to the address, through the
+                        owner's producerOf or producerOfAppSelector. Its queue counts can then
+                        still grow and are not read.
+                      type: boolean
+                  required:
+                  - address
+                  type: object
+                type: array
+              addressesObservedGeneration:
+                description: |-
+                  AddressesObservedGeneration is the app generation that was provisioned on
+                  the broker when Addresses was read. Addresses describes the broker only
+                  when it equals metadata.generation.
+                format: int64
+                type: integer
               conditions:
                 description: |-
                   Current state of the resource
