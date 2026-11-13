@@ -1,0 +1,5 @@
+resources:
+- brokerapp_drain_gate.yaml
+
+configurations:
+- kustomizeconfig.yaml

@@ -261,12 +261,15 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 	}
 
 	reqLogger.V(2).Info("Reconciler Processing...", "CRD.Name", instance.Name, "CRD ver", instance.ObjectMeta.ResourceVersion, "CRD Gen", instance.ObjectMeta.Generation)
+	refreshDrainState := false
 	if err = processor.validateSpec(); err == nil {
 		if err = processor.verifyAppCert(); err == nil {
 			if err = processor.resolveBrokerService(); err == nil {
 				if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
 					if err = processor.processBindingSecret(); err == nil {
-						err = processor.SyncDesiredWithDeployed(processor.instance)
+						if err = processor.SyncDesiredWithDeployed(processor.instance); err == nil {
+							refreshDrainState = processor.processDrainState()
+						}
 					}
 				}
 			}
@@ -289,6 +292,9 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 	}
 	if statusErr != nil {
 		return ctrl.Result{}, fmt.Errorf("Failed to update status: error %v", statusErr)
+	}
+	if refreshDrainState {
+		return ctrl.Result{RequeueAfter: common.GetReconcileResyncPeriod()}, nil
 	}
 	// Success
 	return ctrl.Result{}, nil

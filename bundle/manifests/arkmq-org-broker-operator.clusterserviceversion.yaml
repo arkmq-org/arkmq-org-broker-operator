@@ -5655,6 +5655,12 @@ spec:
         path: serviceSelector
       statusDescriptors:
       - description: |-
+          Addresses reports, for the queues this app's configuration declares on the
+          broker, whether they still hold messages. The admission policy reads it to
+          refuse removing a queue, or deleting the app, while messages would be lost.
+        displayName: Address Drain State
+        path: addresses
+      - description: |-
           Current state of the resource
           Conditions represent the latest available observations of an object's state
         displayName: Conditions
