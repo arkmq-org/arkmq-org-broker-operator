@@ -889,11 +889,11 @@ func formatRejectionDetails(primaryMessage string, rejections []ServiceRejection
 		if len(categoryServices[cd.category]) == 0 {
 			continue
 		}
-		errMsg.WriteString(fmt.Sprintf("  - %s: %s\n", cd.label, formatServices(categoryServices[cd.category])))
+		fmt.Fprintf(&errMsg, "  - %s: %s\n", cd.label, formatServices(categoryServices[cd.category]))
 		if cd.verbose {
 			for _, r := range rejections {
 				if r.Category == cd.category {
-					errMsg.WriteString(fmt.Sprintf("      %s: %s\n", r.ServiceName, r.Message))
+					fmt.Fprintf(&errMsg, "      %s: %s\n", r.ServiceName, r.Message)
 				}
 			}
 		}
