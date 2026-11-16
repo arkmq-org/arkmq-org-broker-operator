@@ -845,11 +845,14 @@ func (reconciler *BrokerAppInstanceReconciler) buildCapacityError(
 		primaryMessage = "other compatibility issues"
 	}
 
-	// Build comprehensive error message with all rejection details grouped by category
+	return fmt.Errorf("%s", strings.TrimSpace(
+		formatRejectionDetails(primaryMessage, rejections, categoryServices)))
+}
+
+func formatRejectionDetails(primaryMessage string, rejections []ServiceRejection, categoryServices map[RejectionCategory][]string) string {
 	var errMsg strings.Builder
 	errMsg.WriteString(fmt.Sprintf("no service available: %s\n", primaryMessage))
 
-	// Helper to format service list
 	formatServices := func(services []string) string {
 		if len(services) == 1 {
 			return services[0]
@@ -857,59 +860,36 @@ func (reconciler *BrokerAppInstanceReconciler) buildCapacityError(
 		return fmt.Sprintf("[%s]", strings.Join(services, ", "))
 	}
 
-	// Add details for each rejection category (in priority order)
-	if len(categoryServices[RejectionAddressRef]) > 0 {
-		errMsg.WriteString(fmt.Sprintf("  - AddressRef issues: %s\n",
-			formatServices(categoryServices[RejectionAddressRef])))
-		// Include specific messages for addressRef failures
-		for _, r := range rejections {
-			if r.Category == RejectionAddressRef {
-				errMsg.WriteString(fmt.Sprintf("      %s: %s\n", r.ServiceName, r.Message))
+	type categoryDetail struct {
+		category RejectionCategory
+		label    string
+		verbose  bool
+	}
+	categories := []categoryDetail{
+		{RejectionAddressRef, "AddressRef issues", true},
+		{RejectionAddressClash, "Address clashes", true},
+		{RejectionMemory, "Insufficient memory", false},
+		{RejectionPortPool, "Port pool exhausted", false},
+		{RejectionSelector, "Selector mismatch", false},
+		{RejectionNotDeployed, "Not deployed", false},
+		{RejectionOther, "Other issues", true},
+	}
+
+	for _, cd := range categories {
+		if len(categoryServices[cd.category]) == 0 {
+			continue
+		}
+		errMsg.WriteString(fmt.Sprintf("  - %s: %s\n", cd.label, formatServices(categoryServices[cd.category])))
+		if cd.verbose {
+			for _, r := range rejections {
+				if r.Category == cd.category {
+					errMsg.WriteString(fmt.Sprintf("      %s: %s\n", r.ServiceName, r.Message))
+				}
 			}
 		}
 	}
 
-	if len(categoryServices[RejectionAddressClash]) > 0 {
-		errMsg.WriteString(fmt.Sprintf("  - Address clashes: %s\n",
-			formatServices(categoryServices[RejectionAddressClash])))
-		for _, r := range rejections {
-			if r.Category == RejectionAddressClash {
-				errMsg.WriteString(fmt.Sprintf("      %s: %s\n", r.ServiceName, r.Message))
-			}
-		}
-	}
-
-	if len(categoryServices[RejectionMemory]) > 0 {
-		errMsg.WriteString(fmt.Sprintf("  - Insufficient memory: %s\n",
-			formatServices(categoryServices[RejectionMemory])))
-	}
-
-	if len(categoryServices[RejectionPortPool]) > 0 {
-		errMsg.WriteString(fmt.Sprintf("  - Port pool exhausted: %s\n",
-			formatServices(categoryServices[RejectionPortPool])))
-	}
-
-	if len(categoryServices[RejectionSelector]) > 0 {
-		errMsg.WriteString(fmt.Sprintf("  - Selector mismatch: %s\n",
-			formatServices(categoryServices[RejectionSelector])))
-	}
-
-	if len(categoryServices[RejectionNotDeployed]) > 0 {
-		errMsg.WriteString(fmt.Sprintf("  - Not deployed: %s\n",
-			formatServices(categoryServices[RejectionNotDeployed])))
-	}
-
-	if len(categoryServices[RejectionOther]) > 0 {
-		errMsg.WriteString(fmt.Sprintf("  - Other issues: %s\n",
-			formatServices(categoryServices[RejectionOther])))
-		for _, r := range rejections {
-			if r.Category == RejectionOther {
-				errMsg.WriteString(fmt.Sprintf("      %s: %s\n", r.ServiceName, r.Message))
-			}
-		}
-	}
-
-	return fmt.Errorf("%s", strings.TrimSpace(errMsg.String()))
+	return errMsg.String()
 }
 
 func (reconciler *BrokerAppInstanceReconciler) listOtherAppsForService(service *broker.BrokerService) ([]broker.BrokerApp, error) {
@@ -1103,60 +1083,68 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressRefCapacity(service *
 				refNamespace, addressRef.AppName, refServiceKey, thisServiceKey)
 		}
 
-		// Check if the referenced app declares this address with a matching sharing selector
-		addressShared := false
-		var ownerIsMulticast bool
-		for _, addr := range referencedApp.Spec.Addresses {
-			if addr.Address != addressRef.Address {
-				continue
-			}
-			var selector string
-			if item.role == "producer" {
-				selector = addr.ProducerOfAppSelector
-			} else {
-				selector = addr.ConsumerOfAppSelector
-			}
-			if selector == "" {
-				break
-			}
-			matched, matchErr := appselector.MatchesAppSelector(selector, reconciler.instance, reconciler.Client)
-			if matchErr != nil {
-				return fmt.Errorf("failed to evaluate %sOfAppSelector on address '%s' of app %s/%s: %v",
-					item.role, addressRef.Address, refNamespace, addressRef.AppName, matchErr)
-			}
-			if matched {
-				addressShared = true
-				ownerIsMulticast = isMulticastAddress(addr.PubSub, addr.Subscriptions)
-			}
+		if err := reconciler.checkAddressSharing(referencedApp, addressRef, item.role); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (reconciler *BrokerAppInstanceReconciler) checkAddressSharing(
+	referencedApp *broker.BrokerApp,
+	addressRef broker.AddressRef,
+	role string,
+) error {
+	refNamespace := addressRef.AppNamespace
+	if refNamespace == "" {
+		refNamespace = reconciler.instance.Namespace
+	}
+
+	addressShared := false
+	var ownerIsMulticast bool
+	for _, addr := range referencedApp.Spec.Addresses {
+		if addr.Address != addressRef.Address {
+			continue
+		}
+		var selector string
+		if role == "producer" {
+			selector = addr.ProducerOfAppSelector
+		} else {
+			selector = addr.ConsumerOfAppSelector
+		}
+		if selector == "" {
 			break
 		}
+		matched, matchErr := appselector.MatchesAppSelector(selector, reconciler.instance, reconciler.Client)
+		if matchErr != nil {
+			return fmt.Errorf("failed to evaluate %sOfAppSelector on address '%s' of app %s/%s: %v",
+				role, addressRef.Address, refNamespace, addressRef.AppName, matchErr)
+		}
+		if matched {
+			addressShared = true
+			ownerIsMulticast = isMulticastAddress(addr.PubSub, addr.Subscriptions)
+		}
+		break
+	}
 
-		if !addressShared {
-			var selectorField string
-			if item.role == "producer" {
-				selectorField = "producerOfAppSelector"
-			} else {
-				selectorField = "consumerOfAppSelector"
-			}
-			return fmt.Errorf("referenced app %s/%s does not share address '%s' for role '%s' (add %s to spec.addresses[])",
-				refNamespace, addressRef.AppName, addressRef.Address, item.role, selectorField)
-		}
+	if !addressShared {
+		selectorField := role + "OfAppSelector"
+		return fmt.Errorf("referenced app %s/%s does not share address '%s' for role '%s' (add %s to spec.addresses[])",
+			refNamespace, addressRef.AppName, addressRef.Address, role, selectorField)
+	}
 
-		currentIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
-		if currentIsMulticast && !ownerIsMulticast {
-			return fmt.Errorf(
-				"referenced app %s/%s declares address '%s' without pubSub, "+
-					"but this app uses it with pubSub. "+
-					"Shared addresses must use consistent semantics across all apps",
-				refNamespace, addressRef.AppName, addressRef.Address)
+	currentIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
+	if currentIsMulticast != ownerIsMulticast {
+		ownerMode, refMode := "without", "with"
+		if ownerIsMulticast {
+			ownerMode, refMode = "with", "without"
 		}
-		if !currentIsMulticast && ownerIsMulticast {
-			return fmt.Errorf(
-				"referenced app %s/%s declares address '%s' with pubSub, "+
-					"but this app references it without pubSub. "+
-					"Shared addresses must use consistent semantics across all apps",
-				refNamespace, addressRef.AppName, addressRef.Address)
-		}
+		return fmt.Errorf(
+			"referenced app %s/%s declares address '%s' %s pubSub, "+
+				"but this app references it %s pubSub. "+
+				"Shared addresses must use consistent semantics across all apps",
+			refNamespace, addressRef.AppName, addressRef.Address, ownerMode, refMode)
 	}
 
 	return nil
