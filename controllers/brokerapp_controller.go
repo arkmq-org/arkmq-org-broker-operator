@@ -287,12 +287,13 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 		status:              instance.Status.DeepCopy(),
 	}
 
-	processor.log.V(1).Info("Processing...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation)
+	processor.log.V(1).Info("Processing...", "CR ver", instance.ResourceVersion, "CR Gen", instance.Generation)
 
 	err = processor.reconcileApp()
 
 	statusErr := processor.processStatus(err)
-	processor.log.V(1).Info("Processed...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation, "error", err)
+
+	processor.log.V(1).Info("Processed...", "CR ver", instance.ResourceVersion, "CR Gen", instance.Generation, "error", err)
 
 	// Pending-empty: requeue to monitor drain
 	if processor.unbindingReason != "" && processor.status.Service != nil {
