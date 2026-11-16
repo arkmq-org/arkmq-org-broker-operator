@@ -148,22 +148,11 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 
 	processor.log.V(2).Info("Processing...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation)
 
-	// Validate spec first, before doing any work
-	if err = processor.validateSpec(); err == nil {
-		if err = processor.InitDeployedByNamedKind(); err == nil {
-			if err = processor.processSpec(); err == nil {
-				if err = processor.handlePendingEmptyFinalizerRemovalOnDelete(ctx, instance); err == nil {
-					instanceFinalizerRemoved := processor.processFinalizers()
-					if err = processor.SyncDesiredWithDeployed(nil); err == nil {
-						if instanceFinalizerRemoved {
-							if err = reconciler.Update(ctx, instance); err == nil {
-								processor.log.V(1).Info("Finalizer removed")
-								servicemetrics.DeleteServiceMetrics(instance.Name, instance.Namespace)
-							}
-						}
-					}
-				}
-			}
+	finalizerRemoved, err := processor.reconcileService(ctx)
+	if err == nil && finalizerRemoved {
+		if err = reconciler.Update(ctx, instance); err == nil {
+			processor.log.V(1).Info("Finalizer removed")
+			servicemetrics.DeleteServiceMetrics(instance.Name, instance.Namespace)
 		}
 	}
 
@@ -189,6 +178,26 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 
 	// Success
 	return ctrl.Result{}, nil
+}
+
+func (processor *BrokerServiceInstanceReconciler) reconcileService(ctx context.Context) (finalizerRemoved bool, err error) {
+	if err = processor.validateSpec(); err != nil {
+		return false, err
+	}
+	if err = processor.InitDeployedByNamedKind(); err != nil {
+		return false, err
+	}
+	if err = processor.processSpec(); err != nil {
+		return false, err
+	}
+	if err = processor.handlePendingEmptyFinalizerRemovalOnDelete(ctx, processor.instance); err != nil {
+		return false, err
+	}
+	finalizerRemoved = processor.processFinalizers()
+	if err = processor.SyncDesiredWithDeployed(nil); err != nil {
+		return false, err
+	}
+	return finalizerRemoved, nil
 }
 
 // can be deleted once all deployed apps are finalized
@@ -1090,7 +1099,7 @@ func buildPendingEmptyStatus(role string, pending []DrainingAddressInfo) broker.
 	for _, da := range pending {
 		for fqqn, count := range da.MessageCounts {
 			if count < 0 {
-				status.Messages[fqqn] = "unknown"
+				status.Messages[fqqn] = UnknownCountValue
 			} else {
 				status.Messages[fqqn] = fmt.Sprintf("%d", count)
 			}
@@ -1110,58 +1119,11 @@ func (reconciler *BrokerServiceInstanceReconciler) removePendingEmptyFinalizer(a
 
 func (reconciler *BrokerServiceInstanceReconciler) filterCrossAppRoles(app *broker.BrokerApp, tracker *AddressTracker, activeApps map[string]bool) {
 	role := AppIdentity(app)
-
-	resolveOwner := func(addressRef *broker.AddressRef) string {
-		ownerNs := addressRef.AppNamespace
-		if ownerNs == "" {
-			ownerNs = app.Namespace
-		}
-		return SlashPrefixValue(ownerNs, addressRef.AppName)
-	}
-
 	spec := &app.Status.BoundSpec.Spec
 
 	for _, capability := range spec.Capabilities {
-		for i := range capability.ProducerOf {
-			addressRef := &capability.ProducerOf[i]
-			if addressRef.AppName == "" {
-				continue
-			}
-			entry, exists := tracker.names[addressRef.Address]
-			if !exists || entry.isOwned {
-				continue
-			}
-			ownerIdentity := resolveOwner(addressRef)
-			if !activeApps[ownerIdentity] {
-				delete(entry.senderRoles, role)
-			} else if addrs, ok := reconciler.drainingAddresses[ownerIdentity]; ok && addrs[addressRef.Address] {
-				delete(entry.senderRoles, role)
-			}
-		}
-
-		// Consumers keep their roles when the owner is pending empty — they
-		// need to stay active to drain the remaining messages. Producers are
-		// already revoked above so no new messages will arrive.
-		for i := range capability.ConsumerOf {
-			addressRef := &capability.ConsumerOf[i]
-			if addressRef.AppName == "" {
-				continue
-			}
-			entry, exists := tracker.names[addressRef.Address]
-			if !exists || entry.isOwned {
-				continue
-			}
-			ownerIdentity := resolveOwner(addressRef)
-			if !activeApps[ownerIdentity] {
-				delete(entry.consumerRoles, role)
-				for _, subName := range addressRef.Subscriptions {
-					fqqn := addressRef.Address + FQQNSeparator + subName
-					if fqqnEntry, fqqnExists := tracker.names[fqqn]; fqqnExists {
-						delete(fqqnEntry.subscriberRoles, role)
-					}
-				}
-			}
-		}
+		reconciler.filterCrossAppProducers(role, app.Namespace, capability.ProducerOf, tracker, activeApps)
+		filterCrossAppConsumers(role, app.Namespace, capability.ConsumerOf, tracker, activeApps)
 	}
 
 	for name, entry := range tracker.names {
@@ -1169,6 +1131,59 @@ func (reconciler *BrokerServiceInstanceReconciler) filterCrossAppRoles(app *brok
 			delete(tracker.names, name)
 		}
 	}
+}
+
+func (reconciler *BrokerServiceInstanceReconciler) filterCrossAppProducers(role, appNamespace string, refs []broker.AddressRef, tracker *AddressTracker, activeApps map[string]bool) {
+	for i := range refs {
+		addressRef := &refs[i]
+		if addressRef.AppName == "" {
+			continue
+		}
+		entry, exists := tracker.names[addressRef.Address]
+		if !exists || entry.isOwned {
+			continue
+		}
+		ownerIdentity := resolveOwnerIdentity(addressRef, appNamespace)
+		if !activeApps[ownerIdentity] {
+			delete(entry.senderRoles, role)
+		} else if addrs, ok := reconciler.drainingAddresses[ownerIdentity]; ok && addrs[addressRef.Address] {
+			delete(entry.senderRoles, role)
+		}
+	}
+}
+
+// filterCrossAppConsumers revokes consumer and subscriber roles when the owner
+// app is no longer active. Consumers keep their roles when the owner is
+// draining — they need to stay active to drain the remaining messages.
+func filterCrossAppConsumers(role, appNamespace string, refs []broker.AddressRef, tracker *AddressTracker, activeApps map[string]bool) {
+	for i := range refs {
+		addressRef := &refs[i]
+		if addressRef.AppName == "" {
+			continue
+		}
+		entry, exists := tracker.names[addressRef.Address]
+		if !exists || entry.isOwned {
+			continue
+		}
+		ownerIdentity := resolveOwnerIdentity(addressRef, appNamespace)
+		if !activeApps[ownerIdentity] {
+			delete(entry.consumerRoles, role)
+			for _, subName := range addressRef.Subscriptions {
+				fqqn := addressRef.Address + FQQNSeparator + subName
+				if fqqnEntry, fqqnExists := tracker.names[fqqn]; fqqnExists {
+					delete(fqqnEntry.subscriberRoles, role)
+				}
+			}
+		}
+	}
+}
+
+func resolveOwnerIdentity(addressRef *broker.AddressRef, appNamespace string) string {
+	ownerNs := addressRef.AppNamespace
+	if ownerNs == "" {
+		ownerNs = appNamespace
+	}
+	return SlashPrefixValue(ownerNs, addressRef.AppName)
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) processCapabilities(secret *corev1.Secret, app *broker.BrokerApp, addressTracker *AddressTracker) (err error) {
@@ -1831,38 +1846,39 @@ func evaluateAddressDrainStatus(reqLogger logr.Logger, artemis *mgmt.Artemis, ad
 
 	result := make(map[string]addressDrainResult, len(addresses))
 	for _, addr := range addresses {
-		dr := addressDrainResult{messageCounts: make(map[string]int64)}
-		if queueCountMap != nil {
-			dr.drained = true
-			if len(addr.Subscriptions) > 0 {
-				for _, sub := range addr.Subscriptions {
-					key := addr.Address + "::" + sub + "::multicast"
-					fqqn := addr.Address + "::" + sub
-					if count, found := queueCountMap[key]; found {
-						dr.messageCounts[fqqn] = count
-						if count > 0 {
-							dr.drained = false
-						}
-					}
-					// queue not found in map = queue no longer exists on the broker = drained
-				}
-			} else {
-				key := addr.Address + "::" + addr.Address + "::anycast"
-				if count, found := queueCountMap[key]; found {
-					dr.messageCounts[addr.Address] = count
-					if count > 0 {
-						dr.drained = false
-					}
-				}
-				// queue not found in map = queue no longer exists on the broker = drained
-			}
-		} else {
-			dr.drained = false
-		}
-		result[addr.Address] = dr
-		reqLogger.V(1).Info("Address drain status", "address", addr.Address, "drained", dr.drained)
+		result[addr.Address] = checkAddressDrained(addr, queueCountMap)
+		reqLogger.V(1).Info("Address drain status", "address", addr.Address, "drained", result[addr.Address].drained)
 	}
 	return result
+}
+
+func checkAddressDrained(addr DrainingAddressInfo, queueCountMap map[string]int64) addressDrainResult {
+	dr := addressDrainResult{messageCounts: make(map[string]int64)}
+	if queueCountMap == nil {
+		return dr
+	}
+	dr.drained = true
+	if len(addr.Subscriptions) > 0 {
+		for _, sub := range addr.Subscriptions {
+			key := addr.Address + "::" + sub + "::multicast"
+			fqqn := addr.Address + "::" + sub
+			if count, found := queueCountMap[key]; found {
+				dr.messageCounts[fqqn] = count
+				if count > 0 {
+					dr.drained = false
+				}
+			}
+		}
+	} else {
+		key := addr.Address + "::" + addr.Address + "::anycast"
+		if count, found := queueCountMap[key]; found {
+			dr.messageCounts[addr.Address] = count
+			if count > 0 {
+				dr.drained = false
+			}
+		}
+	}
+	return dr
 }
 
 // queueOwners maps every queue the validated apps produce to or consume from to
@@ -1897,26 +1913,30 @@ func queueOwners(validApps []broker.BrokerApp, log logr.Logger) map[string]templ
 		for _, capability := range spec.Capabilities {
 			for _, refs := range [][]broker.AddressRef{capability.ConsumerOf, capability.ProducerOf} {
 				for _, addressRef := range refs {
-					if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
-						for _, queueName := range addressRef.Subscriptions {
-							claim(addressRef.Address+FQQNSeparator+queueName, self)
-						}
-						continue
-					}
-					owner := self
-					if addressRef.AppName != "" {
-						owner.OwnerApp = addressRef.AppName
-						if addressRef.AppNamespace != "" {
-							owner.OwnerNamespace = addressRef.AppNamespace
-						}
-					}
-					claim(addressRef.Address, owner)
+					claimQueuesForRef(addressRef, self, claim)
 				}
 			}
 		}
 	}
 
 	return owners
+}
+
+func claimQueuesForRef(addressRef broker.AddressRef, self templates.QueueOwner, claim func(string, templates.QueueOwner)) {
+	if isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
+		for _, queueName := range addressRef.Subscriptions {
+			claim(addressRef.Address+FQQNSeparator+queueName, self)
+		}
+		return
+	}
+	owner := self
+	if addressRef.AppName != "" {
+		owner.OwnerApp = addressRef.AppName
+		if addressRef.AppNamespace != "" {
+			owner.OwnerNamespace = addressRef.AppNamespace
+		}
+	}
+	claim(addressRef.Address, owner)
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]templates.QueueOwner) ([]byte, error) {

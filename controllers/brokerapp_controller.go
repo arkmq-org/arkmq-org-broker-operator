@@ -48,8 +48,8 @@ import (
 )
 
 const (
-	// FQQNSeparator is the separator used in Fully Qualified Queue Names (address-name::queue-name)
-	FQQNSeparator = "::"
+	FQQNSeparator     = "::"
+	UnknownCountValue = "unknown"
 )
 
 // isMulticastAddress determines if an address uses pubSub semantics
@@ -294,8 +294,11 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 	statusErr := processor.processStatus(err)
 	processor.log.V(1).Info("Processed...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation, "error", err)
 
-	// Pending-empty: requeue to monitor drain, errors retried on next cycle
+	// Pending-empty: requeue to monitor drain
 	if processor.unbindingReason != "" && processor.status.Service != nil {
+		if statusErr != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to update status: %w", statusErr)
+		}
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
@@ -317,6 +320,13 @@ func (processor *BrokerAppInstanceReconciler) reconcileApp() error {
 	}
 	if processor.unbindingReason != "" {
 		processor.handleUnbinding(nil)
+		if processor.instance.DeletionTimestamp != nil {
+			// A deleting app must not proceed to service resolution —
+			// without this guard, a cleared binding (no drain finalizer)
+			// would cause resolveBrokerService to reassign the dying app
+			// to a new service.
+			return nil
+		}
 	}
 	if err := processor.validateSpec(); err != nil {
 		return err
@@ -832,7 +842,7 @@ func (reconciler *BrokerAppInstanceReconciler) buildCapacityError(
 		primaryMessage = "address clash with existing apps"
 
 	case categoryCounts[RejectionMemory] > 0:
-		memoryStr := "unknown"
+		memoryStr := UnknownCountValue
 		if appMemoryRequest != nil && !appMemoryRequest.IsZero() {
 			memoryStr = appMemoryRequest.String()
 		}
@@ -1015,8 +1025,6 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressClashOnService(servic
 // checkAddressRefCapacity validates that cross-app addressRefs can be satisfied by the referenced apps.
 // Only addresses with a matching sharing selector (producerOfAppSelector or consumerOfAppSelector) can be referenced.
 func (reconciler *BrokerAppInstanceReconciler) checkAddressRefCapacity(service *broker.BrokerService) error {
-	ctx := context.Background()
-
 	type roleAddrRef struct {
 		role string
 		ref  broker.AddressRef
@@ -1037,58 +1045,60 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressRefCapacity(service *
 	}
 
 	for _, item := range refs {
-		addressRef := item.ref
-
-		refNamespace := addressRef.AppNamespace
-		if refNamespace == "" {
-			refNamespace = reconciler.instance.Namespace
-		}
-
-		referencedApp := &broker.BrokerApp{}
-		refKey := types.NamespacedName{
-			Namespace: refNamespace,
-			Name:      addressRef.AppName,
-		}
-		if getErr := reconciler.Get(ctx, refKey, referencedApp); getErr != nil {
-			if errors.IsNotFound(getErr) {
-				return fmt.Errorf("referenced app %s/%s not found",
-					refNamespace, addressRef.AppName)
-			}
-			return fmt.Errorf("failed to lookup referenced app %s/%s: %v",
-				refNamespace, addressRef.AppName, getErr)
-		}
-
-		if referencedApp.Status.Service == nil {
-			return fmt.Errorf("referenced app %s/%s not yet provisioned on any service",
-				refNamespace, addressRef.AppName)
-		}
-
-		refServiceKey := referencedApp.Status.Service.Key()
-		thisServiceKey := serviceKey(service)
-		if refServiceKey != thisServiceKey {
-			refService := &broker.BrokerService{}
-			refServiceName := types.NamespacedName{
-				Namespace: referencedApp.Status.Service.Namespace,
-				Name:      referencedApp.Status.Service.Name,
-			}
-			if getErr := reconciler.Get(ctx, refServiceName, refService); getErr != nil {
-				if errors.IsNotFound(getErr) {
-					return fmt.Errorf("referenced app %s/%s was provisioned on service %s which no longer exists",
-						refNamespace, addressRef.AppName, refServiceKey)
-				}
-				return fmt.Errorf("failed to lookup service %s for referenced app %s/%s: %v",
-					refServiceKey, refNamespace, addressRef.AppName, getErr)
-			}
-			return fmt.Errorf("referenced app %s/%s is provisioned on different service %s (this app would bind to: %s)",
-				refNamespace, addressRef.AppName, refServiceKey, thisServiceKey)
-		}
-
-		if err := reconciler.checkAddressSharing(referencedApp, addressRef, item.role); err != nil {
+		if err := reconciler.validateAddressRefBinding(item.ref, item.role, service); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func (reconciler *BrokerAppInstanceReconciler) validateAddressRefBinding(addressRef broker.AddressRef, role string, service *broker.BrokerService) error {
+	refNamespace := addressRef.AppNamespace
+	if refNamespace == "" {
+		refNamespace = reconciler.instance.Namespace
+	}
+
+	referencedApp := &broker.BrokerApp{}
+	refKey := types.NamespacedName{
+		Namespace: refNamespace,
+		Name:      addressRef.AppName,
+	}
+	if getErr := reconciler.Get(context.Background(), refKey, referencedApp); getErr != nil {
+		if errors.IsNotFound(getErr) {
+			return fmt.Errorf("referenced app %s/%s not found",
+				refNamespace, addressRef.AppName)
+		}
+		return fmt.Errorf("failed to lookup referenced app %s/%s: %v",
+			refNamespace, addressRef.AppName, getErr)
+	}
+
+	if referencedApp.Status.Service == nil {
+		return fmt.Errorf("referenced app %s/%s not yet provisioned on any service",
+			refNamespace, addressRef.AppName)
+	}
+
+	refServiceKey := referencedApp.Status.Service.Key()
+	thisServiceKey := serviceKey(service)
+	if refServiceKey != thisServiceKey {
+		refService := &broker.BrokerService{}
+		refServiceName := types.NamespacedName{
+			Namespace: referencedApp.Status.Service.Namespace,
+			Name:      referencedApp.Status.Service.Name,
+		}
+		if getErr := reconciler.Get(context.Background(), refServiceName, refService); getErr != nil {
+			if errors.IsNotFound(getErr) {
+				return fmt.Errorf("referenced app %s/%s was provisioned on service %s which no longer exists",
+					refNamespace, addressRef.AppName, refServiceKey)
+			}
+			return fmt.Errorf("failed to lookup service %s for referenced app %s/%s: %v",
+				refServiceKey, refNamespace, addressRef.AppName, getErr)
+		}
+		return fmt.Errorf("referenced app %s/%s is provisioned on different service %s (this app would bind to: %s)",
+			refNamespace, addressRef.AppName, refServiceKey, thisServiceKey)
+	}
+
+	return reconciler.checkAddressSharing(referencedApp, addressRef, role)
 }
 
 func (reconciler *BrokerAppInstanceReconciler) checkAddressSharing(
@@ -1252,70 +1262,50 @@ func (reconciler *BrokerAppInstanceReconciler) verifyCapabilityAddressType() err
 // are used consistently in capabilities (same routing type).
 func (reconciler *BrokerAppInstanceReconciler) validateAddressCapabilityConsistency() error {
 	declaredAddresses := make(map[string]bool)
-
 	for _, addr := range reconciler.instance.Spec.Addresses {
 		declaredAddresses[addr.Address] = isMulticastAddress(addr.PubSub, addr.Subscriptions)
 	}
-
 	if len(declaredAddresses) == 0 {
 		return nil
 	}
 
 	for _, capability := range reconciler.instance.Spec.Capabilities {
 		for _, addressRef := range capability.ProducerOf {
-			if addressRef.AppName == "" {
-				if declaredIsMulticast, isDeclared := declaredAddresses[addressRef.Address]; isDeclared {
-					usageIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
-
-					if declaredIsMulticast && !usageIsMulticast {
-						return NewValidationError(
-							broker.ValidConditionAddressTypeError,
-							"address '%s' is declared with pubSub semantics in spec.addresses, "+
-								"but is used without pubSub semantics in capabilities.producerOf. "+
-								"Address declaration and usage must have consistent routing semantics",
-							addressRef.Address)
-					}
-
-					if !declaredIsMulticast && usageIsMulticast {
-						return NewValidationError(
-							broker.ValidConditionAddressTypeError,
-							"address '%s' is declared without pubSub semantics in spec.addresses, "+
-								"but is used with pubSub semantics in capabilities.producerOf. "+
-								"Address declaration and usage must have consistent routing semantics",
-							addressRef.Address)
-					}
-				}
+			if err := validateAddressRefConsistency(addressRef, declaredAddresses, "producerOf"); err != nil {
+				return err
 			}
 		}
-
 		for _, addressRef := range capability.ConsumerOf {
-			if addressRef.AppName == "" {
-				if declaredIsMulticast, isDeclared := declaredAddresses[addressRef.Address]; isDeclared {
-					usageIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
-
-					if declaredIsMulticast && !usageIsMulticast {
-						return NewValidationError(
-							broker.ValidConditionAddressTypeError,
-							"address '%s' is declared with pubSub semantics in spec.addresses, "+
-								"but is used without pubSub semantics in capabilities.consumerOf. "+
-								"Address declaration and usage must have consistent routing semantics",
-							addressRef.Address)
-					}
-
-					if !declaredIsMulticast && usageIsMulticast {
-						return NewValidationError(
-							broker.ValidConditionAddressTypeError,
-							"address '%s' is declared without pubSub semantics in spec.addresses, "+
-								"but is used with pubSub semantics in capabilities.consumerOf. "+
-								"Address declaration and usage must have consistent routing semantics",
-							addressRef.Address)
-					}
-				}
+			if err := validateAddressRefConsistency(addressRef, declaredAddresses, "consumerOf"); err != nil {
+				return err
 			}
 		}
 	}
-
 	return nil
+}
+
+func validateAddressRefConsistency(addressRef broker.AddressRef, declaredAddresses map[string]bool, role string) error {
+	if addressRef.AppName != "" {
+		return nil
+	}
+	declaredIsMulticast, isDeclared := declaredAddresses[addressRef.Address]
+	if !isDeclared {
+		return nil
+	}
+	usageIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
+	if declaredIsMulticast == usageIsMulticast {
+		return nil
+	}
+	declaredMode, usageMode := "without", "with"
+	if declaredIsMulticast {
+		declaredMode, usageMode = "with", "without"
+	}
+	return NewValidationError(
+		broker.ValidConditionAddressTypeError,
+		"address '%s' is declared %s pubSub semantics in spec.addresses, "+
+			"but is used %s pubSub semantics in capabilities.%s. "+
+			"Address declaration and usage must have consistent routing semantics",
+		addressRef.Address, declaredMode, usageMode, role)
 }
 
 func (reconciler *BrokerAppInstanceReconciler) processStatus(reconcilerError error) error {
@@ -1484,6 +1474,11 @@ func (reconciler *BrokerAppInstanceReconciler) setDeployedCondition(err error) {
 	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
 }
 
+// pendingEmptyDetailMessage fetches the BrokerService to read the latest
+// PendingEmpty drain progress. This is a separate Get rather than reusing the
+// service fetched in checkServiceAcceptance because it runs later in
+// processStatus and benefits from the freshest message counts, and because
+// the "Deletion pending" path never fetches the service at all.
 func (reconciler *BrokerAppInstanceReconciler) pendingEmptyDetailMessage() string {
 	message := "addresses pending empty"
 
@@ -1677,8 +1672,12 @@ func getReferencedApps(app *broker.BrokerApp) []types.NamespacedName {
 		allRefs := [][]broker.AddressRef{capability.ProducerOf, capability.ConsumerOf}
 		for _, refs := range allRefs {
 			for _, ref := range refs {
-				if ref.AppNamespace != "" && ref.AppName != "" {
-					key := types.NamespacedName{Namespace: ref.AppNamespace, Name: ref.AppName}
+				if ref.AppName != "" {
+					refNs := ref.AppNamespace
+					if refNs == "" {
+						refNs = app.Namespace
+					}
+					key := types.NamespacedName{Namespace: refNs, Name: ref.AppName}
 					if !seen[key] {
 						seen[key] = true
 						result = append(result, key)

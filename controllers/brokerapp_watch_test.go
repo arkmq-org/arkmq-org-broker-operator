@@ -5,6 +5,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 var _ = Describe("brokerapp watch propagation", func() {
@@ -196,5 +197,63 @@ var _ = Describe("brokerapp watch propagation", func() {
 
 		result := shouldPropagateWatchForReferencedApp(app)
 		Expect(result).To(BeFalse(), "Should NOT propagate when both Valid=False AND Deployed=False")
+	})
+})
+
+var _ = Describe("getReferencedApps", func() {
+
+	It("returns same-namespace refs where AppNamespace is empty", Label(unitLabel), func() {
+		app := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{Name: "my-app", Namespace: "ns1"},
+			Spec: broker.BrokerAppSpec{
+				Capabilities: []broker.AppCapabilityType{
+					{
+						ProducerOf: []broker.AddressRef{
+							{Address: "orders", AppName: "owner-app"},
+						},
+					},
+				},
+			},
+		}
+
+		refs := getReferencedApps(app)
+		Expect(refs).To(ContainElement(types.NamespacedName{Namespace: "ns1", Name: "owner-app"}),
+			"should include same-namespace ref where AppNamespace is empty")
+	})
+
+	It("returns cross-namespace refs where AppNamespace is set", Label(unitLabel), func() {
+		app := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{Name: "my-app", Namespace: "ns1"},
+			Spec: broker.BrokerAppSpec{
+				Capabilities: []broker.AppCapabilityType{
+					{
+						ConsumerOf: []broker.AddressRef{
+							{Address: "orders", AppName: "owner-app", AppNamespace: "ns2"},
+						},
+					},
+				},
+			},
+		}
+
+		refs := getReferencedApps(app)
+		Expect(refs).To(ContainElement(types.NamespacedName{Namespace: "ns2", Name: "owner-app"}))
+	})
+
+	It("skips local address refs with no AppName", Label(unitLabel), func() {
+		app := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{Name: "my-app", Namespace: "ns1"},
+			Spec: broker.BrokerAppSpec{
+				Capabilities: []broker.AppCapabilityType{
+					{
+						ProducerOf: []broker.AddressRef{
+							{Address: "orders"},
+						},
+					},
+				},
+			},
+		}
+
+		refs := getReferencedApps(app)
+		Expect(refs).To(BeEmpty(), "local refs without AppName should not appear")
 	})
 })

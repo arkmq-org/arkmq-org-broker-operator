@@ -1014,6 +1014,40 @@ var _ = Describe("brokerapp controller unit", func() {
 				"pending-empty should requeue to monitor drain progress")
 		})
 
+		It("pending-empty propagates status update errors", Label(unitLabel), func() {
+			ns := "default"
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+
+			app := NewBrokerApp("app", ns).
+				WithServiceBinding("gone-svc", ns, "app-binding-secret", 61616).
+				Build()
+			app.Finalizers = []string{v1beta2.AddressesPendingEmptyFinalizer}
+
+			interceptorFuncs := interceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+					return fmt.Errorf("simulated status update error")
+				},
+			}
+
+			namespace := &corev1.Namespace{ObjectMeta: v1.ObjectMeta{Name: ns}}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(namespace, app)...).
+				WithStatusSubresource(app).
+				WithInterceptorFuncs(interceptorFuncs)).
+				Build()
+
+			r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app", Namespace: ns}}
+
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).To(HaveOccurred(),
+				"status update failure during pending-empty should not be silently swallowed")
+		})
+
 		It("unbinding without finalizer returns transient error for backoff", Label(unitLabel), func() {
 			ns := "default"
 			// App bound to a service that no longer exists, no finalizer.
