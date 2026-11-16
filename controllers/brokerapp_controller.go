@@ -1540,28 +1540,20 @@ func (reconciler *BrokerAppInstanceReconciler) setReadyCondition() {
 		return
 	}
 
-	validCond := meta.FindStatusCondition(reconciler.status.Conditions, broker.ValidConditionType)
 	deployedCond := meta.FindStatusCondition(reconciler.status.Conditions, broker.DeployedConditionType)
 
-	// Ready = Valid at current generation AND Deployed (at any generation).
-	// Deployed may lag behind the current generation while the service
-	// controller catches up — that is not a readiness issue since the
-	// previous spec is still running.
-	if validCond != nil && validCond.Status == metav1.ConditionTrue &&
-		validCond.ObservedGeneration == reconciler.instance.Generation &&
-		deployedCond != nil && deployedCond.Status == metav1.ConditionTrue {
+	// Ready reflects whether the app is running, like a StatefulSet.
+	// Deployed=True at any generation means the broker is serving this
+	// app's config. A failed validation on a newer generation does not
+	// make the app unready — the Valid condition covers that independently.
+	if deployedCond != nil && deployedCond.Status == metav1.ConditionTrue {
 		condition.Status = metav1.ConditionTrue
 		condition.Reason = broker.ReadyConditionReason
 		condition.Message = "BrokerApp is ready"
 	} else {
 		condition.Status = metav1.ConditionFalse
 		condition.Reason = broker.NotReadyConditionReason
-		if validCond == nil || validCond.Status != metav1.ConditionTrue ||
-			validCond.ObservedGeneration != reconciler.instance.Generation {
-			condition.Message = "Waiting for Valid condition"
-		} else {
-			condition.Message = "Waiting for Deployed condition"
-		}
+		condition.Message = "Waiting for Deployed condition"
 	}
 
 	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
