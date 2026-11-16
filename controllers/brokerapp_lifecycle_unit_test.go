@@ -204,4 +204,42 @@ var _ = Describe("brokerapp lifecycle", func() {
 
 		Expect(meta.IsStatusConditionTrue(updatedApp.Status.Conditions, v1beta2.ReadyConditionType)).To(BeFalse())
 	})
+
+	It("deleting app without finalizer does not get reassigned to a new service", Label(unitLabel), func() {
+		ns := "default"
+		svcName := "my-broker-service"
+		appName := "deleting-no-finalizer"
+
+		svc := NewBrokerService(svcName, ns).Build()
+		// App with no owned content (no addresses) — won't get a drain finalizer
+		app := NewBrokerApp(appName, ns).Build()
+
+		env := NewTestEnvironment(ns, svc, app)
+		r := env.Reconciler
+		cl := env.Client
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: appName, Namespace: ns}}
+
+		// First reconcile: app gets bound
+		_, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		updatedApp := &v1beta2.BrokerApp{}
+		Expect(cl.Get(context.TODO(), req.NamespacedName, updatedApp)).To(Succeed())
+		Expect(updatedApp.Status.Service).NotTo(BeNil(), "app should be bound after first reconcile")
+
+		// Add a non-drain finalizer so the fake client keeps the object after Delete
+		controllerutil.AddFinalizer(updatedApp, "test/keep-alive")
+		Expect(cl.Update(context.TODO(), updatedApp)).To(Succeed())
+		Expect(cl.Delete(context.TODO(), updatedApp)).To(Succeed())
+
+		// Reconcile the deleting app (no pending-empty finalizer)
+		_, err = r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(cl.Get(context.TODO(), req.NamespacedName, updatedApp)).To(Succeed())
+		Expect(updatedApp.Status.Service).To(BeNil(),
+			"deleting app should not be reassigned to a service")
+		Expect(updatedApp.Status.BoundSpec).To(BeNil(),
+			"deleting app should not have BoundSpec set")
+	})
 })
