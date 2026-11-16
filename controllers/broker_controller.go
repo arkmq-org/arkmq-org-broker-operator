@@ -342,7 +342,7 @@ func NewBrokerReconcilerImpl(customResource *v1beta2.Broker, parent *BrokerRecon
 
 func (reconciler *BrokerReconcilerImpl) Process(customResource *v1beta2.Broker, namer common.Namers, client rtclient.Client, scheme *runtime.Scheme) error {
 
-	reconciler.log.V(1).Info("Processing...", "CRD ver", customResource.ResourceVersion, "CRD Gen", customResource.Generation)
+	reconciler.log.V(1).Info("Processing...", "CR ver", customResource.ResourceVersion, "CR Gen", customResource.Generation)
 
 	reconciler.CurrentDeployedResources(customResource, client)
 
@@ -383,7 +383,7 @@ func (reconciler *BrokerReconcilerImpl) Process(customResource *v1beta2.Broker, 
 		reconciler.log.Error(err, "Error processing resources")
 	}
 
-	reconciler.log.V(1).Info("Reconciler processing...complete", "CRD ver", customResource.ResourceVersion, "CRD Gen", customResource.Generation)
+	reconciler.log.V(1).Info("Reconciler processing...complete", "CR ver", customResource.ResourceVersion, "CR Gen", customResource.Generation)
 	// we don't requeue
 	return err
 }

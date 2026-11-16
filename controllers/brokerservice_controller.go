@@ -146,7 +146,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 		status:                  instance.Status.DeepCopy(),
 	}
 
-	processor.log.V(2).Info("Processing...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation)
+	processor.log.V(2).Info("Processing...", "CR ver", instance.ResourceVersion, "CR Gen", instance.Generation)
 
 	finalizerRemoved, err := processor.reconcileService(ctx)
 	if err == nil && finalizerRemoved {
@@ -156,7 +156,7 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 		}
 	}
 
-	processor.log.V(2).Info("Processed...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation, "error", err)
+	processor.log.V(2).Info("Processed...", "CR ver", instance.ResourceVersion, "CR Gen", instance.Generation, "error", err)
 
 	statusErr, retry := processor.processStatus(err)
 	if err != nil {
