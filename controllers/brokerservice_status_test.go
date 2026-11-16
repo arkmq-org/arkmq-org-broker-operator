@@ -36,7 +36,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
-var _ = Describe("broker-service status conditions", func() {
+var _ = Describe("broker-service status conditions", Label("bsvc"), func() {
 
 	BeforeEach(func() {
 		BeforeEachSpec()

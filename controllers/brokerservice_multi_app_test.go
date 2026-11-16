@@ -40,7 +40,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 )
 
-var _ = Describe("broker-service multi-app scenarios", func() {
+var _ = Describe("broker-service multi-app scenarios", Label("bsvc"), func() {
 
 	BeforeEach(func() {
 		BeforeEachSpec()

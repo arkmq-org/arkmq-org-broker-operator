@@ -51,7 +51,7 @@ import (
 )
 
 // Each spec asserts a guarantee the drain finalizer is meant to give
-var _ = Describe("broker-service drain failure modes", Label("verySlow", "failure-modes"), func() {
+var _ = Describe("broker-service drain failure modes", Label("verySlow", "failure-modes", "bsvc"), func() {
 
 	BeforeEach(func() {
 		BeforeEachSpec()

@@ -50,7 +50,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 )
 
-var _ = Describe("broker-service address drain on removal", Label("verySlow"), func() {
+var _ = Describe("broker-service address drain on removal", Label("verySlow", "bsvc"), func() {
 
 	BeforeEach(func() {
 		BeforeEachSpec()
