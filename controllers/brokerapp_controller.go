@@ -413,16 +413,19 @@ func (reconciler *BrokerAppInstanceReconciler) resolveBrokerService() error {
 			}
 		}
 
+		if reconciler.unbindingReason != "" {
+			// Already unbinding from checkServiceAcceptance; binding held
+			// by finalizer. Populate reconciler.service for status reporting.
+			reconciler.service = desiredService
+			return nil
+		}
+
 		if desiredService == nil {
-			if reconciler.unbindingReason == "" {
-				reconciler.unbindingReason = "Bound service not found"
-				desiredService, needsServiceAssignment = reconciler.handleUnbinding(desiredService)
-			}
-		} else if reconciler.unbindingReason == "" {
-			if reason := reconciler.unbindingCheck(desiredService); reason != "" {
-				reconciler.unbindingReason = reason
-				desiredService, needsServiceAssignment = reconciler.handleUnbinding(desiredService)
-			}
+			reconciler.unbindingReason = "App selector no longer matches bound service"
+			desiredService, needsServiceAssignment = reconciler.handleUnbinding(desiredService)
+		} else if reason := reconciler.unbindingCheck(desiredService); reason != "" {
+			reconciler.unbindingReason = reason
+			desiredService, needsServiceAssignment = reconciler.handleUnbinding(desiredService)
 		}
 
 	} else {
@@ -1463,18 +1466,9 @@ func (reconciler *BrokerAppInstanceReconciler) setDeployedCondition(err error) {
 			condition.Status = metav1.ConditionTrue
 			condition.Reason = broker.DeployedConditionBoundReason
 			condition.Message = "Application bound to broker"
-
-			if reconciler.unbindingReason != "" {
-				condition.Reason = broker.DeployedConditionUnbindingReason
-				condition.Message = reconciler.pendingEmptyDetailMessage()
-			}
-		} else if reconciler.unbindingReason != "" {
-			condition.Status = metav1.ConditionFalse
-			condition.Reason = broker.DeployedConditionUnbindingReason
-			condition.Message = reconciler.pendingEmptyDetailMessage()
 		} else {
 			existing := meta.FindStatusCondition(reconciler.status.Conditions, broker.DeployedConditionType)
-			if existing != nil && existing.Status == metav1.ConditionTrue {
+			if reconciler.unbindingReason == "" && existing != nil && existing.Status == metav1.ConditionTrue {
 				// Previously deployed — keep the old condition while the
 				// service controller catches up with the new generation.
 				return
@@ -1487,16 +1481,16 @@ func (reconciler *BrokerAppInstanceReconciler) setDeployedCondition(err error) {
 		condition.Status = metav1.ConditionFalse
 		condition.Reason = broker.DeployedConditionMatchedServiceNotFoundReason
 		condition.Message = fmt.Sprintf("matching service %s not found", reconciler.status.Service.Key())
-
-		if reconciler.unbindingReason != "" {
-			condition.Reason = broker.DeployedConditionUnbindingReason
-			condition.Message = reconciler.pendingEmptyDetailMessage()
-		}
 	} else {
 		// No matching service
 		condition.Status = metav1.ConditionFalse
 		condition.Reason = broker.DeployedConditionNoMatchingServiceReason
 		condition.Message = "No matching BrokerService found"
+	}
+
+	if reconciler.unbindingReason != "" && reconciler.status.Service != nil {
+		condition.Reason = broker.DeployedConditionUnbindingReason
+		condition.Message = reconciler.pendingEmptyDetailMessage()
 	}
 
 	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
