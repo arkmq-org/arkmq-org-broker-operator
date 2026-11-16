@@ -288,54 +288,55 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 	}
 
 	processor.log.V(1).Info("Processing...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation)
-	if err = processor.checkServiceAcceptance(); err == nil {
-		if processor.unbindingReason != "" {
-			processor.handleUnbinding(nil)
-		}
-		if err = processor.validateSpec(); err == nil {
-			if err = processor.verifyAppCert(); err == nil {
-				if err = processor.resolveBrokerService(); err == nil {
-					if err = processor.validatePostBinding(); err == nil {
-						if err = processor.InitDeployed(instance, processor.getOwned()...); err == nil {
-							if err = processor.processBindingSecret(); err == nil {
-								err = processor.SyncDesiredWithDeployed(processor.instance)
-							}
-						}
-					}
-				}
-			}
-		}
-	}
 
-	// Update status with conditions
+	err = processor.reconcileApp()
+
 	statusErr := processor.processStatus(err)
 	processor.log.V(1).Info("Processed...", "CRD ver", instance.ResourceVersion, "CRD Gen", instance.Generation, "error", err)
 
+	// Pending-empty: requeue to monitor drain, errors retried on next cycle
 	if processor.unbindingReason != "" && processor.status.Service != nil {
-		if statusErr != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to update status: error %v", statusErr)
-		}
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
+	if _, ok := err.(*ValidationError); ok {
+		return ctrl.Result{}, nil
+	}
 	if err != nil {
-		// Handle reconcile error based on type
-		if _, ok := err.(*ValidationError); ok {
-			// Validation error - don't retry (wait for spec change)
-			return ctrl.Result{}, nil
-		}
-
-		// exponential backoff retry
 		return ctrl.Result{}, err
 	}
 	if statusErr != nil {
-		return ctrl.Result{}, fmt.Errorf("Failed to update status: error %v", statusErr)
+		return ctrl.Result{}, fmt.Errorf("failed to update status: %w", statusErr)
+	}
+	return ctrl.Result{}, nil
+}
+
+func (processor *BrokerAppInstanceReconciler) reconcileApp() error {
+	if err := processor.checkServiceAcceptance(); err != nil {
+		return err
 	}
 	if processor.unbindingReason != "" {
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		processor.handleUnbinding(nil)
 	}
-	// Success
-	return ctrl.Result{}, nil
+	if err := processor.validateSpec(); err != nil {
+		return err
+	}
+	if err := processor.verifyAppCert(); err != nil {
+		return err
+	}
+	if err := processor.resolveBrokerService(); err != nil {
+		return err
+	}
+	if err := processor.validatePostBinding(); err != nil {
+		return err
+	}
+	if err := processor.InitDeployed(processor.instance, processor.getOwned()...); err != nil {
+		return err
+	}
+	if err := processor.processBindingSecret(); err != nil {
+		return err
+	}
+	return processor.SyncDesiredWithDeployed(processor.instance)
 }
 
 func hasOwnedContentInSpec(spec *broker.BrokerAppSpec) bool {
