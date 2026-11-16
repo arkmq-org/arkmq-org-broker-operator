@@ -38,7 +38,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-var _ = Describe("broker-service address post-binding validation", func() {
+var _ = Describe("broker-service address post-binding validation", Label("bsvc"), func() {
 
 	BeforeEach(func() {
 		BeforeEachSpec()

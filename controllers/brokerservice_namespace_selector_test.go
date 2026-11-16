@@ -36,7 +36,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
-var _ = Describe("broker-service namespace-based CEL selection", func() {
+var _ = Describe("broker-service namespace-based CEL selection", Label("bsvc"), func() {
 
 	BeforeEach(func() {
 		// Enable namespace permission for tests

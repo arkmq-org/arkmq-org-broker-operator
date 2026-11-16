@@ -57,7 +57,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-var _ = Describe("broker-service mqtt", func() {
+var _ = Describe("broker-service mqtt", Label("bsvc"), func() {
 
 	BeforeEach(func() {
 		BeforeEachSpec()

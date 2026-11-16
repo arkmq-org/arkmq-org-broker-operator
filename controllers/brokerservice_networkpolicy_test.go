@@ -34,7 +34,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 )
 
-var _ = Describe("BrokerService NetworkPolicy for child broker", Label("network-policy"), func() {
+var _ = Describe("BrokerService NetworkPolicy for child broker", Label("network-policy", "bsvc"), func() {
 
 	BeforeEach(func() {
 		Expect(os.Setenv("BROKER_NETWORK_POLICY", "true")).To(Succeed())
