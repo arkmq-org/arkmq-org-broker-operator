@@ -864,4 +864,173 @@ var _ = Describe("brokerapp controller unit", func() {
 
 		Expect(check("billing")).To(Succeed())
 	})
+
+	Context("reconcile return paths", func() {
+
+		It("success returns no error and no requeue", Label(unitLabel), func() {
+			ns := "default"
+			svc := NewBrokerService("svc", ns).Build()
+			app := NewBrokerApp("app", ns).Build()
+
+			env := NewTestEnvironment(ns, svc, app)
+
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app", Namespace: ns}}
+			result, err := env.Reconciler.Reconcile(context.TODO(), req)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+		})
+
+		It("validation error returns nil error so controller-runtime does not retry", Label(unitLabel), func() {
+			ns := "default"
+			app := NewBrokerApp("app", ns).
+				WithServiceSelector(nil).
+				Build()
+
+			env := NewTestEnvironment(ns, app)
+
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app", Namespace: ns}}
+			result, err := env.Reconciler.Reconcile(context.TODO(), req)
+
+			Expect(err).NotTo(HaveOccurred(), "validation errors must not trigger backoff retry")
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+		})
+
+		It("transient error returns the error for backoff retry", Label(unitLabel), func() {
+			ns := "default"
+			app := NewBrokerApp("app", ns).
+				WithServiceSelector(&v1.LabelSelector{
+					MatchLabels: map[string]string{"type": "non-existent"},
+				}).
+				Build()
+
+			env := NewTestEnvironment(ns, app)
+
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app", Namespace: ns}}
+			_, err := env.Reconciler.Reconcile(context.TODO(), req)
+
+			Expect(err).To(HaveOccurred(), "transient errors must trigger backoff retry")
+		})
+
+		It("status update failure returns error only when reconcile itself succeeded", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+
+			ns := "default"
+			namespace := &corev1.Namespace{ObjectMeta: v1.ObjectMeta{Name: ns}}
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: v1.ObjectMeta{Name: "svc", Namespace: ns, Labels: map[string]string{"type": "broker"}},
+				Status: v1beta2.BrokerServiceStatus{
+					Conditions: []v1.Condition{
+						{Type: v1beta2.DeployedConditionType, Status: v1.ConditionTrue, Reason: v1beta2.ReadyConditionReason},
+					},
+				},
+			}
+			app := &v1beta2.BrokerApp{
+				ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: ns},
+				Spec: v1beta2.BrokerAppSpec{
+					ServiceSelector: &v1.LabelSelector{MatchLabels: map[string]string{"type": "broker"}},
+				},
+			}
+
+			interceptorFuncs := interceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+					return fmt.Errorf("simulated status update error")
+				},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(namespace, svc, app)...).
+				WithStatusSubresource(app).
+				WithInterceptorFuncs(interceptorFuncs)).
+				Build()
+
+			r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app", Namespace: ns}}
+
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("status"))
+		})
+
+		It("status update failure does not mask a reconcile error", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+
+			ns := "default"
+			namespace := &corev1.Namespace{ObjectMeta: v1.ObjectMeta{Name: ns}}
+			app := &v1beta2.BrokerApp{
+				ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: ns},
+				Spec: v1beta2.BrokerAppSpec{
+					ServiceSelector: &v1.LabelSelector{
+						MatchLabels: map[string]string{"type": "non-existent"},
+					},
+				},
+			}
+
+			interceptorFuncs := interceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, client client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+					return fmt.Errorf("simulated status update error")
+				},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(namespace, app)...).
+				WithStatusSubresource(app).
+				WithInterceptorFuncs(interceptorFuncs)).
+				Build()
+
+			r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app", Namespace: ns}}
+
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).NotTo(ContainSubstring("status"),
+				"reconcile error should take priority over status update error")
+		})
+
+		It("pending-empty requeues to monitor drain", Label(unitLabel), func() {
+			ns := "default"
+			// App bound to a service that no longer exists, with finalizer
+			// holding the binding open. checkServiceAcceptance sets
+			// unbindingReason, handleUnbinding sees the finalizer and keeps
+			// status.Service, so we get the pending-empty requeue.
+			app := NewBrokerApp("app", ns).
+				WithServiceBinding("gone-svc", ns, "app-binding-secret", 61616).
+				Build()
+			app.Finalizers = []string{v1beta2.AddressesPendingEmptyFinalizer}
+
+			env := NewTestEnvironment(ns, app)
+
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app", Namespace: ns}}
+			result, err := env.Reconciler.Reconcile(context.TODO(), req)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(10*time.Second),
+				"pending-empty should requeue to monitor drain progress")
+		})
+
+		It("unbinding without finalizer returns transient error for backoff", Label(unitLabel), func() {
+			ns := "default"
+			// App bound to a service that no longer exists, no finalizer.
+			// handleUnbinding clears Service, then resolveBrokerService
+			// tries to find a new service and fails (none available).
+			app := NewBrokerApp("app", ns).
+				WithServiceBinding("gone-svc", ns, "app-binding-secret", 61616).
+				Build()
+
+			env := NewTestEnvironment(ns, app)
+
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app", Namespace: ns}}
+			result, err := env.Reconciler.Reconcile(context.TODO(), req)
+
+			Expect(err).To(HaveOccurred(),
+				"no available service should produce a transient error for backoff retry")
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)))
+		})
+	})
 })
