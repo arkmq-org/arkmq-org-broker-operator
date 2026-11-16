@@ -1014,7 +1014,7 @@ var _ = Describe("brokerapp controller unit", func() {
 				"pending-empty should requeue to monitor drain progress")
 		})
 
-		It("pending-empty propagates status update errors", Label(unitLabel), func() {
+		It("pending-empty requeues despite status update error", Label(unitLabel), func() {
 			ns := "default"
 			scheme := runtime.NewScheme()
 			_ = v1beta2.AddToScheme(scheme)
@@ -1043,9 +1043,11 @@ var _ = Describe("brokerapp controller unit", func() {
 			r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
 			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app", Namespace: ns}}
 
-			_, err := r.Reconcile(context.TODO(), req)
-			Expect(err).To(HaveOccurred(),
-				"status update failure during pending-empty should not be silently swallowed")
+			result, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred(),
+				"drain monitoring should requeue on fixed interval, not trigger backoff")
+			Expect(result.RequeueAfter).To(Equal(10*time.Second),
+				"should requeue to monitor drain even when status write fails")
 		})
 
 		It("unbinding without finalizer returns transient error for backoff", Label(unitLabel), func() {

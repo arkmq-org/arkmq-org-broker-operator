@@ -295,11 +295,10 @@ func (reconciler *BrokerAppReconciler) Reconcile(ctx context.Context, request ct
 
 	processor.log.V(1).Info("Processed...", "CR ver", instance.ResourceVersion, "CR Gen", instance.Generation, "error", err)
 
-	// Pending-empty: requeue to monitor drain
+	// Pending-empty: requeue on a fixed interval to monitor drain progress.
+	// Errors are retried on the next cycle rather than triggering exponential
+	// backoff, which would delay drain completion.
 	if processor.unbindingReason != "" && processor.status.Service != nil {
-		if statusErr != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to update status: %w", statusErr)
-		}
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
