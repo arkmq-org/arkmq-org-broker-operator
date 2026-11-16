@@ -1061,7 +1061,7 @@ var _ = Describe("broker-service address post-binding validation", func() {
 				g.Expect(validCond.Reason).Should(Equal(broker.ValidConditionAddressTypeError))
 				g.Expect(validCond.ObservedGeneration).Should(Equal(int64(2)))
 
-			}, 10, 2).Should(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			By("updating app1 with a trivial change to trigger service reconcile")
 			Eventually(func(g Gomega) {

@@ -1010,6 +1010,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAddressDrain(app *brok
 		if updateErr := reconciler.Update(context.TODO(), app); updateErr != nil {
 			return false, fmt.Errorf("failed to add pending-empty finalizer to app %s: %v", app.Name, updateErr)
 		}
+		reconciler.log.V(2).Info("Added finaliser", "app", client.ObjectKeyFromObject(app))
 	}
 
 	pendingAddresses, err := reconciler.detectDrainingAddresses(app, tracker, oldSecretData)
