@@ -874,6 +874,49 @@ var _ = Describe("processAddressDrain lifecycle for live app updates", Label(uni
 	})
 })
 
+var _ = Describe("processAddressDrain secret recovery", Label(unitLabel), func() {
+
+	It("holds finalizer when secret is missing for a deleting provisioned app", Label(unitLabel), func() {
+		ns := "default"
+		appName := "secret-lost-app"
+
+		app := NewBrokerApp(appName, ns).
+			WithAddresses(NewAddressType("orders").Build()).
+			WithProducerOf(NewAddressRef("orders").Build()).
+			Build()
+		app.Status.BoundSpec = &broker.AppBoundSpec{
+			Spec:       *app.Spec.DeepCopy(),
+			Generation: 1,
+		}
+		app.Finalizers = []string{broker.AddressesPendingEmptyFinalizer}
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{AppIdentityWithGeneration(app)}
+		Expect(reconciler.Client.Create(context.TODO(), app)).To(Succeed())
+
+		// set DeletionTimestamp after Create — fake client strips it on create
+		now := metav1.Now()
+		app.DeletionTimestamp = &now
+
+		tracker := newAddressTracker()
+
+		// nil previousSecretData — matches what processAppSecrets produces
+		// when the secret does not exist (NewSecret returns Data: nil)
+		var previousSecretData map[string][]byte
+
+		skip, err := reconciler.processAddressDrain(app, tracker, previousSecretData)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(skip).To(BeFalse(),
+			"must not complete drain when secret is missing — normal reconcile will rebuild it")
+
+		updatedApp := &broker.BrokerApp{}
+		Expect(reconciler.Client.Get(context.TODO(),
+			types.NamespacedName{Name: appName, Namespace: ns}, updatedApp)).To(Succeed())
+		Expect(controllerutil.ContainsFinalizer(updatedApp, broker.AddressesPendingEmptyFinalizer)).To(BeTrue(),
+			"finalizer must not be removed when secret is missing")
+	})
+})
+
 var _ = Describe("cross-app drain unit", Label(unitLabel), func() {
 
 	It("should drop cross-app producer send permission when owner app is draining", Label(unitLabel), func() {

@@ -1024,6 +1024,11 @@ func (reconciler *BrokerServiceInstanceReconciler) processAddressDrain(app *brok
 		reconciler.log.V(2).Info("Added finaliser", "app", client.ObjectKeyFromObject(app))
 	}
 
+	if oldSecretData == nil && reconciler.wasAppEverProvisioned(app) {
+		reconciler.log.Info("secret missing for provisioned app, deferring drain detection", "app", app.Name)
+		return false, nil
+	}
+
 	pendingAddresses, err := reconciler.detectDrainingAddresses(app, tracker, oldSecretData)
 	if err != nil {
 		return false, err
