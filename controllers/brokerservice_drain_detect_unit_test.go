@@ -51,7 +51,9 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 			AddressConfigurations: make(map[string]*brokerproperties.AddressConfiguration),
 		}
 		for _, addr := range addresses {
-			caps.AddressConfigurations[addr] = &brokerproperties.AddressConfiguration{}
+			caps.AddressConfigurations[addr] = &brokerproperties.AddressConfiguration{
+				RoutingTypes: brokerproperties.RoutingTypeAnycast,
+			}
 		}
 		data, err := json.Marshal(caps)
 		Expect(err).NotTo(HaveOccurred())
@@ -349,7 +351,7 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		Expect(result[0].Subscriptions).To(ConsistOf("client-a.events", "client-b.events"))
 	})
 
-	It("sets PendingDeploy when sender role is present in old config", Label(unitLabel), func() {
+	It("sets PendingDrainConfig when sender role is present in old config", Label(unitLabel), func() {
 		ns := "default"
 		appName := "producer-check-app"
 
@@ -380,7 +382,7 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		result, err := reconciler.detectDrainingAddresses(app, newAddressTracker(), oldSecretData)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(HaveLen(1))
-		Expect(result[0].PendingDeploy).To(BeTrue(), "should flag active producers from deployed config")
+		Expect(result[0].PendingDrainConfig).To(BeTrue(), "should flag active producers from deployed config")
 	})
 
 	It("detects removed subscription on a retained multicast address", Label(unitLabel), func() {
@@ -431,7 +433,7 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		Expect(result[0].Subscriptions).To(ConsistOf("removed.events"))
 	})
 
-	It("does not set PendingDeploy for retained address even when producer role exists", Label(unitLabel), func() {
+	It("does not set PendingDrainConfig for retained address even when producer role exists", Label(unitLabel), func() {
 		ns := "default"
 		appName := "retained-producer-app"
 
@@ -477,11 +479,11 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		result, err := reconciler.detectDrainingAddresses(app, tracker, oldSecretData)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(HaveLen(1))
-		Expect(result[0].PendingDeploy).To(BeFalse(),
+		Expect(result[0].PendingDrainConfig).To(BeFalse(),
 			"retained address should not flag active producers — enabled=false handles it")
 	})
 
-	It("sets PendingDeploy on first detection of retained subscription drain", Label(unitLabel), func() {
+	It("sets PendingDrainConfig on first detection of retained subscription drain", Label(unitLabel), func() {
 		ns := "default"
 		appName := "first-detect-app"
 
@@ -523,11 +525,11 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		result, err := reconciler.detectDrainingAddresses(app, tracker, oldSecretData)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(HaveLen(1))
-		Expect(result[0].PendingDeploy).To(BeTrue(),
+		Expect(result[0].PendingDrainConfig).To(BeTrue(),
 			"first detection should gate Jolokia until enabled=false config is deployed")
 	})
 
-	It("clears PendingDeploy when sender role was already revoked", Label(unitLabel), func() {
+	It("clears PendingDrainConfig when sender role was already revoked", Label(unitLabel), func() {
 		ns := "default"
 		appName := "revoked-producer-app"
 
@@ -557,7 +559,7 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		result, err := reconciler.detectDrainingAddresses(app, newAddressTracker(), oldSecretData)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(HaveLen(1))
-		Expect(result[0].PendingDeploy).To(BeFalse(), "should not flag producers when sender role was already revoked")
+		Expect(result[0].PendingDrainConfig).To(BeFalse(), "should not flag producers when sender role was already revoked")
 	})
 
 	It("detects both addresses when a second is removed while the first is still draining", Label(unitLabel), func() {
@@ -604,10 +606,49 @@ var _ = Describe("detectDrainingAddresses unit", Label(unitLabel), func() {
 		for _, dai := range result {
 			byAddr[dai.Address] = dai
 		}
-		Expect(byAddr["A"].PendingDeploy).To(BeTrue(),
+		Expect(byAddr["A"].PendingDrainConfig).To(BeTrue(),
 			"A has active send — needs drain config deployed first")
-		Expect(byAddr["B"].PendingDeploy).To(BeFalse(),
+		Expect(byAddr["B"].PendingDrainConfig).To(BeFalse(),
 			"B already had send revoked — drain config already in place")
+	})
+
+	It("does not flag a cross-app consumed address as a drain candidate", Label(unitLabel), func() {
+		ns := "default"
+		sinkName := "sink-app"
+		ownerName := "owner-app"
+
+		sinkApp := NewBrokerApp(sinkName, ns).
+			WithConsumerOf(NewAddressRef("delivered").WithAppRef(ns, ownerName).Build()).
+			Build()
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{
+			AppIdentityWithGeneration(sinkApp),
+		}
+
+		appIdentity := AppIdentity(sinkApp)
+		oldCaps := &brokerproperties.CapabilitiesJSON{
+			AddressConfigurations: map[string]*brokerproperties.AddressConfiguration{
+				"delivered": {},
+			},
+			SecurityRoles: map[string]map[string]*brokerproperties.RolePermissions{
+				"delivered": {
+					consumerRole(appIdentity): {Consume: true},
+				},
+			},
+		}
+		data, err := json.Marshal(oldCaps)
+		Expect(err).NotTo(HaveOccurred())
+		capKey := AppIdentityPrefixed(sinkApp, "capabilities.json")
+		oldSecretData := map[string][]byte{capKey: data}
+
+		tracker, buildErr := reconciler.buildAddressTracker(sinkApp)
+		Expect(buildErr).NotTo(HaveOccurred())
+
+		result, err := reconciler.detectDrainingAddresses(sinkApp, tracker, oldSecretData)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(BeEmpty(),
+			"cross-app consumed address (no RoutingTypes in old config) must not appear as a drain candidate")
 	})
 
 })
@@ -619,7 +660,7 @@ var _ = Describe("isDrainConfigApplied unit", Label(unitLabel), func() {
 		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
 
 		candidates := []DrainingAddressInfo{
-			{Address: "orders", PendingDeploy: true},
+			{Address: "orders", PendingDrainConfig: true},
 		}
 		Expect(reconciler.isDrainConfigApplied(candidates)).To(BeFalse(),
 			"should not allow Jolokia check when producers are still active")
@@ -630,7 +671,7 @@ var _ = Describe("isDrainConfigApplied unit", Label(unitLabel), func() {
 		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
 
 		candidates := []DrainingAddressInfo{
-			{Address: "orders", PendingDeploy: false},
+			{Address: "orders", PendingDrainConfig: false},
 		}
 		Expect(reconciler.isDrainConfigApplied(candidates)).To(BeFalse(),
 			"should not allow Jolokia check when AppsProvisioned condition is missing")
@@ -647,7 +688,7 @@ var _ = Describe("isDrainConfigApplied unit", Label(unitLabel), func() {
 		})
 
 		candidates := []DrainingAddressInfo{
-			{Address: "orders", PendingDeploy: false},
+			{Address: "orders", PendingDrainConfig: false},
 		}
 		Expect(reconciler.isDrainConfigApplied(candidates)).To(BeTrue(),
 			"should allow Jolokia check when producers revoked and config applied")

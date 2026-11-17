@@ -47,7 +47,7 @@ import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/version"
 )
 
-var _ = Describe("broker-service-poc", func() {
+var _ = Describe("broker-service-poc", Label("bsvc"), func() {
 
 	BeforeEach(func() {
 		BeforeEachSpec()
