@@ -686,17 +686,26 @@ func DuplicateKeyIn(keyValues []string) string {
 	keysMap := map[string]string{}
 
 	for _, keyAndValue := range keyValues {
-		if key, _, found := strings.Cut(keyAndValue, "="); found {
-			_, duplicate := keysMap[key]
-			if !(duplicate) {
-				keysMap[key] = key
-			} else {
-				return key
-			}
+		key := extractPropertyKey(keyAndValue)
+		if _, duplicate := keysMap[key]; duplicate {
+			return key
 		}
+		keysMap[key] = key
 	}
 
 	return ""
+}
+
+// extractPropertyKey returns the part of a java properties entry that precedes the
+// first unescaped '='. An '=' preceded by a backslash belongs to the key, as
+// documented for spec.brokerProperties in docs/help/operator.md.
+func extractPropertyKey(keyAndValue string) string {
+	for index, c := range keyAndValue {
+		if c == '=' && index > 0 && keyAndValue[index-1] != '\\' {
+			return keyAndValue[0:index]
+		}
+	}
+	return keyAndValue
 }
 
 func AssertSecretContainsKey(secret corev1.Secret, key string, contextMessage string) *metav1.Condition {

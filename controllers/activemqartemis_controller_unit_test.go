@@ -125,7 +125,7 @@ func TestValidateBrokerPropsDuplicateOnFirstEquals(t *testing.T) {
 	assert.True(t, strings.Contains(condition.Message, "nameWith"))
 }
 
-func TestValidateBrokerPropsDuplicateOnFirstEqualsIncorrectButUnrealisticForOurBrokerConfigUsecase(t *testing.T) {
+func TestValidateBrokerPropsDistinctKeysWithEscapedEquals(t *testing.T) {
 
 	cr := &brokerv1beta1.ActiveMQArtemis{
 		Spec: brokerv1beta1.ActiveMQArtemisSpec{
@@ -143,14 +143,34 @@ func TestValidateBrokerPropsDuplicateOnFirstEqualsIncorrectButUnrealisticForOurB
 
 	valid, retry := ri.validate(cr, k8sClient, *namer)
 
-	assert.False(t, valid)
+	assert.True(t, valid)
 	assert.False(t, retry)
 
-	assert.True(t, meta.IsStatusConditionFalse(cr.Status.Conditions, brokerv1beta1.ValidConditionType))
+	assert.True(t, meta.IsStatusConditionTrue(cr.Status.Conditions, brokerv1beta1.ValidConditionType))
+}
 
-	condition := meta.FindStatusCondition(cr.Status.Conditions, brokerv1beta1.ValidConditionType)
-	assert.Equal(t, condition.Reason, brokerv1beta1.ValidConditionFailedDuplicateBrokerPropertiesKey)
-	assert.True(t, strings.Contains(condition.Message, "nameWith"))
+func TestValidateBrokerPropsAddressSettingsWithEscapedEquals(t *testing.T) {
+
+	cr := &brokerv1beta1.ActiveMQArtemis{
+		Spec: brokerv1beta1.ActiveMQArtemisSpec{
+			BrokerProperties: []string{
+				"addressSettings.\"modules.*.messages.events.type\\=timeSeries*\".enableMetrics=true",
+				"addressSettings.\"modules.*.messages.events.type\\=alarm*\".enableMetrics=true",
+			},
+		},
+	}
+
+	namer := MakeNamers(cr)
+
+	r := NewActiveMQArtemisReconciler(&NillCluster{}, ctrl.Log, isOpenshift)
+	ri := NewActiveMQArtemisReconcilerImpl(cr, r)
+
+	valid, retry := ri.validate(cr, k8sClient, *namer)
+
+	assert.True(t, valid)
+	assert.False(t, retry)
+
+	assert.True(t, meta.IsStatusConditionTrue(cr.Status.Conditions, brokerv1beta1.ValidConditionType))
 }
 
 func TestStatusPodsCheckCached(t *testing.T) {
