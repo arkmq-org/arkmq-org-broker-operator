@@ -1038,4 +1038,316 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		}, existingClusterTimeout, existingClusterInterval).Should(BeTrue())
 
 	})
+
+	It("holds a service delete while an owned address read by a sink app has messages", func() {
+		if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+			return
+		}
+
+		ctx := context.Background()
+		serviceName := NextSpecResourceName()
+		labels := map[string]string{"test": "fm-f6"}
+		ownerName := NextSpecResourceName()
+		sinkName := NextSpecResourceName()
+		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
+		DeferCleanup(CleanupAppCerts, ownerName, defaultNamespace)
+		DeferCleanup(CleanupAppCerts, sinkName, defaultNamespace)
+
+		// the broker carries no owner ref, so a force-removed service leaves it orphaned
+		DeferCleanup(func(ctx context.Context) {
+			orphan, err := getBrokerForService(ctx, serviceName)
+			if err == nil {
+				Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, orphan))).Should(Succeed())
+			}
+		}, ctx)
+
+		service := setupService(ctx, serviceName, labels)
+		DeferCleanup(ForceRemove, ctx, &service)
+
+		owner := setupApp(ctx, ownerName, labels, broker.BrokerAppSpec{
+			Addresses: []broker.AddressType{{
+				Address:               "delivered",
+				ConsumerOfAppSelector: fmt.Sprintf("app.metadata.name == '%s'", sinkName),
+			}},
+			Capabilities: []broker.AppCapabilityType{{
+				ProducerOf: []broker.AddressRef{{Address: "delivered"}},
+			}},
+		})
+		DeferCleanup(ForceRemove, ctx, &owner)
+		verifyProvisioned(ctx, serviceName, ownerName)
+
+		By("the service and the owner app are protected by the drain finalizer")
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
+			g.Expect(current.Finalizers).Should(ContainElement(broker.AddressesPendingEmptyFinalizer))
+
+			currentOwner := &broker.BrokerApp{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&owner), currentOwner)).Should(Succeed())
+			g.Expect(currentOwner.Finalizers).Should(ContainElement(broker.AddressesPendingEmptyFinalizer),
+				"precondition: the owner app is protected by the drain finalizer")
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		ep := setupMqttEndpoint(ctx, serviceName, ownerName)
+		DeferCleanup(cleanupMqttEndpoint, ep)
+		amqpProduce(ctx, ep, "delivered", 5)
+
+		// the sink joins once its upstream queue already holds messages
+		By("adding a sink app that consumes the owner's address")
+		sink := setupApp(ctx, sinkName, labels, broker.BrokerAppSpec{
+			Capabilities: []broker.AppCapabilityType{{
+				ConsumerOf: []broker.AddressRef{{
+					Address:      "delivered",
+					AppNamespace: defaultNamespace,
+					AppName:      ownerName,
+				}},
+			}},
+		})
+		DeferCleanup(ForceRemove, ctx, &sink)
+		verifyProvisioned(ctx, serviceName, sinkName)
+
+		// the sink consumes an address it does not own; that must not read as a removed
+		// address. An empty queue hides it (it reads as drained), so messages are queued first.
+		By("nothing is pending empty on a healthy deploy with messages queued")
+		Consistently(func(g Gomega) {
+			current := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
+			g.Expect(current.Status.PendingEmpty).Should(BeEmpty(), "pendingEmpty with nothing deleted")
+		}, 20*time.Second, time.Second*5).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
+			g.Expect(meta.IsStatusConditionTrue(current.Status.Conditions, broker.AppsProvisionedConditionType)).Should(BeTrue(),
+				"AppsProvisioned: %v", meta.FindStatusCondition(current.Status.Conditions, broker.AppsProvisionedConditionType))
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		By("deleting the service with background propagation, as kubectl delete does")
+		Expect(k8sClient.Delete(ctx, &service, client.PropagationPolicy(metav1.DeletePropagationBackground))).Should(Succeed())
+
+		By("the service and the owner app stay held while 5 messages are unconsumed")
+		Consistently(func(g Gomega) {
+			held := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), held)).Should(Succeed(),
+				"service deletion completed with 5 messages unconsumed")
+			g.Expect(held.Finalizers).Should(ContainElement(broker.AddressesPendingEmptyFinalizer))
+
+			currentOwner := &broker.BrokerApp{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&owner), currentOwner)).Should(Succeed())
+			g.Expect(currentOwner.Finalizers).Should(ContainElement(broker.AddressesPendingEmptyFinalizer),
+				"owner app finalizer cleared with 5 messages unconsumed, conditions: %v", currentOwner.Status.Conditions)
+
+			_, err := getBrokerForService(ctx, serviceName)
+			g.Expect(err).ShouldNot(HaveOccurred(), "broker gone while the service is still held")
+		}, time.Second*20, time.Second*5).Should(Succeed())
+	})
+
+	It("consumer app stays bound when owner removes a shared address", func() {
+		if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+			return
+		}
+
+		ctx := context.Background()
+		serviceName := NextSpecResourceName()
+		labels := map[string]string{"test": "fm-f7"}
+		ownerName := NextSpecResourceName()
+		consumerName := NextSpecResourceName()
+		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
+		DeferCleanup(CleanupAppCerts, ownerName, defaultNamespace)
+		DeferCleanup(CleanupAppCerts, consumerName, defaultNamespace)
+
+		service := setupService(ctx, serviceName, labels)
+		DeferCleanup(ForceRemove, ctx, &service)
+
+		By("creating owner app with shared address 'orders'")
+		owner := setupApp(ctx, ownerName, labels, broker.BrokerAppSpec{
+			Addresses: []broker.AddressType{{
+				Address:               "orders",
+				ConsumerOfAppSelector: fmt.Sprintf("app.metadata.name == '%s'", consumerName),
+			}},
+			Capabilities: []broker.AppCapabilityType{{
+				ProducerOf: []broker.AddressRef{{Address: "orders"}},
+			}},
+		})
+		DeferCleanup(ForceRemove, ctx, &owner)
+		verifyProvisioned(ctx, serviceName, ownerName)
+
+		By("creating consumer app that references owner's 'orders' address")
+		consumer := setupApp(ctx, consumerName, labels, broker.BrokerAppSpec{
+			Capabilities: []broker.AppCapabilityType{{
+				ConsumerOf: []broker.AddressRef{{
+					Address: "orders",
+					AppName: ownerName,
+				}},
+			}},
+		})
+		DeferCleanup(ForceRemove, ctx, &consumer)
+		verifyProvisioned(ctx, serviceName, consumerName)
+
+		By("owner removes the shared address from its spec")
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerApp{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&owner), current)).Should(Succeed())
+			current.Spec.Addresses = nil
+			current.Spec.Capabilities = nil
+			g.Expect(k8sClient.Update(ctx, current)).Should(Succeed())
+		}, timeout, interval).Should(Succeed())
+
+		By("verifying the consumer's reaction to the removed shared address")
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerApp{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&consumer), current)).Should(Succeed())
+
+			if verbose {
+				fmt.Printf("consumer after owner removes shared address STATUS: %v\n", current.Status)
+			}
+
+			// The consumer should detect that the address ref is no longer
+			// satisfied. Whether it unbinds or goes invalid, it should not
+			// remain Ready=True with a stale binding.
+			validCond := meta.FindStatusCondition(current.Status.Conditions, broker.ValidConditionType)
+			readyCond := meta.FindStatusCondition(current.Status.Conditions, broker.ReadyConditionType)
+			g.Expect(validCond).ShouldNot(BeNil())
+			g.Expect(readyCond).ShouldNot(BeNil())
+
+			// The consumer must acknowledge the change — either Valid=False
+			// or Ready=False (unbinding)
+			stale := validCond.Status == metav1.ConditionTrue && readyCond.Status == metav1.ConditionTrue
+			g.Expect(stale).To(BeFalse(),
+				"consumer should not remain fully ready when owner removes the shared address, valid: %v, ready: %v",
+				validCond, readyCond)
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+	})
+
+	It("two apps draining different addresses on the same service do not interfere", func() {
+		if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+			return
+		}
+
+		ctx := context.Background()
+		serviceName := NextSpecResourceName()
+		labels := map[string]string{"test": "fm-f8"}
+		app1Name := NextSpecResourceName()
+		app2Name := NextSpecResourceName()
+		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
+		DeferCleanup(CleanupAppCerts, app1Name, defaultNamespace)
+		DeferCleanup(CleanupAppCerts, app2Name, defaultNamespace)
+
+		service := setupService(ctx, serviceName, labels)
+		DeferCleanup(ForceRemove, ctx, &service)
+
+		By("creating app1 with addresses 'alpha' and 'beta'")
+		app1 := setupApp(ctx, app1Name, labels, broker.BrokerAppSpec{
+			Addresses: []broker.AddressType{
+				{Address: "alpha"},
+				{Address: "beta"},
+			},
+			Capabilities: []broker.AppCapabilityType{{
+				ProducerOf: []broker.AddressRef{
+					{Address: "alpha"},
+					{Address: "beta"},
+				},
+			}},
+		})
+		DeferCleanup(ForceRemove, ctx, &app1)
+
+		By("creating app2 with addresses 'gamma' and 'delta'")
+		app2 := setupApp(ctx, app2Name, labels, broker.BrokerAppSpec{
+			Addresses: []broker.AddressType{
+				{Address: "gamma"},
+				{Address: "delta"},
+			},
+			Capabilities: []broker.AppCapabilityType{{
+				ProducerOf: []broker.AddressRef{
+					{Address: "gamma"},
+					{Address: "delta"},
+				},
+			}},
+		})
+		DeferCleanup(ForceRemove, ctx, &app2)
+
+		verifyProvisioned(ctx, serviceName, app1Name)
+		verifyProvisioned(ctx, serviceName, app2Name)
+
+		By("producing messages so drain will be needed")
+		ep1 := setupMqttEndpoint(ctx, serviceName, app1Name)
+		DeferCleanup(cleanupMqttEndpoint, ep1)
+		amqpProduce(ctx, ep1, "beta", 3)
+
+		ep2 := setupMqttEndpoint(ctx, serviceName, app2Name)
+		DeferCleanup(cleanupMqttEndpoint, ep2)
+		amqpProduce(ctx, ep2, "delta", 3)
+
+		By("app1 removes 'beta', app2 removes 'delta' — concurrent drains")
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerApp{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&app1), current)).Should(Succeed())
+			current.Spec.Addresses = []broker.AddressType{{Address: "alpha"}}
+			current.Spec.Capabilities = []broker.AppCapabilityType{{
+				ProducerOf: []broker.AddressRef{{Address: "alpha"}},
+			}}
+			g.Expect(k8sClient.Update(ctx, current)).Should(Succeed())
+		}, timeout, interval).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerApp{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&app2), current)).Should(Succeed())
+			current.Spec.Addresses = []broker.AddressType{{Address: "gamma"}}
+			current.Spec.Capabilities = []broker.AppCapabilityType{{
+				ProducerOf: []broker.AddressRef{{Address: "gamma"}},
+			}}
+			g.Expect(k8sClient.Update(ctx, current)).Should(Succeed())
+		}, timeout, interval).Should(Succeed())
+
+		By("verifying each app drains only its own removed address")
+		Eventually(func(g Gomega) {
+			svc := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), svc)).Should(Succeed())
+
+			if verbose {
+				fmt.Printf("service pending empty: %v\n", svc.Status.PendingEmpty)
+			}
+
+			// Both apps should have pending empty entries
+			app1Identity := AppIdentity(&app1)
+			app2Identity := AppIdentity(&app2)
+
+			var app1Pending, app2Pending *broker.PendingEmptyAddressStatus
+			for i := range svc.Status.PendingEmpty {
+				switch svc.Status.PendingEmpty[i].App {
+				case app1Identity:
+					app1Pending = &svc.Status.PendingEmpty[i]
+				case app2Identity:
+					app2Pending = &svc.Status.PendingEmpty[i]
+				}
+			}
+
+			g.Expect(app1Pending).ShouldNot(BeNil(), "app1 should have pending empty for 'beta'")
+			g.Expect(app1Pending.Messages).Should(HaveKey("beta"),
+				"app1 should drain 'beta', not 'alpha'")
+			g.Expect(app1Pending.Messages).ShouldNot(HaveKey("alpha"),
+				"app1's retained address 'alpha' should not be draining")
+
+			g.Expect(app2Pending).ShouldNot(BeNil(), "app2 should have pending empty for 'delta'")
+			g.Expect(app2Pending.Messages).Should(HaveKey("delta"),
+				"app2 should drain 'delta', not 'gamma'")
+			g.Expect(app2Pending.Messages).ShouldNot(HaveKey("gamma"),
+				"app2's retained address 'gamma' should not be draining")
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		By("verifying both apps stay provisioned during drain")
+		Eventually(func(g Gomega) {
+			svc := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), svc)).Should(Succeed())
+			g.Expect(svc.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(app1Name)))
+			g.Expect(svc.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(app2Name)))
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+	})
+
 })
+
+func getBrokerForService(ctx context.Context, serviceName string) (*broker.Broker, error) {
+	current := &broker.Broker{}
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: defaultNamespace}, current)
+	return current, err
+}

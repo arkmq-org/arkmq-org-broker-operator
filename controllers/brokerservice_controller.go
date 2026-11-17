@@ -1648,7 +1648,7 @@ func (reconciler *BrokerServiceInstanceReconciler) isSubscriptionDrainProvisione
 
 // detectDrainingAddresses compares the current spec addresses against the previously
 // deployed capabilities.json to find addresses or subscriptions that were removed.
-// Each candidate is annotated with PendingDeploy when the drain config change has
+// Each candidate is annotated with PendingDrainConfig when the drain config change has
 // not yet been applied by the broker; the caller gates the Jolokia message-count
 // check on isDrainConfigApplied.
 func (reconciler *BrokerServiceInstanceReconciler) detectDrainingAddresses(app *broker.BrokerApp, currentTracker *AddressTracker, oldSecretData map[string][]byte) ([]DrainingAddressInfo, error) {
@@ -1704,6 +1704,11 @@ func (reconciler *BrokerServiceInstanceReconciler) buildDrainCandidate(
 ) *DrainingAddressInfo {
 	addressStillOwned := currentOwned[name]
 
+	// address was never owned by this app — not a drain candidate
+	if oldCfg.RoutingTypes == "" && !addressStillOwned {
+		return nil
+	}
+
 	dai := DrainingAddressInfo{Address: name, AddressStillOwned: addressStillOwned}
 	if addrRoles, ok := oldCaps.SecurityRoles[name]; ok {
 		if perms, ok := addrRoles[consumerRole(appIdentity)]; ok && perms.Consume {
@@ -1711,7 +1716,7 @@ func (reconciler *BrokerServiceInstanceReconciler) buildDrainCandidate(
 		}
 		if !addressStillOwned {
 			if perms, ok := addrRoles[producerRole(appIdentity)]; ok && perms.Send {
-				dai.PendingDeploy = true
+				dai.PendingDrainConfig = true
 			}
 		}
 	}
@@ -1732,7 +1737,7 @@ func (reconciler *BrokerServiceInstanceReconciler) buildDrainCandidate(
 	}
 
 	if addressStillOwned && !reconciler.isSubscriptionDrainProvisioned(appIdentity, name, dai.Subscriptions) {
-		dai.PendingDeploy = true
+		dai.PendingDrainConfig = true
 	}
 
 	return &dai
@@ -1756,13 +1761,13 @@ func findRemovedSubscriptions(name string, oldCfg *brokerproperties.AddressConfi
 	return removed
 }
 
-// isDrainConfigApplied returns true when no candidates are PendingDeploy (the
+// isDrainConfigApplied returns true when no candidates are PendingDrainConfig (the
 // drain config has been pushed) AND the broker has applied that config. This
 // gates the Jolokia message-count check so we only query counts after message
 // flow has actually stopped on the broker.
 func (reconciler *BrokerServiceInstanceReconciler) isDrainConfigApplied(candidates []DrainingAddressInfo) bool {
 	for _, c := range candidates {
-		if c.PendingDeploy {
+		if c.PendingDrainConfig {
 			return false
 		}
 	}
@@ -1796,12 +1801,12 @@ func (reconciler *BrokerServiceInstanceReconciler) removeFullyDrained(app *broke
 }
 
 type DrainingAddressInfo struct {
-	Address           string           `json:"address"`
-	Subscriptions     []string         `json:"subscriptions,omitempty"`
-	WasConsumer       bool             `json:"-"`
-	PendingDeploy     bool             `json:"-"`
-	AddressStillOwned bool             `json:"-"`
-	MessageCounts     map[string]int64 `json:"-"`
+	Address            string           `json:"address"`
+	Subscriptions      []string         `json:"subscriptions,omitempty"`
+	WasConsumer        bool             `json:"-"`
+	PendingDrainConfig bool             `json:"-"`
+	AddressStillOwned  bool             `json:"-"`
+	MessageCounts      map[string]int64 `json:"-"`
 }
 
 type addressDrainResult struct {

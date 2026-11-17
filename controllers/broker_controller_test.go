@@ -45,7 +45,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-var _ = Describe("minimal", func() {
+var _ = Describe("minimal", Label("bsvc"), func() {
 
 	BeforeEach(func() {
 		BeforeEachSpec()
