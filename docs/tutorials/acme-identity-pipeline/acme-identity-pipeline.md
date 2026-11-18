@@ -1847,6 +1847,18 @@ spec:
   resources:
     limits:
       memory: 1Gi
+  tolerations:
+    - key: "dedicated"
+      operator: "Equal"
+      value: "messaging"
+      effect: "NoSchedule"
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: "topology.kubernetes.io/zone"
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/instance: core-prd
   appSelectorExpression: >-
     has(app.spec.serviceSelector.matchLabels) &&
     'tier' in app.spec.serviceSelector.matchLabels &&
@@ -1856,6 +1868,12 @@ EOF
 ```shell markdown_runner
 brokerservice.broker.arkmq.org/core-prd created
 ```
+
+The `tolerations` entry lets this broker schedule onto nodes tainted with `dedicated=messaging:NoSchedule` — useful when you reserve nodes for messaging workloads. The `topologySpreadConstraints` entry tells the scheduler to spread broker pods evenly across availability zones. Both are optional; on a single-node cluster they are accepted and have no effect.
+
+> **Note:** changing pod-template fields (scheduling, resources, env, image)
+> triggers a broker pod restart. Because BrokerService does not yet enable
+> persistence, in-flight messages are lost during the restart.
 
 The CEL expression reads three variables the operator injects at evaluation time:
 
