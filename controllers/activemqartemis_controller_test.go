@@ -72,6 +72,7 @@ import (
 	netv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 var _ = Describe("artemis controller", func() {
@@ -307,6 +308,125 @@ var _ = Describe("artemis controller", func() {
 				CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
 				CleanResource(commonSecret, commonSecret.Name, defaultNamespace)
 			}
+		})
+
+		It("exposes acceptors and console via Gateway API routes", func() {
+			if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+				return
+			}
+			if err := k8sClient.List(ctx, &gatewayv1.TLSRouteList{}); err != nil {
+				if errors.IsNotFound(err) || meta.IsNoMatchError(err) {
+					Skip("gateway-api CRDs not installed in the cluster — skipping gateway expose-mode spec")
+				}
+			}
+
+			commonSecretName := "common-amq-tls-secret"
+			commonSecret, err := CreateTlsSecret(commonSecretName, defaultNamespace, defaultPassword, defaultSanDnsNames)
+			Expect(err).To(BeNil())
+
+			Expect(k8sClient.Create(ctx, commonSecret)).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				createdSecret := corev1.Secret{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: commonSecretName, Namespace: defaultNamespace}, &createdSecret)).To(Succeed())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			gatewayMode := brokerv1beta1.ExposeModes.Gateway
+			parent := brokerv1beta1.GatewayParentReference{Name: "test-gateway", Namespace: defaultNamespace}
+
+			By("Deploying the broker cr with gateway-exposed acceptors and console")
+			brokerCr, createdBrokerCr := DeployCustomBroker(defaultNamespace, func(candidate *brokerv1beta1.ActiveMQArtemis) {
+
+				candidate.Spec.DeploymentPlan.Size = common.Int32ToPtr(1)
+				candidate.Spec.DeploymentPlan.ReadinessProbe = &corev1.Probe{
+					InitialDelaySeconds: 1,
+					PeriodSeconds:       1,
+					TimeoutSeconds:      5,
+				}
+				candidate.Spec.IngressDomain = defaultTestIngressDomain
+
+				gatewayHostTemplate := "$(ITEM_NAME)-$(BROKER_ORDINAL).$(INGRESS_DOMAIN)"
+
+				candidate.Spec.Console.Expose = true
+				candidate.Spec.Console.SSLEnabled = true
+				candidate.Spec.Console.SSLSecret = commonSecretName
+				candidate.Spec.Console.ExposeMode = &gatewayMode
+				candidate.Spec.Console.IngressHost = gatewayHostTemplate
+				candidate.Spec.Console.Gateway = &brokerv1beta1.GatewayConfig{ParentRef: parent}
+
+				candidate.Spec.Acceptors = []brokerv1beta1.AcceptorType{
+					{
+						Name:        "amqp-ssl-gw",
+						Protocols:   "amqp",
+						Port:        5671,
+						SSLEnabled:  true,
+						SSLSecret:   commonSecretName,
+						Expose:      true,
+						ExposeMode:  &gatewayMode,
+						IngressHost: gatewayHostTemplate,
+						Gateway:     &brokerv1beta1.GatewayConfig{ParentRef: parent},
+					},
+					{
+						Name:        "amqp-plain-gw",
+						Protocols:   "amqp",
+						Port:        5672,
+						Expose:      true,
+						ExposeMode:  &gatewayMode,
+						IngressHost: gatewayHostTemplate,
+						Gateway:     &brokerv1beta1.GatewayConfig{ParentRef: parent},
+					},
+				}
+			})
+
+			By("verify pod is up")
+			WaitForPod(brokerCr.Name)
+
+			By("checking TLSRoute is created for the SSL acceptor")
+			tlsRoute := gatewayv1.TLSRoute{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: brokerCr.Name + "-amqp-ssl-gw-0-svc-tlsrte", Namespace: defaultNamespace}, &tlsRoute)).To(Succeed())
+				g.Expect(tlsRoute.Spec.ParentRefs).To(HaveLen(1))
+				g.Expect(string(tlsRoute.Spec.ParentRefs[0].Name)).To(Equal(parent.Name))
+				g.Expect(tlsRoute.Spec.ParentRefs[0].Namespace).NotTo(BeNil())
+				g.Expect(string(*tlsRoute.Spec.ParentRefs[0].Namespace)).To(Equal(parent.Namespace))
+				g.Expect(tlsRoute.Spec.Rules).To(HaveLen(1))
+				g.Expect(tlsRoute.Spec.Rules[0].BackendRefs).To(HaveLen(1))
+				g.Expect(string(tlsRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(brokerCr.Name + "-amqp-ssl-gw-0-svc"))
+				g.Expect(tlsRoute.Spec.Rules[0].BackendRefs[0].Port).NotTo(BeNil())
+				g.Expect(int32(*tlsRoute.Spec.Rules[0].BackendRefs[0].Port)).To(Equal(int32(5671)))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("checking HTTPRoute is created for the plain acceptor")
+			httpRoute := gatewayv1.HTTPRoute{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: brokerCr.Name + "-amqp-plain-gw-0-svc-httprte", Namespace: defaultNamespace}, &httpRoute)).To(Succeed())
+				g.Expect(httpRoute.Spec.ParentRefs).To(HaveLen(1))
+				g.Expect(string(httpRoute.Spec.ParentRefs[0].Name)).To(Equal(parent.Name))
+				g.Expect(httpRoute.Spec.Rules).To(HaveLen(1))
+				g.Expect(httpRoute.Spec.Rules[0].BackendRefs).To(HaveLen(1))
+				g.Expect(string(httpRoute.Spec.Rules[0].BackendRefs[0].Name)).To(Equal(brokerCr.Name + "-amqp-plain-gw-0-svc"))
+				g.Expect(httpRoute.Spec.Rules[0].BackendRefs[0].Port).NotTo(BeNil())
+				g.Expect(int32(*httpRoute.Spec.Rules[0].BackendRefs[0].Port)).To(Equal(int32(5672)))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("checking TLSRoute is created for the SSL-enabled console")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: brokerCr.Name + "-wconsj-0-svc-tlsrte", Namespace: defaultNamespace}, &tlsRoute)).To(Succeed())
+				g.Expect(tlsRoute.Spec.ParentRefs).To(HaveLen(1))
+				g.Expect(string(tlsRoute.Spec.ParentRefs[0].Name)).To(Equal(parent.Name))
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			By("verifying the broker reconciles cleanly, i.e. the gateway routes are tracked as deployed")
+			// without the routes in GetDeployedResources every reconcile retries a
+			// create and fails with AlreadyExists, so the CR never becomes Ready
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: brokerCr.Name, Namespace: defaultNamespace}, createdBrokerCr)).To(Succeed())
+				g.Expect(meta.IsStatusConditionTrue(createdBrokerCr.Status.Conditions, brokerv1beta1.ValidConditionType)).Should(BeTrue())
+				g.Expect(meta.IsStatusConditionTrue(createdBrokerCr.Status.Conditions, brokerv1beta1.ReadyConditionType)).Should(BeTrue())
+			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+			CleanResource(createdBrokerCr, createdBrokerCr.Name, defaultNamespace)
+			CleanResource(commonSecret, commonSecret.Name, defaultNamespace)
 		})
 	})
 
@@ -3905,7 +4025,7 @@ var _ = Describe("artemis controller", func() {
 			crd.Spec.Console.Expose = true
 			crd.Spec.Console.SSLEnabled = true
 
-			outer := NewActiveMQArtemisReconciler(k8Manager, ctrl.Log, isOpenshift)
+			outer := NewActiveMQArtemisReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable)
 			reconcilerImpl := NewActiveMQArtemisReconcilerImpl(&crd, outer)
 
 			defaultConsoleSecretName := crd.Name + "-console-secret"
@@ -3998,7 +4118,7 @@ var _ = Describe("artemis controller", func() {
 				g.Expect(createdCrd.ResourceVersion).ShouldNot(BeEmpty())
 			}, timeout, interval).Should(Succeed())
 
-			outer := NewActiveMQArtemisReconciler(k8Manager, ctrl.Log, isOpenshift)
+			outer := NewActiveMQArtemisReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable)
 			reconcilerImpl := NewActiveMQArtemisReconcilerImpl(createdCrd, outer)
 
 			namer := MakeNamers(createdCrd)
@@ -4103,7 +4223,7 @@ var _ = Describe("artemis controller", func() {
 
 			}, timeout, interval).Should(Succeed())
 
-			outer := NewActiveMQArtemisReconciler(k8Manager, ctrl.Log, isOpenshift)
+			outer := NewActiveMQArtemisReconciler(k8Manager, ctrl.Log, isOpenshift, isGatewayAPIAvailable)
 			reconcilerImpl := NewActiveMQArtemisReconcilerImpl(&crd, outer)
 			reconcilerImpl.deployed = make(map[reflect.Type][]client.Object)
 
@@ -5612,7 +5732,7 @@ var _ = Describe("artemis controller", func() {
 			}, timeout, interval).Should(Succeed())
 
 			By("checking deployed resources of valid CR")
-			deployedResources, err = common.GetDeployedResources(&validCrd, k8sClient, isOpenshift)
+			deployedResources, err = common.GetDeployedResources(&validCrd, k8sClient, isOpenshift, isGatewayAPIAvailable)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(deployedResources).ShouldNot(BeEmpty())
 
@@ -5627,7 +5747,7 @@ var _ = Describe("artemis controller", func() {
 				g.Expect(deployedCrd.Name).Should(Equal(invalidCrd.ObjectMeta.Name))
 			}, timeout, interval).Should(Succeed())
 
-			deployedResources, err = common.GetDeployedResources(&invalidCrd, k8sClient, isOpenshift)
+			deployedResources, err = common.GetDeployedResources(&invalidCrd, k8sClient, isOpenshift, isGatewayAPIAvailable)
 			Expect(err).Should(Succeed())
 			Expect(deployedResources).Should(BeEmpty())
 
@@ -5662,7 +5782,7 @@ var _ = Describe("artemis controller", func() {
 			}, timeout, interval).Should(Succeed())
 
 			By("checking deployed resources of updated invalid CR")
-			deployedResources, err = common.GetDeployedResources(&validCrd, k8sClient, isOpenshift)
+			deployedResources, err = common.GetDeployedResources(&validCrd, k8sClient, isOpenshift, isGatewayAPIAvailable)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(deployedResources).ShouldNot(BeEmpty())
 
@@ -5704,7 +5824,7 @@ var _ = Describe("artemis controller", func() {
 				g.Expect(k8sClient.Get(ctx, crdKey, deployed)).Should(Succeed())
 				g.Expect(deployed.Name).Should(Equal(crd.Name))
 
-				deployedResources, err := common.GetDeployedResources(deployed, k8sClient, true)
+				deployedResources, err := common.GetDeployedResources(deployed, k8sClient, true, isGatewayAPIAvailable)
 				g.Expect(err).Should(Succeed())
 				g.Expect(deployedResources).ShouldNot(BeEmpty())
 				listOfIngress := deployedResources[ingressType]
