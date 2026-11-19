@@ -126,10 +126,11 @@ func init() {
 }
 
 const (
-	AppsProvisionedConditionType           = "AppsProvisioned"
-	AppsProvisionedConditionSyncedReason   = "Synced"
-	AppsProvisionedConditionWaitingReason  = "WaitingForBroker"
-	AppsProvisionedConditionNotReadyReason = "BrokerNotReady"
+	AppsProvisionedConditionType               = "AppsProvisioned"
+	AppsProvisionedConditionSyncedReason       = "Synced"
+	AppsProvisionedConditionWaitingReason      = "WaitingForBroker"
+	AppsProvisionedConditionNotReadyReason     = "BrokerNotReady"
+	AppsProvisionedConditionDrainPendingReason = "DrainConfigPending"
 
 	ReadyConditionAddressesPendingEmpty      = "AddressesPendingEmpty"
 	DeployedConditionPortPoolExhaustedReason = "PortPoolExhausted"

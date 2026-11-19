@@ -1133,7 +1133,6 @@ func InstallAppCert(app *brokerv1beta2.BrokerApp) *cmv1.Certificate {
 
 func CleanupAppCerts(appName string, namespace string) {
 	UninstallCert(appName+common.AppCertSecretSuffix, namespace)
-	UninstallCert(appName+"-"+common.DefaultOperandCertSecretName, namespace)
 }
 
 func CleanupServiceCerts(serviceName string, namespace string) {

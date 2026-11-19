@@ -149,17 +149,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			}, timeout, interval).Should(Succeed())
 
 			ownerAppName := NextSpecResourceName()
-			ownerCertName := ownerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing owner app cert")
-			InstallCert(ownerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = ownerCertName
-				candidate.Spec.CommonName = ownerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			By("creating owner app that declares and uses 'orders' address")
 			ownerApp := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -195,17 +184,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
 
 			consumerAppName := NextSpecResourceName()
-			consumerCertName := consumerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing consumer app cert")
-			InstallCert(consumerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = consumerCertName
-				candidate.Spec.CommonName = consumerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			By("creating consumer app that references 'orders' from owner")
 			consumerApp := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -323,17 +301,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			appName := NextSpecResourceName()
-			appCertName := appName + "-" + common.DefaultOperandCertSecretName
-			By("installing app cert")
-			InstallCert(appCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = appCertName
-				candidate.Spec.CommonName = appName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			By("creating app that references non-existent owner")
 			app := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -458,17 +425,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			registryAppName := NextSpecResourceName()
-			registryCertName := registryAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing registry app cert")
-			InstallCert(registryCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = registryCertName
-				candidate.Spec.CommonName = registryAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			By("creating address registry app (no capabilities, just declares addresses)")
 			registryApp := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -502,17 +458,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &registryApp)).Should(Succeed())
 
 			consumerAppName := NextSpecResourceName()
-			consumerCertName := consumerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing consumer app cert")
-			InstallCert(consumerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = consumerCertName
-				candidate.Spec.CommonName = consumerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			By("creating consumer app that references 'events' from registry")
 			consumerApp := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -631,17 +576,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			ownerAppName := NextSpecResourceName()
-			ownerCertName := ownerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing owner app cert")
-			InstallCert(ownerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = ownerCertName
-				candidate.Spec.CommonName = ownerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			By("creating owner app that only declares 'events'")
 			ownerApp := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -670,17 +604,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
 
 			consumerAppName := NextSpecResourceName()
-			consumerCertName := consumerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing consumer app cert")
-			InstallCert(consumerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = consumerCertName
-				candidate.Spec.CommonName = consumerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			By("creating consumer app that tries to reference 'orders' (not declared)")
 			consumerApp := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -810,17 +733,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			app1Name := NextSpecResourceName()
-			app1CertName := app1Name + "-" + common.DefaultOperandCertSecretName
-			By("installing app1 cert")
-			InstallCert(app1CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app1CertName
-				candidate.Spec.CommonName = app1Name
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			By("creating app1 that declares 'orders' directly")
 			app1 := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -866,17 +778,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			app2Name := NextSpecResourceName()
-			app2CertName := app2Name + "-" + common.DefaultOperandCertSecretName
-			By("installing app2 cert")
-			InstallCert(app2CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app2CertName
-				candidate.Spec.CommonName = app2Name
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
-
 			By("creating app2 that also declares 'orders' directly (clash!)")
 			app2 := broker.BrokerApp{
 				TypeMeta: metav1.TypeMeta{
@@ -1208,16 +1109,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			ownerAppName := NextSpecResourceName()
-			ownerCertName := ownerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing owner app cert")
-			InstallCert(ownerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = ownerCertName
-				candidate.Spec.CommonName = ownerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating owner app with private address (no sharing selectors)")
 			ownerApp := broker.BrokerApp{
@@ -1255,16 +1146,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
 
 			consumerAppName := NextSpecResourceName()
-			consumerCertName := consumerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing consumer app cert")
-			InstallCert(consumerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = consumerCertName
-				candidate.Spec.CommonName = consumerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating consumer app that tries to reference private address")
 			consumerApp := broker.BrokerApp{
@@ -1402,16 +1283,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			ownerAppName := NextSpecResourceName()
-			ownerCertName := ownerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing owner app cert")
-			InstallCert(ownerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = ownerCertName
-				candidate.Spec.CommonName = ownerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating owner app with private address (Addresses only, not in SharedAddresses)")
 			ownerApp := broker.BrokerApp{
@@ -1448,16 +1319,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			InstallAppCert(&ownerApp)
 
 			consumerAppName := NextSpecResourceName()
-			consumerCertName := consumerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing consumer app cert")
-			InstallCert(consumerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = consumerCertName
-				candidate.Spec.CommonName = consumerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating consumer app that tries to reference private address")
 			consumerApp := broker.BrokerApp{
@@ -1608,16 +1469,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			ownerAppName := NextSpecResourceName()
-			ownerCertName := ownerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing owner app cert")
-			InstallCert(ownerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = ownerCertName
-				candidate.Spec.CommonName = ownerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating owner app with shared address (CEL selector)")
 			ownerApp := broker.BrokerApp{
@@ -1654,16 +1505,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &ownerApp)).Should(Succeed())
 
 			consumerAppName := NextSpecResourceName()
-			consumerCertName := consumerAppName + "-" + common.DefaultOperandCertSecretName
-			By("installing consumer app cert")
-			InstallCert(consumerCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = consumerCertName
-				candidate.Spec.CommonName = consumerAppName
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating consumer app that references shared address owner")
 			consumerApp := broker.BrokerApp{
@@ -1783,16 +1624,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			app1Name := NextSpecResourceName()
-			app1CertName := app1Name + "-" + common.DefaultOperandCertSecretName
-			By("installing app1 cert")
-			InstallCert(app1CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app1CertName
-				candidate.Spec.CommonName = app1Name
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating app1 with shared address")
 			app1 := broker.BrokerApp{
@@ -1837,16 +1668,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			app2Name := NextSpecResourceName()
-			app2CertName := app2Name + "-" + common.DefaultOperandCertSecretName
-			By("installing app2 cert")
-			InstallCert(app2CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app2CertName
-				candidate.Spec.CommonName = app2Name
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating app2 that also declares 'api' as shared address (clash!)")
 			app2 := broker.BrokerApp{
@@ -1971,16 +1792,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
 
 			app1Name := NextSpecResourceName()
-			app1CertName := app1Name + "-" + common.DefaultOperandCertSecretName
-			By("installing app1 cert")
-			InstallCert(app1CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app1CertName
-				candidate.Spec.CommonName = app1Name
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating app1 with address in Addresses (private)")
 			app1 := broker.BrokerApp{
@@ -2025,16 +1836,6 @@ var _ = Describe("broker-service address sharing scenarios", Label("bsvc"), func
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
 			app2Name := NextSpecResourceName()
-			app2CertName := app2Name + "-" + common.DefaultOperandCertSecretName
-			By("installing app2 cert")
-			InstallCert(app2CertName, defaultNamespace, func(candidate *cmv1.Certificate) {
-				candidate.Spec.SecretName = app2CertName
-				candidate.Spec.CommonName = app2Name
-				candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-					Name: caIssuer.Name,
-					Kind: "ClusterIssuer",
-				}
-			})
 
 			By("creating app2 that declares same address as shared (clash!)")
 			app2 := broker.BrokerApp{
