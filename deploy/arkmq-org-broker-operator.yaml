@@ -9556,7 +9556,8 @@ spec:
                           pubSub:
                             description: |-
                               PubSub declares publish/subscribe (pubSub) semantics.
-                              Used with ProducerOf, to declare pubSub semantics.
+                              When omitted and the address is declared in spec.addresses, the routing
+                              type is inherited from the declaration.
                             type: boolean
                           subscriptions:
                             description: |-
@@ -9585,7 +9586,8 @@ spec:
                           pubSub:
                             description: |-
                               PubSub declares publish/subscribe (pubSub) semantics.
-                              Used with ProducerOf, to declare pubSub semantics.
+                              When omitted and the address is declared in spec.addresses, the routing
+                              type is inherited from the declaration.
                             type: boolean
                           subscriptions:
                             description: |-
@@ -9777,7 +9779,8 @@ spec:
                                   pubSub:
                                     description: |-
                                       PubSub declares publish/subscribe (pubSub) semantics.
-                                      Used with ProducerOf, to declare pubSub semantics.
+                                      When omitted and the address is declared in spec.addresses, the routing
+                                      type is inherited from the declaration.
                                     type: boolean
                                   subscriptions:
                                     description: |-
@@ -9806,7 +9809,8 @@ spec:
                                   pubSub:
                                     description: |-
                                       PubSub declares publish/subscribe (pubSub) semantics.
-                                      Used with ProducerOf, to declare pubSub semantics.
+                                      When omitted and the address is declared in spec.addresses, the routing
+                                      type is inherited from the declaration.
                                     type: boolean
                                   subscriptions:
                                     description: |-

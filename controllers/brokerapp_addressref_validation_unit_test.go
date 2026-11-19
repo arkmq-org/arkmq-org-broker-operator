@@ -184,7 +184,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 					{Address: "orders"},
 				},
 			}
-			err := validateCapabilityRoutingConsistency(cap)
+			err := validateCapabilityRoutingConsistency(cap, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("orders"))
 			Expect(err.Error()).To(ContainSubstring("consistent semantics"))
@@ -199,7 +199,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 					{Address: "events", PubSub: boolPtr(true), Subscriptions: []string{"sub1"}},
 				},
 			}
-			Expect(validateCapabilityRoutingConsistency(cap)).To(Succeed())
+			Expect(validateCapabilityRoutingConsistency(cap, nil)).To(Succeed())
 		})
 
 		It("accepts consistent anycast routing", Label(unitLabel), func() {
@@ -211,7 +211,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 					{Address: "commands"},
 				},
 			}
-			Expect(validateCapabilityRoutingConsistency(cap)).To(Succeed())
+			Expect(validateCapabilityRoutingConsistency(cap, nil)).To(Succeed())
 		})
 
 		It("skips cross-app refs in consistency check", Label(unitLabel), func() {
@@ -223,7 +223,48 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 					{Address: "events", AppNamespace: "other-ns", AppName: "other-app"},
 				},
 			}
-			Expect(validateCapabilityRoutingConsistency(cap)).To(Succeed())
+			Expect(validateCapabilityRoutingConsistency(cap, nil)).To(Succeed())
+		})
+
+		It("inherits multicast from declared address when ProducerOf has no routing signal", Label(unitLabel), func() {
+			declared := map[string]bool{"events": true}
+			cap := broker.AppCapabilityType{
+				ProducerOf: []broker.AddressRef{
+					{Address: "events"},
+				},
+				ConsumerOf: []broker.AddressRef{
+					{Address: "events", Subscriptions: []string{"sub1"}},
+				},
+			}
+			Expect(validateCapabilityRoutingConsistency(cap, declared)).To(Succeed())
+		})
+
+		It("rejects explicit anycast ProducerOf when declared address is multicast", Label(unitLabel), func() {
+			declared := map[string]bool{"events": true}
+			cap := broker.AppCapabilityType{
+				ProducerOf: []broker.AddressRef{
+					{Address: "events", PubSub: boolPtr(false)},
+				},
+				ConsumerOf: []broker.AddressRef{
+					{Address: "events", Subscriptions: []string{"sub1"}},
+				},
+			}
+			err := validateCapabilityRoutingConsistency(cap, declared)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("no inheritance when address is not in spec.addresses", Label(unitLabel), func() {
+			cap := broker.AppCapabilityType{
+				ProducerOf: []broker.AddressRef{
+					{Address: "orders"},
+				},
+				ConsumerOf: []broker.AddressRef{
+					{Address: "orders", Subscriptions: []string{"sub1"}},
+				},
+			}
+			err := validateCapabilityRoutingConsistency(cap, nil)
+			Expect(err).To(HaveOccurred(),
+				"without declared address, ProducerOf defaults to anycast conflicting with multicast ConsumerOf")
 		})
 	})
 })

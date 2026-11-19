@@ -975,7 +975,11 @@ func (reconciler *BrokerServiceInstanceReconciler) buildAddressTracker(app *brok
 		for _, addressRef := range capability.ConsumerOf {
 			entry = addressTracker.track(&addressRef)
 
-			if !isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions) {
+			refIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
+			if !refIsMulticast && !hasExplicitRoutingSignal(&addressRef) && entry.isOwned {
+				refIsMulticast = entry.isMulticast
+			}
+			if !refIsMulticast {
 				entry.consumerRoles[role] = role
 
 				if entry.isOwned && entry.isMulticast {

@@ -71,7 +71,7 @@ var _ = Describe("brokerapp deployed condition", func() {
 				},
 				Capabilities: []v1beta2.AppCapabilityType{{
 					ConsumerOf: []v1beta2.AddressRef{
-						{Address: "conflicting-address"},
+						{Address: "conflicting-address", PubSub: func() *bool { b := false; return &b }()},
 					},
 				}},
 			},
@@ -179,7 +179,7 @@ var _ = Describe("brokerapp deployed condition", func() {
 				},
 				Capabilities: []v1beta2.AppCapabilityType{{
 					ConsumerOf: []v1beta2.AddressRef{
-						{Address: "conflicting-address"},
+						{Address: "conflicting-address", PubSub: func() *bool { b := false; return &b }()},
 					},
 				}},
 			},
@@ -258,7 +258,7 @@ var _ = Describe("brokerapp deployed condition", func() {
 				},
 				Capabilities: []v1beta2.AppCapabilityType{{
 					ConsumerOf: []v1beta2.AddressRef{
-						{Address: "conflicting-address"},
+						{Address: "conflicting-address", PubSub: func() *bool { b := false; return &b }()},
 					},
 				}},
 			},
