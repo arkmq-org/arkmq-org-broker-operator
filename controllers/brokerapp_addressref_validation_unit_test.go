@@ -18,6 +18,12 @@ import (
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/go-logr/logr"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -219,5 +225,116 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 			}
 			Expect(validateCapabilityRoutingConsistency(cap)).To(Succeed())
 		})
+	})
+})
+
+var _ = Describe("checkAddressSharing uses BoundSpec", Label(unitLabel), func() {
+
+	newReconciler := func(consumerApp *broker.BrokerApp) BrokerAppInstanceReconciler {
+		scheme := runtime.NewScheme()
+		_ = broker.AddToScheme(scheme)
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		return BrokerAppInstanceReconciler{
+			BrokerAppReconciler: &BrokerAppReconciler{
+				ReconcilerLoop: &ReconcilerLoop{
+					KubeBits: &KubeBits{Client: cl, log: logr.New(log.NullLogSink{})},
+				},
+			},
+			instance: consumerApp,
+			status:   consumerApp.Status.DeepCopy(),
+		}
+	}
+
+	It("validates against BoundSpec when owner has unvalidated spec change", Label(unitLabel), func() {
+		ns := "default"
+
+		ownerApp := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{Name: "owner", Namespace: ns},
+			Spec: broker.BrokerAppSpec{
+				Addresses: []broker.AddressType{
+					{Address: "events", ConsumerOfAppSelector: "true", Subscriptions: []string{"sub1"}},
+				},
+			},
+			Status: broker.BrokerAppStatus{
+				BoundSpec: &broker.AppBoundSpec{
+					Generation: 1,
+					Spec: broker.BrokerAppSpec{
+						Addresses: []broker.AddressType{
+							{Address: "events", ConsumerOfAppSelector: "true"},
+						},
+					},
+				},
+			},
+		}
+
+		consumerApp := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{Name: "consumer", Namespace: ns},
+		}
+
+		reconciler := newReconciler(consumerApp)
+		ref := broker.AddressRef{Address: "events", AppName: "owner"}
+
+		err := reconciler.checkAddressSharing(ownerApp, ref, "consumer")
+		Expect(err).ToNot(HaveOccurred(),
+			"should validate against BoundSpec (anycast) not live Spec (multicast)")
+	})
+
+	It("rejects when BoundSpec also has multicast mismatch", Label(unitLabel), func() {
+		ns := "default"
+
+		ownerApp := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{Name: "owner", Namespace: ns},
+			Spec: broker.BrokerAppSpec{
+				Addresses: []broker.AddressType{
+					{Address: "events", ConsumerOfAppSelector: "true", Subscriptions: []string{"sub1"}},
+				},
+			},
+			Status: broker.BrokerAppStatus{
+				BoundSpec: &broker.AppBoundSpec{
+					Generation: 1,
+					Spec: broker.BrokerAppSpec{
+						Addresses: []broker.AddressType{
+							{Address: "events", ConsumerOfAppSelector: "true", Subscriptions: []string{"sub1"}},
+						},
+					},
+				},
+			},
+		}
+
+		consumerApp := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{Name: "consumer", Namespace: ns},
+		}
+
+		reconciler := newReconciler(consumerApp)
+		ref := broker.AddressRef{Address: "events", AppName: "owner"}
+
+		err := reconciler.checkAddressSharing(ownerApp, ref, "consumer")
+		Expect(err).To(HaveOccurred(),
+			"should reject when BoundSpec also has multicast but consumer references anycast")
+		Expect(err.Error()).To(ContainSubstring("pubSub"))
+	})
+
+	It("falls back to Spec when BoundSpec is nil", Label(unitLabel), func() {
+		ns := "default"
+
+		ownerApp := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{Name: "owner", Namespace: ns},
+			Spec: broker.BrokerAppSpec{
+				Addresses: []broker.AddressType{
+					{Address: "events", ConsumerOfAppSelector: "true"},
+				},
+			},
+		}
+
+		consumerApp := &broker.BrokerApp{
+			ObjectMeta: v1.ObjectMeta{Name: "consumer", Namespace: ns},
+		}
+
+		reconciler := newReconciler(consumerApp)
+		ref := broker.AddressRef{Address: "events", AppName: "owner"}
+
+		err := reconciler.checkAddressSharing(ownerApp, ref, "consumer")
+		Expect(err).ToNot(HaveOccurred(),
+			"should fall back to Spec when BoundSpec is nil (new app not yet deployed)")
 	})
 })
