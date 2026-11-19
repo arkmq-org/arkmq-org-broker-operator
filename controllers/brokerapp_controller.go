@@ -1111,9 +1111,14 @@ func (reconciler *BrokerAppInstanceReconciler) checkAddressSharing(
 		refNamespace = reconciler.instance.Namespace
 	}
 
+	ownerAddresses := referencedApp.Spec.Addresses
+	if referencedApp.Status.BoundSpec != nil {
+		ownerAddresses = referencedApp.Status.BoundSpec.Spec.Addresses
+	}
+
 	addressShared := false
 	var ownerIsMulticast bool
-	for _, addr := range referencedApp.Spec.Addresses {
+	for _, addr := range ownerAddresses {
 		if addr.Address != addressRef.Address {
 			continue
 		}
