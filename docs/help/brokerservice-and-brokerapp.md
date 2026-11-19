@@ -236,7 +236,6 @@ spec:
   capabilities:
     - producerOf:
         - address: APP.EVENTS
-          pubSub: true
       consumerOf:
         - address: APP.EVENTS
           subscriptions:
@@ -244,7 +243,7 @@ spec:
             - client-2.events-sub
 ```
 
-When `pubSub` is true, consumers receive a copy of each message via their named subscription. Producers declare `pubSub: true` but do not specify subscriptions. Consumers must specify at least one subscription name.
+When `pubSub` is true, consumers receive a copy of each message via their named subscription. Capability references that target an address declared in `spec.addresses` inherit the routing type from the declaration, so `producerOf` does not need to repeat `pubSub: true`. Consumers must specify at least one subscription name.
 
 ### Status
 

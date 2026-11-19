@@ -210,7 +210,7 @@ var _ = Describe("broker-service multi-app scenarios", Label("bsvc"), func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AddressRef{{Address: "APP2.TOPIC"}},
+							ProducerOf: []broker.AddressRef{{Address: "APP2.TOPIC", PubSub: &boolTrue}},
 							ConsumerOf: []broker.AddressRef{
 								{
 									Address:       "APP2.TOPIC",

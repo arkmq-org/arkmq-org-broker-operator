@@ -82,7 +82,8 @@ type AddressRef struct {
 	AppName string `json:"appName,omitempty"`
 
 	// PubSub declares publish/subscribe (pubSub) semantics.
-	// Used with ProducerOf, to declare pubSub semantics.
+	// When omitted and the address is declared in spec.addresses, the routing
+	// type is inherited from the declaration.
 	// +optional
 	PubSub *bool `json:"pubSub,omitempty"`
 

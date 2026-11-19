@@ -730,7 +730,9 @@ var _ = Describe("broker-service address post-binding validation", Label("bsvc")
 				// Change existing address to multicast by adding subscriptions (implicit pubSub inference)
 				updatedOwner.Spec.Addresses[0].Subscriptions = []string{"sub1"}
 
-				// ProducerOf is still with an anycast reference, should be invalid
+				// ProducerOf explicitly declares anycast, conflicting with the now-multicast address
+				pubSubFalse := false
+				updatedOwner.Spec.Capabilities[0].ProducerOf[0].PubSub = &pubSubFalse
 
 				g.Expect(k8sClient.Update(ctx, updatedOwner)).Should(Succeed())
 			}, timeout, interval).Should(Succeed())
@@ -744,18 +746,18 @@ var _ = Describe("broker-service address post-binding validation", Label("bsvc")
 					fmt.Printf("invalid? owner STATUS: %v\n", createdOwner.Status)
 				}
 
-				deployedCond := meta.FindStatusCondition(createdOwner.Status.Conditions, broker.DeployedConditionType)
-				g.Expect(deployedCond).ShouldNot(BeNil())
-				g.Expect(deployedCond.Status).Should(Equal(metav1.ConditionTrue))
-				g.Expect(deployedCond.ObservedGeneration).To(BeNumerically(">", 0))
-				g.Expect(deployedCond.ObservedGeneration).To(BeNumerically("<", createdOwner.Generation))
-
 				validCond := meta.FindStatusCondition(createdOwner.Status.Conditions, broker.ValidConditionType)
 				g.Expect(validCond).ShouldNot(BeNil())
 				g.Expect(validCond.Status).Should(Equal(metav1.ConditionFalse))
 				g.Expect(validCond.Reason).Should(Equal(broker.ValidConditionAddressTypeError))
 				g.Expect(validCond.ObservedGeneration).Should(Equal(createdOwner.Generation))
 				g.Expect(createdOwner.Status.ObservedGeneration).Should(Equal(createdOwner.Generation))
+
+				deployedCond := meta.FindStatusCondition(createdOwner.Status.Conditions, broker.DeployedConditionType)
+				g.Expect(deployedCond).ShouldNot(BeNil())
+				g.Expect(deployedCond.Status).Should(Equal(metav1.ConditionTrue))
+				g.Expect(deployedCond.ObservedGeneration).To(BeNumerically(">", 0))
+				g.Expect(deployedCond.ObservedGeneration).To(BeNumerically("<", createdOwner.Generation))
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 

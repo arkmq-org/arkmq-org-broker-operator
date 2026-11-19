@@ -63,6 +63,10 @@ func isMulticastAddress(pubSub *bool, subscriptions []string) bool {
 	return (pubSub != nil && *pubSub) || len(subscriptions) > 0
 }
 
+func hasExplicitRoutingSignal(ref *broker.AddressRef) bool {
+	return ref.PubSub != nil || len(ref.Subscriptions) > 0
+}
+
 // extractBaseAddress extracts the base address from a potentially FQQN format address
 // E.g., "events::queue1" returns "events", "orders" returns "orders"
 func extractBaseAddress(address string) string {
@@ -1211,26 +1215,27 @@ func validateConsumerOfRef(ref broker.AddressRef, index int) error {
 	return nil
 }
 
-func validateCapabilityRoutingConsistency(capability broker.AppCapabilityType) error {
+func validateCapabilityRoutingConsistency(capability broker.AppCapabilityType, declaredAddresses map[string]bool) error {
 	addressRoutingTypes := make(map[string]bool)
 
-	for _, ref := range capability.ProducerOf {
+	for i := range capability.ProducerOf {
+		ref := &capability.ProducerOf[i]
 		if ref.AppNamespace == "" && ref.AppName == "" {
-			if isMulticastAddress(ref.PubSub, ref.Subscriptions) {
-				if prevType, exists := addressRoutingTypes[ref.Address]; exists && !prevType {
-					return fmt.Errorf(
-						"address '%s' is referenced with both pubSub and non pubSub semantics in the same capability. "+
-							"Shared addresses must use consistent semantics",
-						ref.Address)
-				}
-				addressRoutingTypes[ref.Address] = true
+			isMulticast := resolveMulticast(ref, declaredAddresses)
+			if prevType, exists := addressRoutingTypes[ref.Address]; exists && prevType != isMulticast {
+				return fmt.Errorf(
+					"address '%s' is referenced with both pubSub and non pubSub semantics in the same capability. "+
+						"Shared addresses must use consistent semantics",
+					ref.Address)
 			}
+			addressRoutingTypes[ref.Address] = isMulticast
 		}
 	}
 
-	for _, ref := range capability.ConsumerOf {
+	for i := range capability.ConsumerOf {
+		ref := &capability.ConsumerOf[i]
 		if ref.AppNamespace == "" && ref.AppName == "" {
-			isMulticast := isMulticastAddress(ref.PubSub, ref.Subscriptions)
+			isMulticast := resolveMulticast(ref, declaredAddresses)
 			if prevType, exists := addressRoutingTypes[ref.Address]; exists && prevType != isMulticast {
 				return fmt.Errorf(
 					"address '%s' is referenced with both pubSub and non pubSub semantics in the same capability. "+
@@ -1245,6 +1250,11 @@ func validateCapabilityRoutingConsistency(capability broker.AppCapabilityType) e
 }
 
 func (reconciler *BrokerAppInstanceReconciler) verifyCapabilityAddressType() error {
+	declaredAddresses := make(map[string]bool)
+	for _, addr := range reconciler.instance.Spec.Addresses {
+		declaredAddresses[addr.Address] = isMulticastAddress(addr.PubSub, addr.Subscriptions)
+	}
+
 	for _, capability := range reconciler.instance.Spec.Capabilities {
 		for i, ref := range capability.ProducerOf {
 			if err := validateProducerOfRef(ref, i); err != nil {
@@ -1256,7 +1266,7 @@ func (reconciler *BrokerAppInstanceReconciler) verifyCapabilityAddressType() err
 				return NewValidationError(broker.ValidConditionAddressTypeError, "%v", err)
 			}
 		}
-		if err := validateCapabilityRoutingConsistency(capability); err != nil {
+		if err := validateCapabilityRoutingConsistency(capability, declaredAddresses); err != nil {
 			return NewValidationError(broker.ValidConditionAddressTypeError, "%v", err)
 		}
 	}
@@ -1297,6 +1307,9 @@ func validateAddressRefConsistency(addressRef broker.AddressRef, declaredAddress
 	if !isDeclared {
 		return nil
 	}
+	if !hasExplicitRoutingSignal(&addressRef) {
+		return nil
+	}
 	usageIsMulticast := isMulticastAddress(addressRef.PubSub, addressRef.Subscriptions)
 	if declaredIsMulticast == usageIsMulticast {
 		return nil
@@ -1311,6 +1324,16 @@ func validateAddressRefConsistency(addressRef broker.AddressRef, declaredAddress
 			"but is used %s pubSub semantics in capabilities.%s. "+
 			"Address declaration and usage must have consistent routing semantics",
 		addressRef.Address, declaredMode, usageMode, role)
+}
+
+func resolveMulticast(ref *broker.AddressRef, declaredAddresses map[string]bool) bool {
+	if hasExplicitRoutingSignal(ref) {
+		return isMulticastAddress(ref.PubSub, ref.Subscriptions)
+	}
+	if declaredIsMulticast, isDeclared := declaredAddresses[ref.Address]; isDeclared {
+		return declaredIsMulticast
+	}
+	return false
 }
 
 func (reconciler *BrokerAppInstanceReconciler) processStatus(reconcilerError error) error {
