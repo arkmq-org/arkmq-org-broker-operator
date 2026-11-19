@@ -127,15 +127,18 @@ minikube start \
   --disk-size 20000
 ```
 ```shell markdown_runner
-* [acme-identity-pipeline] minikube v1.37.0 sur Fedora 44
-  - MINIKUBE_ROOTLESS=true
-* Choix automatique du pilote kvm2. Autres choix: qemu2, podman, ssh
-* Démarrage du nœud "acme-identity-pipeline" primary control-plane dans le cluster "acme-identity-pipeline"
-* Configuration de bridge CNI (Container Networking Interface)...
-* Vérification des composants Kubernetes...
-  - Utilisation de l'image gcr.io/k8s-minikube/storage-provisioner:v5
-* Modules activés: storage-provisioner, default-storageclass
-* Terminé ! kubectl est maintenant configuré pour utiliser "acme-identity-pipeline" cluster et espace de noms "default" par défaut.
+* [acme-identity-pipeline] minikube v1.38.1 on Fedora 45
+* Automatically selected the kvm2 driver. Other choices: qemu2, podman, ssh
+* Starting "acme-identity-pipeline" primary control-plane node in "acme-identity-pipeline" cluster
+* Configuring bridge CNI (Container Networking Interface) ...
+* Verifying Kubernetes components...
+  - Using image gcr.io/k8s-minikube/storage-provisioner:v5
+* Enabled addons: default-storageclass, storage-provisioner
+
+  - Want kubectl v1.35.1? Try 'minikube kubectl -- get pods -A'
+* Done! kubectl is now configured to use "acme-identity-pipeline" cluster and "default" namespace by default
+! Starting v1.39.0, minikube will default to "containerd" container runtime. See #21973 for more info.
+! /usr/bin/kubectl is version 1.37.2, which may have incompatibilities with Kubernetes 1.35.1.
 ```
 
 ### Build the Acme App Image
@@ -167,61 +170,61 @@ fi
 ```shell markdown_runner
 [1/2] STEP 1/8: FROM registry.access.redhat.com/ubi9/openjdk-21 AS builder
 [1/2] STEP 2/8: USER root
---> Using cache 3e5bf15dd426ca024d7a3af3b4f4a6c59d227d8c5a9922958d323eca6be39613
---> 3e5bf15dd426
+--> Using cache ec878c6d572b1d18b17bedf8607e5441ddf66e6eb05cc90c75a43e8e8586ce86
+--> ec878c6d572b
 [1/2] STEP 3/8: WORKDIR /build
---> Using cache 5ce706c5e3af56fde0bdcc58b3779e70093e2f3076d3a9fa96ed48b2b23f362f
---> 5ce706c5e3af
+--> Using cache 2c0966901013a0e00c5561d652559c7024904d83fcd8b47b89412036d52282f4
+--> 2c0966901013
 [1/2] STEP 4/8: RUN microdnf install -y maven --setopt=install_weak_deps=0 && microdnf clean all
---> Using cache e5d815cb03f5046a3b7aece3f9e14f0dcccf7a22aad181e87dfe812da3051b77
---> e5d815cb03f5
+--> Using cache 40f912a3093e71a0c3d6dcabfcb07821eae72c468cce7e63925e171b75ccd41e
+--> 40f912a3093e
 [1/2] STEP 5/8: COPY pom.xml pom.xml
---> Using cache 127c0870930552aeb55748c1add39fe5ae322d25522c52abaa1f80e7d85bec04
---> 127c08709305
+--> Using cache 54691abe160a88de79b942e03241fe4f601f989b7d0209c8e87c65f4a11bbaf3
+--> 54691abe160a
 [1/2] STEP 6/8: RUN mvn dependency:resolve-plugins dependency:resolve -q
---> Using cache c794b57056caf737bda94552f739d26308d6e639e82ccc92eb08df67e19f1789
---> c794b57056ca
+--> Using cache 7d466d1c4d8131b0c3a765678fb0ff944e071380e87731c8ec42bcfdd92d0fe5
+--> 7d466d1c4d81
 [1/2] STEP 7/8: COPY src/ src/
---> Using cache f22106f0f6dd78368924d96d8b564f22fa77d8afdc55fd05f4409e9cdf5bce9b
---> f22106f0f6dd
+--> Using cache 0372a32bce6d181dc3a6060bc31d9e9ac462643489fc8d0380eb11ab4bef278b
+--> 0372a32bce6d
 [1/2] STEP 8/8: RUN mvn package -DskipTests -q
---> Using cache 1b1c774d99f96560b70d0f2781f4256b410a8ad4c668d221f3ada0aa456f8713
---> 1b1c774d99f9
+--> Using cache e00c4622ea7abd6a6facfe8c48637d50aaa33f4961c9a0209ceacb946407c07d
+--> e00c4622ea7a
 [2/2] STEP 1/9: FROM registry.access.redhat.com/ubi9/openjdk-21-runtime
 [2/2] STEP 2/9: ENV LANGUAGE='en_US:en'
---> Using cache ca3fea98387789c1abb5c26cba3a713d7b21135a8f2a8141c2e3199bd9bbbd51
---> ca3fea983877
+--> Using cache 5e15ef5522c2d443f6a8c7435436f0b96d79d8603adf4b55c2aaa4c59c1263f0
+--> 5e15ef5522c2
 [2/2] STEP 3/9: COPY --chown=185 --from=builder /build/target/quarkus-app/lib/       /deployments/lib/
---> Using cache 0c30b0c3f88ce8181a6f765678f7109fcc552d78ff1bfdd213d15e0b9a5429f8
---> 0c30b0c3f88c
+--> Using cache a5198e6607a081d840ea349a0dc68abbb453b3dd9d75a07786ac5f98595c6f41
+--> a5198e6607a0
 [2/2] STEP 4/9: COPY --chown=185 --from=builder /build/target/quarkus-app/*.jar       /deployments/
---> Using cache 83fd5b81872582969f756bbade89bb580782f102725e2f5a07d8c494b52b5bdc
---> 83fd5b818725
+--> Using cache 989283b7c176c116d07a65ae2f35b2393daa6ef101fd1f37a19df178386d50d8
+--> 989283b7c176
 [2/2] STEP 5/9: COPY --chown=185 --from=builder /build/target/quarkus-app/app/        /deployments/app/
---> Using cache 302de2b02e1b8663c67b83d0fd88585fcf631d74435f71e14cda79080601085d
---> 302de2b02e1b
+--> Using cache 95f6e87f5bdf17f0d70807e28303c7eb5770a195cf97b76053c795d943254e50
+--> 95f6e87f5bdf
 [2/2] STEP 6/9: COPY --chown=185 --from=builder /build/target/quarkus-app/quarkus/    /deployments/quarkus/
---> Using cache 7e008a0df2e35c3a567b92ace928453bac49bc69a46c0103eb7906545a76d7f5
---> 7e008a0df2e3
+--> Using cache 64113a5ced0a02b8992869859f2b3a2777e0042c3cf67c273484afaa54cf7c53
+--> 64113a5ced0a
 [2/2] STEP 7/9: USER 185
---> Using cache 1e4286f84a4c12d08e0f75b06cf56028e6afb775c6b8900f5ab73e0b57935d78
---> 1e4286f84a4c
+--> Using cache a864fcd39f68df2ce6a5c24aa41ba94b2350222693ddf175c6172318c9fdac9b
+--> a864fcd39f68
 [2/2] STEP 8/9: ENV JAVA_OPTS_APPEND="-Djava.util.logging.manager=org.jboss.logmanager.LogManager -Xbootclasspath/a:/deployments/lib/main/de.dentrassi.crypto.pem-keystore-3.0.0.jar:/deployments/lib/main/com.hierynomus.asn-one-0.6.0.jar:/deployments/lib/main/org.slf4j.slf4j-api-2.0.18.jar -Djava.security.properties=/app/tls/pem/java.security"
---> Using cache 5b4413358fc89528861189e20f56fde66d72f61550b42a8f8351ffbc30f3be93
---> 5b4413358fc8
+--> Using cache 7dae8c00a06cd93285c999b1a936f337aa0d87765934fcc7846ae64e23e5472a
+--> 7dae8c00a06c
 [2/2] STEP 9/9: ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
---> Using cache 5f9f2d434832a2b6b5bbd1d09c130578cda93ab05cc5d39097c65e152c9dec60
+--> Using cache a42d4330f14956c7dfe71977dbb8ac577e4f7c76ba425235826d5b615c6744f0
 [2/2] COMMIT acme-app:latest
---> 5f9f2d434832
+--> a42d4330f149
 Successfully tagged localhost/acme-app:latest
-5f9f2d434832a2b6b5bbd1d09c130578cda93ab05cc5d39097c65e152c9dec60
-Copying blob sha256:e4279e5d4617765c246574388d5808fa588ef6f8c5781b304f7e2aa03f4cc646
-Copying blob sha256:af8c33f99484ff031ed34e92eeb29691c0ffc1457d877424fdb539ad3d4d95bf
-Copying blob sha256:d8d5182ad24d75cc4600834483ca6c740887133501e90c0ee740ebc1f7c70373
-Copying blob sha256:fa6a55069bc654ea16d83a2ec3a48a8bbaa7aa4769554e0b3a60d9ca8cbb0730
-Copying blob sha256:0e40076b0c8ffe98001abe1074637a6a280a752c28c3adb19644e8a8f988ca3a
-Copying blob sha256:92d6356dfae10a029cc1471ead100f8bc01dced76502e7cb87ed45c72800070d
-Copying config sha256:5f9f2d434832a2b6b5bbd1d09c130578cda93ab05cc5d39097c65e152c9dec60
+a42d4330f14956c7dfe71977dbb8ac577e4f7c76ba425235826d5b615c6744f0
+Copying blob sha256:cbc8310187019cbadb7ad4848279b7014d97977ccd972b808d0e13ad4b29b03a
+Copying blob sha256:0b0c2e09ba6d5f4ae2aeb2218309453134713b82e073e6035d26c08232c60363
+Copying blob sha256:10901bf7f3decce210b23430c9e11e89f3acca548cbb430d14a276591cebf86a
+Copying blob sha256:8234a5b119ac3c9cfc9e964b242c8e8ff3dffc3a2efc4a3cc15af7a3ed1b41d8
+Copying blob sha256:d690c2d869ddb73bb7c9d4e2741fe4803a3d32ea1e1d399502c2c9fef3c52410
+Copying blob sha256:9f227f3bf9e7c11a05af4b4868fd3fc1dc61af1fae0cf59853422b3a463fea1e
+Copying config sha256:a42d4330f14956c7dfe71977dbb8ac577e4f7c76ba425235826d5b615c6744f0
 Writing manifest to image destination
 ```
 
@@ -280,8 +283,6 @@ deployment.apps/cert-manager created
 deployment.apps/cert-manager-webhook created
 mutatingwebhookconfiguration.admissionregistration.k8s.io/cert-manager-webhook created
 validatingwebhookconfiguration.admissionregistration.k8s.io/cert-manager-webhook created
-Warning: unrecognized format "int32"
-Warning: unrecognized format "int64"
 ```
 
 ```bash {"stage":"init", "label":"wait for cert-manager", "runtime":"bash"}
@@ -323,7 +324,7 @@ helm upgrade trust-manager jetstack/trust-manager --install --namespace cert-man
 ```shell markdown_runner
 Release "trust-manager" does not exist. Installing it now.
 NAME: trust-manager
-LAST DEPLOYED: Mon Nov  2 15:52:31 2026
+LAST DEPLOYED: Thu Nov 19 20:02:22 2026
 NAMESPACE: cert-manager
 STATUS: deployed
 REVISION: 1
@@ -345,7 +346,6 @@ with creating your first bundle, check out the documentation on the
 cert-manager website:
 
 https://cert-manager.io/docs/projects/trust-manager/
-I1102 15:52:31.471674  259826 warnings.go:107] "Warning: unrecognized format \"int64\""
 ```
 
 ### Install kube-prometheus-stack
@@ -385,7 +385,7 @@ helm upgrade -i prometheus prometheus-community/kube-prometheus-stack \
 ```shell markdown_runner
 Release "prometheus" does not exist. Installing it now.
 NAME: prometheus
-LAST DEPLOYED: Mon Nov  2 15:52:49 2026
+LAST DEPLOYED: Thu Nov 19 20:02:45 2026
 NAMESPACE: acme-platform
 STATUS: deployed
 REVISION: 1
@@ -409,24 +409,6 @@ Get your grafana admin user password by running:
 
 
 Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
-I1102 15:52:48.192620  260107 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1102 15:52:48.192641  260107 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1102 15:52:48.352303  260107 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1102 15:52:48.352328  260107 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1102 15:52:48.383251  260107 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1102 15:52:48.383262  260107 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1102 15:52:48.417909  260107 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1102 15:52:48.616256  260107 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1102 15:52:48.616499  260107 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1102 15:52:48.806506  260107 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1102 15:52:48.806525  260107 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1102 15:52:48.855045  260107 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1102 15:52:49.015770  260107 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1102 15:52:49.015788  260107 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1102 15:52:49.046856  260107 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1102 15:52:49.184547  260107 warnings.go:107] "Warning: unrecognized format \"int32\""
-I1102 15:52:49.184565  260107 warnings.go:107] "Warning: unrecognized format \"int64\""
-I1102 15:52:56.765084  260107 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
 ```
 
 ```bash {"stage":"init", "label":"wait for prometheus stack", "runtime":"bash"}
@@ -448,9 +430,9 @@ echo "" | ./deploy/cluster_wide_install_opr.sh
 ```
 ```shell markdown_runner
 Deploying cluster-wide operator
-Client Version: 4.18.5
-Kustomize Version: v5.4.2
-Kubernetes Version: v1.34.0
+Client Version: 4.22.0-202607220441.p2.g7ec2e14.assembly.stream.el9-7ec2e14
+Kustomize Version: v5.7.1
+Kubernetes Version: v1.35.1
 customresourcedefinition.apiextensions.k8s.io/activemqartemises.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisaddresses.broker.amq.io created
 customresourcedefinition.apiextensions.k8s.io/activemqartemisscaledowns.broker.amq.io created
@@ -466,8 +448,6 @@ role.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-role created
 rolebinding.rbac.authorization.k8s.io/arkmq-org-broker-leader-election-rolebinding created
 networkpolicy.networking.k8s.io/arkmq-org-broker-controller-manager-netpol created
 deployment.apps/arkmq-org-broker-controller-manager created
-Warning: unrecognized format "int32"
-Warning: unrecognized format "int64"
 ```
 
 ```bash {"stage":"init", "label":"wait for operator", "runtime":"bash"}
@@ -1204,7 +1184,7 @@ export ACME_CA="${ACME_WORK}/acme-ca.crt"
 echo "Tokens will be issued by ${ACME_ISSUER}"
 ```
 ```shell markdown_runner
-Tokens will be issued by https://192.168.50.213:32000/realms/acme
+Tokens will be issued by https://192.168.50.196:32000/realms/acme
 ```
 
 ### Deploy Keycloak
@@ -1365,7 +1345,7 @@ echo "Keycloak is up, issuer ${ACME_ISSUER}, password grant enabled"
 ```shell markdown_runner
 certificate.cert-manager.io/keycloak-tls condition met
 deployment.apps/keycloak condition met
-Keycloak is up, issuer https://192.168.50.213:32000/realms/acme, password grant enabled
+Keycloak is up, issuer https://192.168.50.196:32000/realms/acme, password grant enabled
 ```
 
 ### Turn OIDC on in the API server
@@ -1392,21 +1372,23 @@ minikube start \
   --extra-config=apiserver.oidc-ca-file=/var/lib/minikube/certs/acme-ca.crt
 ```
 ```shell markdown_runner
-* [acme-identity-pipeline] minikube v1.37.0 sur Fedora 44
-  - MINIKUBE_IP=192.168.50.213
-  - MINIKUBE_ROOTLESS=true
-* Utilisation du pilote kvm2 basé sur le profil existant
-* Démarrage du nœud "acme-identity-pipeline" primary control-plane dans le cluster "acme-identity-pipeline"
-  - apiserver.oidc-issuer-url=https://192.168.50.213:32000/realms/acme
+* [acme-identity-pipeline] minikube v1.38.1 on Fedora 45
+  - MINIKUBE_IP=192.168.50.196
+* Using the kvm2 driver based on existing profile
+* Starting "acme-identity-pipeline" primary control-plane node in "acme-identity-pipeline" cluster
+  - apiserver.oidc-issuer-url=https://192.168.50.196:32000/realms/acme
   - apiserver.oidc-client-id=kubernetes
   - apiserver.oidc-username-claim=preferred_username
   - apiserver.oidc-username-prefix=-
   - apiserver.oidc-ca-file=/var/lib/minikube/certs/acme-ca.crt
-* Configuration de bridge CNI (Container Networking Interface)...
-* Vérification des composants Kubernetes...
-  - Utilisation de l'image gcr.io/k8s-minikube/storage-provisioner:v5
-* Modules activés: storage-provisioner, default-storageclass
-* Terminé ! kubectl est maintenant configuré pour utiliser "acme-identity-pipeline" cluster et espace de noms "default" par défaut.
+* Configuring bridge CNI (Container Networking Interface) ...
+  - Using image gcr.io/k8s-minikube/storage-provisioner:v5
+* Verifying Kubernetes components...
+* Enabled addons: storage-provisioner, default-storageclass
+
+  - Want kubectl v1.35.1? Try 'minikube kubectl -- get pods -A'
+* Done! kubectl is now configured to use "acme-identity-pipeline" cluster and "default" namespace by default
+! /usr/bin/kubectl is version 1.37.2, which may have incompatibilities with Kubernetes 1.35.1.
 ```
 
 The restart brings every pod back, in no particular order. The chunk below waits for the ones the next steps depend on: the node, the API server with its new flags, the cert-manager webhook (it answers `connection refused` for a few seconds after a control-plane restart), Keycloak on its NodePort, and the operator. Then it waits for the API server to accept a Keycloak token: the OIDC authenticator fetches the issuer's keys in the background and retries every ten seconds while Keycloak is still starting, and until it has them every token is `Unauthorized`.
@@ -1448,7 +1430,7 @@ deployment.apps/trust-manager condition met
 Waiting for the cert-manager webhook to answer
 deployment.apps/keycloak condition met
 deployment.apps/arkmq-org-broker-controller-manager condition met
-API server trusts https://192.168.50.213:32000/realms/acme, and accepts its tokens
+API server trusts https://192.168.50.196:32000/realms/acme, and accepts its tokens
 ```
 
 ### First login
@@ -1468,12 +1450,12 @@ kubectl auth whoami
 ```
 ```shell markdown_runner
 User "alice" set.
-Context "alice" modified.
+Context "alice" created.
 Switched to context "alice".
 ATTRIBUTE                                           VALUE
 Username                                            alice
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=0cb86c8d-548f-9691-ab44-d0bd993425ba]
+Extra: authentication.kubernetes.io/credential-id   [JTI=27653b51-fb80-bea7-b8bd-465d5e11be17]
 ```
 
 Alice may create BrokerApps in her namespace, may read the catalog in other namespaces, and may not touch the brokers or another team's workloads. `kubectl auth can-i` exits non-zero on `no`, hence the `|| true` on the answers that are expected to be negative.
@@ -1510,7 +1492,7 @@ export TENANCY_URL="https://${MINIKUBE_IP}:32001"
 echo "Tenant-scoped Prometheus API at ${TENANCY_URL}"
 ```
 ```shell markdown_runner
-Tenant-scoped Prometheus API at https://192.168.50.213:32001
+Tenant-scoped Prometheus API at https://192.168.50.196:32001
 ```
 
 ```bash {"stage":"observability", "label":"deploy the tenancy proxy", "runtime":"bash"}
@@ -1707,7 +1689,7 @@ kubectl rollout status deployment prometheus-grafana -n acme-platform --timeout=
 secret/grafana-oauth created
 Release "prometheus" has been upgraded. Happy Helming!
 NAME: prometheus
-LAST DEPLOYED: Mon Nov  2 15:55:47 2026
+LAST DEPLOYED: Thu Nov 19 20:08:15 2026
 NAMESPACE: acme-platform
 STATUS: deployed
 REVISION: 2
@@ -1732,7 +1714,6 @@ Get your grafana admin user password by running:
 
 Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
 deployment "prometheus-grafana" successfully rolled out
-I1102 15:55:54.219120  263652 warnings.go:107] "Warning: spec.SessionAffinity is ignored for headless services"
 ```
 
 ```bash {"stage":"observability", "label":"grafana address and admin password", "runtime":"bash"}
@@ -1743,7 +1724,7 @@ curl -s "${GRAFANA_URL}/login" | grep -q 'Acme ID'
 echo "Grafana: ${GRAFANA_URL}, 'Sign in with Acme ID' (local admin password: ${GRAFANA_PASSWORD})"
 ```
 ```shell markdown_runner
-Grafana: http://192.168.50.213:32002, 'Sign in with Acme ID' (local admin password: tdg3uFQ5OP03mbJ5er6z4qp960WaluLvm3yPzKiq)
+Grafana: http://192.168.50.196:32002, 'Sign in with Acme ID' (local admin password: oCi4wlgMGO6imD32TZHOIfh0QowNyRUsNmFjGOGE)
 ```
 
 The datasources are provisioned the way the dashboard is: a ConfigMap the Grafana sidecar picks up. `httpMethod: GET` matters, because the proxy turns a `POST` into a `create` that nobody is allowed.
@@ -1844,12 +1825,12 @@ kubectl auth whoami
 ```
 ```shell markdown_runner
 User "platform" set.
-Context "platform" modified.
+Context "platform" created.
 Switched to context "platform".
 ATTRIBUTE                                           VALUE
 Username                                            platform
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=f35aa85e-0f81-da93-d77f-e16afca4c078]
+Extra: authentication.kubernetes.io/credential-id   [JTI=f59fb4c5-a093-7389-57fa-285d8243f69f]
 ```
 
 ```bash {"stage":"platform", "label":"deploy core-prd", "runtime":"bash"}
@@ -1930,8 +1911,8 @@ NAME       READY   APPS
 core-prd   True    <none>
 core-sim   True    <none>
 NAME               AGE
-core-prd-metrics   15s
-core-sim-metrics   15s
+core-prd-metrics   98s
+core-sim-metrics   98s
 ```
 
 ---
@@ -1982,7 +1963,7 @@ Switched to context "alice".
 ATTRIBUTE                                           VALUE
 Username                                            alice
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=d764d88e-5c8d-e965-6aee-661200c668c8]
+Extra: authentication.kubernetes.io/credential-id   [JTI=0cb9720b-70b1-2faf-a450-479a626380f7]
 ```
 
 ```bash {"stage":"deploy_enroll", "label":"deploy capture brokerapp", "runtime":"bash"}
@@ -2227,10 +2208,10 @@ capture   True    core-prd
 scorer    True    core-prd
 secret/capture-binding-secret
 secret/scorer-binding-secret
-acme-enroll/capture@1
-acme-enroll/scorer@1
-2026-11-02 14:56:55,951 INFO  [scorer-consume] (Camel (camel-1) thread #1 - JmsConsumer[ENROLL.IN]) [scorer] ACME-000002 queue:ENROLL.IN -> queue:IDENT.REQUEST
-2026-11-02 14:56:56,352 INFO  [scorer-consume] (Camel (camel-1) thread #1 - JmsConsumer[ENROLL.IN]) [scorer] ACME-000003 queue:ENROLL.IN -> queue:IDENT.REQUEST
+acme-enroll/capture@2
+acme-enroll/scorer@2
+2026-11-19 20:12:06,930 INFO  [scorer-consume] (Camel (camel-1) thread #1 - JmsConsumer[ENROLL.IN]) [scorer] ACME-000001 queue:ENROLL.IN -> queue:IDENT.REQUEST
+2026-11-19 20:12:07,057 INFO  [scorer-consume] (Camel (camel-1) thread #1 - JmsConsumer[ENROLL.IN]) [scorer] ACME-000002 queue:ENROLL.IN -> queue:IDENT.REQUEST
 ```
 
 ---
@@ -2276,12 +2257,12 @@ kubectl auth whoami
 ```
 ```shell markdown_runner
 User "bob" set.
-Context "bob" modified.
+Context "bob" created.
 Switched to context "bob".
 ATTRIBUTE                                           VALUE
 Username                                            bob
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=350077b0-9dcf-5b18-4937-7def94180152]
+Extra: authentication.kubernetes.io/credential-id   [JTI=37ef2b25-565c-f821-47dc-18cc23ece5db]
 ```
 
 ```bash {"stage":"deploy_ident", "label":"deploy matcher brokerapp", "runtime":"bash"}
@@ -2522,8 +2503,8 @@ timeout 300 bash -c 'until kubectl logs deploy/registry-sync -n acme-ident --tai
 kubectl logs deploy/registry-sync -n acme-ident --tail=2
 ```
 ```shell markdown_runner
-2026-11-02 14:58:35,304 INFO  [registry-sync-consume] (Camel (camel-1) thread #1 - JmsConsumer[IDENT.RESULTS::registry]) [registry-sync] ACME-000008 received from queue:IDENT.RESULTS::registry
-2026-11-02 14:58:35,510 INFO  [registry-sync-consume] (Camel (camel-1) thread #1 - JmsConsumer[IDENT.RESULTS::registry]) [registry-sync] ACME-000009 received from queue:IDENT.RESULTS::registry
+2026-11-19 20:12:25,831 INFO  [registry-sync-consume] (Camel (camel-1) thread #1 - JmsConsumer[IDENT.RESULTS::registry]) [registry-sync] ACME-000007 received from queue:IDENT.RESULTS::registry
+2026-11-19 20:12:26,232 INFO  [registry-sync-consume] (Camel (camel-1) thread #1 - JmsConsumer[IDENT.RESULTS::registry]) [registry-sync] ACME-000008 received from queue:IDENT.RESULTS::registry
 ```
 
 Bob reads the Enroll catalog, that is how he found `scorer`'s address and the gate that lets `matcher` in, but Enroll's namespace is not his: he can neither declare an app there nor look at its secrets.
@@ -2574,12 +2555,12 @@ kubectl auth whoami
 ```
 ```shell markdown_runner
 User "carol" set.
-Context "carol" modified.
+Context "carol" created.
 Switched to context "carol".
 ATTRIBUTE                                           VALUE
 Username                                            carol
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=bab69084-91e0-c8fc-31c5-949ae36555ff]
+Extra: authentication.kubernetes.io/credential-id   [JTI=d24b7c43-1c2b-b89c-c43b-1346ee16f711]
 ```
 
 ```bash {"stage":"deploy_notify", "label":"deploy notifier brokerapp", "runtime":"bash"}
@@ -2704,8 +2685,8 @@ timeout 300 bash -c 'until kubectl logs deploy/notifier -n acme-notify --tail=50
 kubectl logs deploy/notifier -n acme-notify --tail=2
 ```
 ```shell markdown_runner
-2026-11-02 14:58:54,517 INFO  [notifier-consume] (Camel (camel-1) thread #1 - JmsConsumer[IDENT.RESULTS::notifier]) [notifier] ACME-000068 received from queue:IDENT.RESULTS::notifier
-2026-11-02 14:58:54,568 INFO  [notifier-consume] (Camel (camel-1) thread #1 - JmsConsumer[IDENT.RESULTS::notifier]) [notifier] ACME-000069 received from queue:IDENT.RESULTS::notifier
+2026-11-19 20:13:40,656 INFO  [notifier-consume] (Camel (camel-1) thread #1 - JmsConsumer[IDENT.RESULTS::notifier]) [notifier] ACME-000188 received from queue:IDENT.RESULTS::notifier
+2026-11-19 20:13:40,885 INFO  [notifier-consume] (Camel (camel-1) thread #1 - JmsConsumer[IDENT.RESULTS::notifier]) [notifier] ACME-000189 received from queue:IDENT.RESULTS::notifier
 ```
 
 ---
@@ -2734,7 +2715,7 @@ Switched to context "bob".
 ATTRIBUTE                                           VALUE
 Username                                            bob
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=e01156ee-c505-a124-4c09-2da740faf521]
+Extra: authentication.kubernetes.io/credential-id   [JTI=09481ae9-3059-852a-607b-6435df5f3bf4]
 ```
 
 ```bash {"stage":"deploy_sandbox", "label":"deploy loadtest brokerapp", "runtime":"bash"}
@@ -2862,9 +2843,9 @@ timeout 300 bash -c 'until kubectl logs deploy/loadtest -n acme-ident-sim --tail
 kubectl logs deploy/loadtest -n acme-ident-sim --tail=2
 ```
 ```shell markdown_runner
-acme-ident-sim/loadtest@1
-2026-11-02 14:59:31,988 INFO  [loadtest-consume] (Camel (camel-1) thread #1 - JmsConsumer[IDENT.REQUEST]) [loadtest] ACME-000001 received from queue:IDENT.REQUEST
-2026-11-02 14:59:32,008 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(3):[amqps://core-sim.acme-platform.svc.cluster.local:61616]) Connection ID:433e8594-95bf-4fed-a1bb-707489ba87fd:3 connected to server: amqps://core-sim.acme-platform.svc.cluster.local:61616
+acme-ident-sim/loadtest@2
+2026-11-19 20:14:31,297 INFO  [loadtest-consume] (Camel (camel-1) thread #1 - JmsConsumer[IDENT.REQUEST]) [loadtest] ACME-000002 received from queue:IDENT.REQUEST
+2026-11-19 20:14:31,429 INFO  [org.apache.qpid.jms.JmsConnection] (AmqpProvider :(4):[amqps://core-sim.acme-platform.svc.cluster.local:61616]) Connection ID:e98d84a8-be10-4aff-b2e1-880a08caf48e:4 connected to server: amqps://core-sim.acme-platform.svc.cluster.local:61616
 ```
 
 ---
@@ -2893,7 +2874,7 @@ Switched to context "bob".
 ATTRIBUTE                                           VALUE
 Username                                            bob
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=4f5800ec-28e4-4aee-e95d-90f4fa8888f8]
+Extra: authentication.kubernetes.io/credential-id   [JTI=afecf283-b194-1611-f5d2-c34a18b0a178]
 ```
 
 ```bash {"stage":"deploy_authority", "label":"deploy loadtest-prd brokerapp", "runtime":"bash"}
@@ -3016,8 +2997,8 @@ timeout 300 bash -c 'until kubectl logs deploy/loadtest-prd -n acme-ident-sim --
 kubectl logs deploy/loadtest-prd -n acme-ident-sim --tail=2
 ```
 ```shell markdown_runner
-2026-11-02 15:00:23,927 INFO  [loadtest-prd-source] (Camel (camel-1) thread #2 - timer://loadtest-prd-source) [loadtest-prd] emitted ACME-000005 -> queue:SIM.PROBE
-2026-11-02 15:00:24,005 INFO  [loadtest-prd-consume] (Camel (camel-1) thread #1 - JmsConsumer[SIM.PROBE]) [loadtest-prd] ACME-000005 received from queue:SIM.PROBE
+2026-11-19 20:15:21,689 INFO  [loadtest-prd-source] (Camel (camel-1) thread #2 - timer://loadtest-prd-source) [loadtest-prd] emitted ACME-000001 -> queue:SIM.PROBE
+2026-11-19 20:15:21,693 INFO  [loadtest-prd-consume] (Camel (camel-1) thread #1 - JmsConsumer[SIM.PROBE]) [loadtest-prd] ACME-000001 received from queue:SIM.PROBE
 ```
 
 It landed on `core-prd`. The intent check only reads what the app declared, and intent is not authority. The address gates still hold: `loadtest-prd` sits on the production broker but could not consume `IDENT.REQUEST` or `IDENT.RESULTS`, because neither gate admits an app from `acme-ident-sim`. Placement is the platform's decision, data access is the owner's.
@@ -3044,7 +3025,7 @@ Switched to context "platform".
 ATTRIBUTE                                           VALUE
 Username                                            platform
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=1c7b0fa5-523c-9e85-12ab-d225be01c450]
+Extra: authentication.kubernetes.io/credential-id   [JTI=b86e2368-3154-06ea-55d7-9333e9e1dfd6]
 ```
 
 ```bash {"stage":"authority_gate", "label":"update core-prd CEL expression", "runtime":"bash"}
@@ -3115,7 +3096,7 @@ Switched to context "bob".
 ATTRIBUTE                                           VALUE
 Username                                            bob
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=f60127ae-e0f6-1894-8001-e82f32338006]
+Extra: authentication.kubernetes.io/credential-id   [JTI=9fcc7b34-eb22-3044-72a0-b7dffd5a9d93]
 ```
 
 ```bash {"stage":"authority_gate", "label":"bob cannot relabel his namespace", "runtime":"bash"}
@@ -3155,7 +3136,7 @@ Switched to context "carol".
 ATTRIBUTE                                           VALUE
 Username                                            carol
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=02429134-c97a-31d4-0179-e0d190ac3570]
+Extra: authentication.kubernetes.io/credential-id   [JTI=94f0f688-de4d-0484-e838-379dd22c3d63]
 ```
 
 What Carol's BrokerApp page shows: one consumer on her subscription queue, no backlog. The same query for Bob's namespace is refused: the proxy asked the API server whether `carol` may read metrics in `acme-ident`, and it said no.
@@ -3187,7 +3168,7 @@ echo "notifier backlog: $(curl -s --cacert "${ACME_CA}" -H "Authorization: Beare
 ```shell markdown_runner
 deployment.apps/notifier scaled
 notifier has no consumer left
-notifier backlog: 45
+notifier backlog: 49
 ```
 
 ![A few minutes later on Carol's dashboard: no consumer, and the notifier queue past 400 messages](assets/images/carol-notify-backlog.png)
@@ -3214,7 +3195,7 @@ Switched to context "bob".
 ATTRIBUTE                                           VALUE
 Username                                            bob
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=1d7820ce-b1c2-89b2-ef52-587a468ae05b]
+Extra: authentication.kubernetes.io/credential-id   [JTI=ab6cd52a-36fd-3b37-7459-ef99e14321e9]
 ```
 
 ```bash {"stage":"metrics", "label":"bob reads registry-sync metrics", "runtime":"bash"}
@@ -3251,7 +3232,7 @@ Switched to context "alice".
 ATTRIBUTE                                           VALUE
 Username                                            alice
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=0d195777-e392-74f8-9f5a-9cf2170041b9]
+Extra: authentication.kubernetes.io/credential-id   [JTI=d3a26581-6bdb-786d-8005-082c231dc7ab]
 ```
 
 ```bash {"stage":"metrics", "label":"alice reads core-prd metrics", "runtime":"bash"}
@@ -3334,7 +3315,7 @@ Switched to context "platform".
 ATTRIBUTE                                           VALUE
 Username                                            platform
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=64ce69c5-efe4-0850-08bb-12d6c7b333c1]
+Extra: authentication.kubernetes.io/credential-id   [JTI=226363cb-154a-4315-56a4-246162b8801e]
 ```
 
 ```bash {"stage":"metrics", "label":"platform reads every namespace", "runtime":"bash"}
@@ -3412,7 +3393,7 @@ Switched to context "carol".
 ATTRIBUTE                                           VALUE
 Username                                            carol
 Groups                                              [system:authenticated]
-Extra: authentication.kubernetes.io/credential-id   [JTI=62dbcfe2-e283-607a-d806-e91f75244943]
+Extra: authentication.kubernetes.io/credential-id   [JTI=4a8db74a-5aa6-5938-f74b-d2ca84c1d0ff]
 ```
 
 ```bash {"stage":"metrics", "label":"carol scales notifier back up", "runtime":"bash"}
@@ -3456,12 +3437,12 @@ test -n "${ACME_WORK:-}" && rm -rf "${ACME_WORK}" || true
 ```
 ```shell markdown_runner
 Switched to context "acme-identity-pipeline".
-* Suppression de "acme-identity-pipeline" dans kvm2...
-* Le cluster "acme-identity-pipeline" a été supprimé.
-deleted context alice from /home/tlavocat/.kube/config
-deleted context bob from /home/tlavocat/.kube/config
-deleted context carol from /home/tlavocat/.kube/config
-deleted context platform from /home/tlavocat/.kube/config
+* Deleting "acme-identity-pipeline" in kvm2 ...
+* Removed all traces of the "acme-identity-pipeline" cluster.
+deleted context alice from /home/gtully/.kube/config
+deleted context bob from /home/gtully/.kube/config
+deleted context carol from /home/gtully/.kube/config
+deleted context platform from /home/gtully/.kube/config
 ```
 
 To keep the cluster and remove only the tutorial's resources (as the cluster admin):
