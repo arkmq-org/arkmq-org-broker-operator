@@ -1935,3 +1935,166 @@ var _ = Describe("sequential address removal during drain", Label(unitLabel), fu
 			"second removed address should also be detected")
 	})
 })
+
+var _ = Describe("drain state machine per-app re-entry", Label(unitLabel), func() {
+
+	It("should re-trigger DrainConfigPending when a second app starts draining", Label(unitLabel), func() {
+		ns := "default"
+		appA := NewBrokerApp("app-a", ns).
+			WithAddresses(NewAddressType("orders").Build()).
+			Build()
+		appB := NewBrokerApp("app-b", ns).Build()
+
+		identityA := AppIdentity(appA)
+		identityB := AppIdentity(appB)
+
+		By("setting up: App A is draining, broker confirmed → Synced, PendingEmpty has App A")
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{
+			AppIdentityWithGeneration(appA),
+			AppIdentityWithGeneration(appB),
+		}
+		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
+			{App: identityA, Messages: map[string]string{"notifications": "5"}},
+		}
+		meta.SetStatusCondition(&reconciler.instance.Status.Conditions, metav1.Condition{
+			Type:   broker.AppsProvisionedConditionType,
+			Status: metav1.ConditionTrue,
+			Reason: broker.AppsProvisionedConditionSyncedReason,
+		})
+
+		By("App B now has drain candidates with PendingDrainConfig")
+		reconciler.status.PendingEmpty = []broker.PendingEmptyAddressStatus{
+			{App: identityA, Messages: map[string]string{"notifications": "5"}},
+			{App: identityB, Messages: map[string]string{"alerts": "unknown"}},
+		}
+
+		condition := metav1.Condition{
+			Type:   broker.AppsProvisionedConditionType,
+			Status: metav1.ConditionTrue,
+			Reason: broker.AppsProvisionedConditionSyncedReason,
+		}
+		reconciler.applyDrainProvisionedTransition(&condition)
+
+		Expect(condition.Status).To(Equal(metav1.ConditionFalse),
+			"should transition to DrainConfigPending when new app starts draining, "+
+				"even though PendingEmpty was already non-empty from App A")
+		Expect(condition.Reason).To(Equal(broker.AppsProvisionedConditionDrainPendingReason))
+	})
+
+	It("should re-trigger DrainConfigPending when same app has a second config change", Label(unitLabel), func() {
+		ns := "default"
+		appA := NewBrokerApp("app-a", ns).
+			WithAddresses(NewAddressType("orders").Build()).
+			Build()
+
+		identityA := AppIdentity(appA)
+
+		By("App A is draining 'notifications', broker confirmed → Synced")
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{AppIdentityWithGeneration(appA)}
+		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
+			{App: identityA, Messages: map[string]string{"notifications": "5"}},
+		}
+		meta.SetStatusCondition(&reconciler.instance.Status.Conditions, metav1.Condition{
+			Type:   broker.AppsProvisionedConditionType,
+			Status: metav1.ConditionTrue,
+			Reason: broker.AppsProvisionedConditionSyncedReason,
+		})
+
+		By("App A now also removes 'alerts' — new drain config needed")
+		reconciler.status.PendingEmpty = []broker.PendingEmptyAddressStatus{
+			{App: identityA, Messages: map[string]string{"notifications": "5", "alerts": "unknown"}},
+		}
+
+		condition := metav1.Condition{
+			Type:   broker.AppsProvisionedConditionType,
+			Status: metav1.ConditionTrue,
+			Reason: broker.AppsProvisionedConditionSyncedReason,
+		}
+		reconciler.applyDrainProvisionedTransition(&condition)
+
+		Expect(condition.Status).To(Equal(metav1.ConditionFalse),
+			"should transition to DrainConfigPending for new drain addresses on same app")
+		Expect(condition.Reason).To(Equal(broker.AppsProvisionedConditionDrainPendingReason))
+	})
+
+	It("isDrainConfigApplied gates on DrainConfigPending after second app triggers re-entry", Label(unitLabel), func() {
+		ns := "default"
+		appB := NewBrokerApp("app-b", ns).Build()
+
+		identityA := AppIdentity(NewBrokerApp("app-a", ns).Build())
+
+		By("after applyDrainProvisionedTransition sets DrainConfigPending for new app")
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.status.ProvisionedApps = []string{
+			identityA + "@1",
+			AppIdentityWithGeneration(appB),
+		}
+		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
+			{App: identityA, Messages: map[string]string{"notifications": "5"}},
+		}
+		meta.SetStatusCondition(&reconciler.instance.Status.Conditions, metav1.Condition{
+			Type:   broker.AppsProvisionedConditionType,
+			Status: metav1.ConditionFalse,
+			Reason: broker.AppsProvisionedConditionDrainPendingReason,
+		})
+
+		candidatesB := []DrainingAddressInfo{
+			{Address: "alerts", PendingDrainConfig: false},
+		}
+
+		result := reconciler.isDrainConfigApplied(candidatesB)
+		Expect(result).To(BeFalse(),
+			"isDrainConfigApplied should return false while AppsProvisioned "+
+				"is DrainConfigPending — broker has not confirmed the new secret")
+	})
+
+	It("no re-trigger when PendingEmpty entries are unchanged", Label(unitLabel), func() {
+		ns := "default"
+		identityA := AppIdentity(NewBrokerApp("app-a", ns).Build())
+
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		reconciler.instance.Status.PendingEmpty = []broker.PendingEmptyAddressStatus{
+			{App: identityA, Messages: map[string]string{"notifications": "5"}},
+		}
+		meta.SetStatusCondition(&reconciler.instance.Status.Conditions, metav1.Condition{
+			Type:   broker.AppsProvisionedConditionType,
+			Status: metav1.ConditionTrue,
+			Reason: broker.AppsProvisionedConditionSyncedReason,
+		})
+
+		reconciler.status.PendingEmpty = []broker.PendingEmptyAddressStatus{
+			{App: identityA, Messages: map[string]string{"notifications": "3"}},
+		}
+
+		condition := metav1.Condition{
+			Type:   broker.AppsProvisionedConditionType,
+			Status: metav1.ConditionTrue,
+			Reason: broker.AppsProvisionedConditionSyncedReason,
+		}
+		reconciler.applyDrainProvisionedTransition(&condition)
+
+		Expect(condition.Status).To(Equal(metav1.ConditionTrue),
+			"should not re-trigger DrainConfigPending when same addresses are draining "+
+				"with only count changes — no config update needed")
+	})
+
+	It("isDrainConfigApplied correctly gates on per-candidate PendingDrainConfig for first detection", Label(unitLabel), func() {
+		ns := "default"
+
+		By("first detection: PendingDrainConfig=true protects correctly")
+		reconciler := BrokerServiceInstanceReconcilerForTestWithInstance(ns, "test-service")
+		meta.SetStatusCondition(&reconciler.instance.Status.Conditions, metav1.Condition{
+			Type:   broker.AppsProvisionedConditionType,
+			Status: metav1.ConditionTrue,
+			Reason: broker.AppsProvisionedConditionSyncedReason,
+		})
+
+		candidates := []DrainingAddressInfo{
+			{Address: "alerts", PendingDrainConfig: true},
+		}
+		Expect(reconciler.isDrainConfigApplied(candidates)).To(BeFalse(),
+			"PendingDrainConfig=true should block isDrainConfigApplied regardless of condition")
+	})
+})

@@ -1787,9 +1787,11 @@ func findRemovedSubscriptions(name string, oldCfg *brokerproperties.AddressConfi
 //	WaitingForBroker (False)   → broker confirms       → Synced (True)
 //	BrokerNotReady (False)     → broker confirms       → Synced (True)
 //
-// The Synced → DrainConfigPending transition only fires when entering drain
-// (previous PendingEmpty was empty). Once drain is active the Synced state
-// is stable — no re-verification is needed while the config is unchanged.
+// The Synced → DrainConfigPending transition fires whenever the new
+// PendingEmpty contains drain entries that were not present in the previous
+// reconcile's PendingEmpty — a new app entering drain or an existing app
+// gaining additional addresses both require the broker to apply the updated
+// secret before Jolokia queries are safe.
 func (reconciler *BrokerServiceInstanceReconciler) applyDrainProvisionedTransition(condition *metav1.Condition) {
 	if len(reconciler.status.PendingEmpty) == 0 {
 		return
@@ -1806,12 +1808,35 @@ func (reconciler *BrokerServiceInstanceReconciler) applyDrainProvisionedTransiti
 		prev.Reason == broker.AppsProvisionedConditionNotReadyReason {
 		return
 	}
-	if len(reconciler.instance.Status.PendingEmpty) > 0 {
+	if !reconciler.hasNewDrainEntries() {
 		return
 	}
 	condition.Status = metav1.ConditionFalse
 	condition.Reason = broker.AppsProvisionedConditionDrainPendingReason
 	condition.Message = "pending drain config verification"
+}
+
+func (reconciler *BrokerServiceInstanceReconciler) hasNewDrainEntries() bool {
+	oldByApp := make(map[string]map[string]bool, len(reconciler.instance.Status.PendingEmpty))
+	for _, pe := range reconciler.instance.Status.PendingEmpty {
+		addrs := make(map[string]bool, len(pe.Messages))
+		for addr := range pe.Messages {
+			addrs[addr] = true
+		}
+		oldByApp[pe.App] = addrs
+	}
+	for _, pe := range reconciler.status.PendingEmpty {
+		oldAddrs, exists := oldByApp[pe.App]
+		if !exists {
+			return true
+		}
+		for addr := range pe.Messages {
+			if !oldAddrs[addr] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isDrainConfigApplied returns true when no candidates are PendingDrainConfig (the
