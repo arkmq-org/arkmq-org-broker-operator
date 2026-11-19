@@ -152,15 +152,6 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 
 	// helper: create a BrokerApp with certs
 	setupApp := func(ctx context.Context, appName string, selectorLabels map[string]string, spec broker.BrokerAppSpec) broker.BrokerApp {
-		InstallCert(appName+"-"+common.DefaultOperandCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
-			candidate.Spec.SecretName = appName + "-" + common.DefaultOperandCertSecretName
-			candidate.Spec.CommonName = appName
-			candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-				Name: caIssuer.Name,
-				Kind: "ClusterIssuer",
-			}
-		})
-
 		spec.ServiceSelector = &metav1.LabelSelector{
 			MatchLabels: selectorLabels,
 		}

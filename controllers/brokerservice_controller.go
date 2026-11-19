@@ -704,6 +704,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 				deployedCondition.Message = fmt.Sprintf("awaiting deployed condition, broker status %v", deployed.Status)
 			}
 			reconciler.resolveAppsProvisioned(deployed, &appsProvisionedCondition)
+			reconciler.applyDrainProvisionedTransition(&appsProvisionedCondition)
 		} else {
 			appsProvisionedCondition.Message = "broker not found"
 		}
@@ -1709,8 +1710,8 @@ func (reconciler *BrokerServiceInstanceReconciler) buildDrainCandidate(
 ) *DrainingAddressInfo {
 	addressStillOwned := currentOwned[name]
 
-	// address was never owned by this app — not a drain candidate
-	if oldCfg.RoutingTypes == "" && !addressStillOwned {
+	// address was never owned by this app and has no multicast subscriptions — not a drain candidate
+	if oldCfg.RoutingTypes == "" && !addressStillOwned && !hasMulticastQueueConfigs(oldCfg) {
 		return nil
 	}
 
@@ -1728,7 +1729,7 @@ func (reconciler *BrokerServiceInstanceReconciler) buildDrainCandidate(
 
 	dai.Subscriptions = findRemovedSubscriptions(name, oldCfg, currentTracker)
 
-	if addressStillOwned && len(dai.Subscriptions) == 0 {
+	if len(dai.Subscriptions) == 0 && (addressStillOwned || oldCfg.RoutingTypes == "") {
 		return nil
 	}
 
@@ -1748,8 +1749,20 @@ func (reconciler *BrokerServiceInstanceReconciler) buildDrainCandidate(
 	return &dai
 }
 
+func hasMulticastQueueConfigs(cfg *brokerproperties.AddressConfiguration) bool {
+	for _, qc := range cfg.QueueConfigs {
+		if qc.RoutingType == brokerproperties.RoutingTypeMulticast {
+			return true
+		}
+	}
+	return false
+}
+
 func findRemovedSubscriptions(name string, oldCfg *brokerproperties.AddressConfiguration, currentTracker *AddressTracker) []string {
-	if oldCfg.RoutingTypes != brokerproperties.RoutingTypeMulticast || oldCfg.QueueConfigs == nil {
+	if oldCfg.QueueConfigs == nil {
+		return nil
+	}
+	if oldCfg.RoutingTypes != "" && oldCfg.RoutingTypes != brokerproperties.RoutingTypeMulticast {
 		return nil
 	}
 	var removed []string
@@ -1764,6 +1777,41 @@ func findRemovedSubscriptions(name string, oldCfg *brokerproperties.AddressConfi
 	}
 	sort.Strings(removed)
 	return removed
+}
+
+// applyDrainProvisionedTransition manages the AppsProvisioned condition as a
+// state machine during drain. The Reason field encodes the current state:
+//
+//	Synced (True)              → new drain detected   → DrainConfigPending (False)
+//	DrainConfigPending (False) → broker confirms       → Synced (True)
+//	WaitingForBroker (False)   → broker confirms       → Synced (True)
+//	BrokerNotReady (False)     → broker confirms       → Synced (True)
+//
+// The Synced → DrainConfigPending transition only fires when entering drain
+// (previous PendingEmpty was empty). Once drain is active the Synced state
+// is stable — no re-verification is needed while the config is unchanged.
+func (reconciler *BrokerServiceInstanceReconciler) applyDrainProvisionedTransition(condition *metav1.Condition) {
+	if len(reconciler.status.PendingEmpty) == 0 {
+		return
+	}
+	if condition.Status != metav1.ConditionTrue {
+		return
+	}
+	prev := meta.FindStatusCondition(reconciler.instance.Status.Conditions, broker.AppsProvisionedConditionType)
+	if prev == nil {
+		return
+	}
+	if prev.Reason == broker.AppsProvisionedConditionDrainPendingReason ||
+		prev.Reason == broker.AppsProvisionedConditionWaitingReason ||
+		prev.Reason == broker.AppsProvisionedConditionNotReadyReason {
+		return
+	}
+	if len(reconciler.instance.Status.PendingEmpty) > 0 {
+		return
+	}
+	condition.Status = metav1.ConditionFalse
+	condition.Reason = broker.AppsProvisionedConditionDrainPendingReason
+	condition.Message = "pending drain config verification"
 }
 
 // isDrainConfigApplied returns true when no candidates are PendingDrainConfig (the

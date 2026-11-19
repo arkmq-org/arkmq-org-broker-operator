@@ -153,15 +153,6 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 
 	// helper: create a BrokerApp with certs
 	setupApp := func(ctx context.Context, appName string, selectorLabels map[string]string, spec broker.BrokerAppSpec) broker.BrokerApp {
-		InstallCert(appName+"-"+common.DefaultOperandCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
-			candidate.Spec.SecretName = appName + "-" + common.DefaultOperandCertSecretName
-			candidate.Spec.CommonName = appName
-			candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
-				Name: caIssuer.Name,
-				Kind: "ClusterIssuer",
-			}
-		})
-
 		spec.ServiceSelector = &metav1.LabelSelector{
 			MatchLabels: selectorLabels,
 		}
@@ -233,9 +224,14 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 	}
 
 	// helper: set up service, ingress, and TLS for MQTT access to an app's acceptor
-	setupMqttEndpoint := func(ctx context.Context, serviceName, appName string) mqttTestEndpoint {
+	setupMqttEndpoint := func(ctx context.Context, serviceName, appName string, appNamespace ...string) mqttTestEndpoint {
+		ns := defaultNamespace
+		if len(appNamespace) > 0 {
+			ns = appNamespace[0]
+		}
+
 		createdApp := &broker.BrokerApp{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appName, Namespace: defaultNamespace}, createdApp)).Should(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appName, Namespace: ns}, createdApp)).Should(Succeed())
 		Expect(createdApp.Status.Service).ShouldNot(BeNil())
 		appPort := createdApp.Status.Service.AssignedPort
 		Expect(appPort).ShouldNot(BeZero())
@@ -264,7 +260,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 
 		appCertName := appName + common.AppCertSecretSuffix
 		appCertSecret, err := secrets.RetriveSecret(
-			types.NamespacedName{Namespace: defaultNamespace, Name: appCertName},
+			types.NamespacedName{Namespace: ns, Name: appCertName},
 			make(map[string]string), k8sClient)
 		Expect(err).Should(BeNil())
 		clientKeyPair, err := tls.X509KeyPair(appCertSecret.Data["tls.crt"], appCertSecret.Data["tls.key"])
@@ -882,12 +878,24 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 
 		mqttConsume(ctx, ep, "kept", "events", int(afterCount)+3)
 
+		By("waiting for the drain config to be applied by the broker")
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
+			if verbose {
+				fmt.Printf("\n Waiting for drain config applied, brokerService Status: %v\n", current.Status)
+			}
+			g.Expect(meta.IsStatusConditionTrue(current.Status.Conditions, broker.AppsProvisionedConditionType)).Should(BeTrue(),
+				"AppsProvisioned should be true once the broker has applied the drain config")
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
 		By("verifying removed.events is not growing — enabled=false stops new message routing")
+		var removedCount int64 = -1
 		Consistently(func(g Gomega) {
 			current := &broker.BrokerService{}
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
 			if verbose {
-				fmt.Printf("\n Checking for growth, brokerService Status: %v\n", current.Status)
+				fmt.Printf("\n Checking for stability, brokerService Status: %v\n", current.Status)
 			}
 			for _, pe := range current.Status.PendingEmpty {
 				if pe.App == AppIdentity(&app) {
@@ -895,8 +903,11 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 					if ok && countStr != "unknown" {
 						count, err := strconv.ParseInt(countStr, 10, 64)
 						g.Expect(err).NotTo(HaveOccurred())
-						g.Expect(count).Should(BeNumerically("<=", int64(17)),
-							"removed subscription should not receive continuous messages, got %d", count)
+						if removedCount >= 0 {
+							g.Expect(count).Should(BeNumerically("<=", removedCount),
+								"removed subscription should not receive new messages, was %d now %d", removedCount, count)
+						}
+						removedCount = count
 					}
 				}
 			}
@@ -1342,6 +1353,208 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 			g.Expect(svc.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(app1Name)))
 			g.Expect(svc.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(app2Name)))
 		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+	})
+
+	It("keeps a renamed cross-namespace subscription pending until its messages are consumed", func() {
+		if os.Getenv("USE_EXISTING_CLUSTER") != "true" {
+			return
+		}
+
+		ctx := context.Background()
+		serviceName := NextSpecResourceName()
+		ownerName := NextSpecResourceName()
+		consumerName := NextSpecResourceName()
+
+		By("ensuring other namespace exists")
+		otherNs := corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: otherNamespace}}
+		if err := k8sClient.Create(ctx, &otherNs); err != nil && !errors.IsAlreadyExists(err) {
+			Fail(fmt.Sprintf("Failed to create other namespace: %v", err))
+		}
+
+		By("installing certs")
+		sharedOperandCertName := serviceName + "-" + common.DefaultOperandCertSecretName
+		InstallCert(sharedOperandCertName, defaultNamespace, func(candidate *cmv1.Certificate) {
+			candidate.Spec.SecretName = sharedOperandCertName
+			candidate.Spec.CommonName = serviceName
+			candidate.Spec.DNSNames = []string{
+				serviceName,
+				fmt.Sprintf("%s.%s", serviceName, defaultNamespace),
+				fmt.Sprintf("%s.%s.svc.%s", serviceName, defaultNamespace, common.GetClusterDomain()),
+				common.ClusterDNSWildCard(serviceName, defaultNamespace),
+			}
+			candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+				Name: caIssuer.Name,
+				Kind: "ClusterIssuer",
+			}
+		})
+		DeferCleanup(CleanupServiceCerts, serviceName, defaultNamespace)
+
+		InstallCert(common.DefaultPrometheusCertSecretName, defaultNamespace, func(candidate *cmv1.Certificate) {
+			candidate.Spec.SecretName = common.DefaultPrometheusCertSecretName
+			candidate.Spec.CommonName = "prometheus"
+			candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+				Name: caIssuer.Name,
+				Kind: "ClusterIssuer",
+			}
+		})
+
+		By("creating cross-namespace service")
+		service := broker.BrokerService{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "BrokerService",
+				APIVersion: broker.GroupVersion.Identifier(),
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      serviceName,
+				Namespace: defaultNamespace,
+				Labels:    map[string]string{"test": "fm-xns-drain"},
+			},
+			Spec: broker.BrokerServiceSpec{
+				AppSelectorExpression: fmt.Sprintf(`app.metadata.namespace in ["%s", "%s"]`, defaultNamespace, otherNamespace),
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceMemory: resource.MustParse("2Gi"),
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, &service)).Should(Succeed())
+		DeferCleanup(GracefulRemove, ctx, &service)
+
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
+			g.Expect(meta.IsStatusConditionTrue(current.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		By("creating owner app in default namespace that owns the address")
+		DeferCleanup(CleanupAppCerts, ownerName, defaultNamespace)
+		ownerApp := setupApp(ctx, ownerName, map[string]string{"test": "fm-xns-drain"}, broker.BrokerAppSpec{
+			Addresses: []broker.AddressType{{
+				Address:               "events",
+				PubSub:                &boolTrue,
+				ConsumerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", otherNamespace),
+			}},
+			Capabilities: []broker.AppCapabilityType{{
+				ProducerOf: []broker.AddressRef{{Address: "events", PubSub: &boolTrue}},
+				ConsumerOf: []broker.AddressRef{{
+					Address:       "events",
+					Subscriptions: []string{"owner.events"},
+				}},
+			}},
+		})
+		DeferCleanup(GracefulRemove, ctx, &ownerApp)
+		verifyProvisioned(ctx, serviceName, ownerName)
+
+		By("creating consumer app in other namespace with a subscription to the owner's address")
+		consumerCertName := consumerName + common.AppCertSecretSuffix
+		InstallCert(consumerCertName, otherNamespace, func(candidate *cmv1.Certificate) {
+			candidate.Spec.SecretName = consumerCertName
+			candidate.Spec.CommonName = consumerName
+			candidate.Spec.Subject.Organizations = nil
+			candidate.Spec.Subject.OrganizationalUnits = []string{otherNamespace}
+			candidate.Spec.IssuerRef = cmmetav1.ObjectReference{
+				Name: caIssuer.Name,
+				Kind: "ClusterIssuer",
+			}
+		})
+		DeferCleanup(UninstallCert, consumerCertName, otherNamespace)
+
+		consumerApp := broker.BrokerApp{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "BrokerApp",
+				APIVersion: broker.GroupVersion.Identifier(),
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      consumerName,
+				Namespace: otherNamespace,
+			},
+			Spec: broker.BrokerAppSpec{
+				ServiceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"test": "fm-xns-drain"},
+				},
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceMemory: resource.MustParse("256Mi"),
+					},
+				},
+				Capabilities: []broker.AppCapabilityType{{
+					ConsumerOf: []broker.AddressRef{{
+						Address:       "events",
+						AppName:       ownerName,
+						AppNamespace:  defaultNamespace,
+						Subscriptions: []string{"old-sub.events"},
+					}},
+				}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, &consumerApp)).Should(Succeed())
+		DeferCleanup(GracefulRemove, ctx, &consumerApp)
+
+		By("waiting for the cross-namespace consumer to be provisioned")
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerApp{}
+			g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: consumerName, Namespace: otherNamespace}, current)).Should(Succeed())
+			g.Expect(meta.IsStatusConditionTrue(current.Status.Conditions, broker.ReadyConditionType)).Should(BeTrue())
+			g.Expect(current.Status.Service.AssignedPort).ShouldNot(BeZero())
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
+			g.Expect(current.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(ownerName)))
+			g.Expect(current.Status.ProvisionedApps).Should(ContainElement(ContainSubstring(consumerName)))
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		By("setting up MQTT endpoint via the owner app's acceptor")
+		ep := setupMqttEndpoint(ctx, serviceName, ownerName)
+		DeferCleanup(cleanupMqttEndpoint, ep)
+
+		By("establishing durable subscriber via owner")
+		mqttSubscribe(ctx, ep, "owner", "events")
+
+		By("setting up MQTT endpoint via the reference app's acceptor")
+		ep2 := setupMqttEndpoint(ctx, serviceName, consumerName, otherNamespace)
+		DeferCleanup(cleanupMqttEndpoint, ep2)
+
+		By("establishing durable subscriber via ref")
+		mqttSubscribe(ctx, ep2, "old-sub", "events")
+
+		By("seeding messages")
+		mqttProduce(ctx, ep, "events", 5)
+
+		By("renaming the cross-namespace consumer's subscription from old-sub to new-sub")
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerApp{}
+			g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: consumerName, Namespace: otherNamespace}, current)).Should(Succeed())
+			current.Spec.Capabilities[0].ConsumerOf[0].Subscriptions = []string{"new-sub.events"}
+			g.Expect(k8sClient.Update(ctx, current)).Should(Succeed())
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		By("verifying old-sub.events appears in pendingEmpty for the cross-namespace consumer")
+		Eventually(func(g Gomega) {
+			current := &broker.BrokerService{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&service), current)).Should(Succeed())
+
+			if verbose {
+				fmt.Printf("\n Service Status: %v\n", current.Status)
+			}
+			var pending map[string]string
+			for _, pe := range current.Status.PendingEmpty {
+				if pe.App == AppIdentity(&consumerApp) {
+					pending = pe.Messages
+				}
+			}
+			g.Expect(pending).Should(HaveKeyWithValue("events::old-sub.events", "5"),
+				"5 messages on the renamed subscription are not tracked as pending empty, status.pendingEmpty=%+v",
+				current.Status.PendingEmpty)
+		}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
+
+		By("the old subscriber can still drain its messages")
+		mqttConsume(ctx, ep2, "old-sub", "events", 5)
+
+		By("the owner subscriber can consume its messages")
+		mqttConsume(ctx, ep, "owner", "events", 5)
 	})
 
 })
