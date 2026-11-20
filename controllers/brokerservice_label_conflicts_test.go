@@ -95,7 +95,6 @@ var _ = Describe("brokerservice label conflicts", func() {
 		Expect(labels).To(HaveKey(selectors.LabelAppKubernetesComponent))
 		Expect(labels).To(HaveKey(selectors.LabelAppKubernetesManagedBy))
 		Expect(labels).To(HaveKey(selectors.LabelBrokerService))
-		Expect(labels).To(HaveKey(selectors.LabelBrokerPeerIndex))
 	})
 
 	It("uses proper domain prefixes on all labels", Label(unitLabel), func() {

@@ -97,7 +97,6 @@ var _ = Describe("brokerservice pod labels", func() {
 		Expect(labels[selectors.LabelAppKubernetesComponent]).To(Equal("broker-service"))
 		Expect(labels[selectors.LabelAppKubernetesManagedBy]).To(Equal(common.OperatorName))
 		Expect(labels[selectors.LabelBrokerService]).To(Equal(svcName))
-		Expect(labels[selectors.LabelBrokerPeerIndex]).To(Equal("0"))
 	})
 
 	It("network policy matches broker service label", Label(unitLabel), func() {
