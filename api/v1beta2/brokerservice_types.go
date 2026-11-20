@@ -35,6 +35,15 @@ type BrokerServiceSpec struct {
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Broker image"
 	Image *string `json:"image,omitempty"`
 
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Node Selector"
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Tolerations"
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Topology Spread Constraints"
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
+
 	// AppSelectorExpression is a CEL expression that determines which BrokerApps
 	// can deploy to this service.
 	//

@@ -7542,8 +7542,14 @@ spec:
         path: env
       - displayName: Broker image
         path: image
+      - displayName: Node Selector
+        path: nodeSelector
       - displayName: Resources
         path: resources
+      - displayName: Tolerations
+        path: tolerations
+      - displayName: Topology Spread Constraints
+        path: topologySpreadConstraints
       statusDescriptors:
       - description: |-
           Current state of the resource

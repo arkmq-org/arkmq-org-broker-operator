@@ -373,6 +373,9 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 	}
 	desired.Spec.Env = reconciler.instance.Spec.Env
 	desired.Spec.Resources = reconciler.instance.Spec.Resources
+	desired.Spec.NodeSelector = reconciler.instance.Spec.NodeSelector
+	desired.Spec.Tolerations = reconciler.instance.Spec.Tolerations
+	desired.Spec.TopologySpreadConstraints = reconciler.instance.Spec.TopologySpreadConstraints
 
 	if reconciler.instance.Spec.Image != nil {
 		desired.Spec.Image = *reconciler.instance.Spec.Image
