@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -302,7 +303,7 @@ func (a *AddressTypeBuilder) WithSubscriptions(subs ...string) *AddressTypeBuild
 }
 
 func (a *AddressTypeBuilder) WithPubSub(pubSub bool) *AddressTypeBuilder {
-	a.addr.PubSub = &pubSub
+	a.addr.PubSub = ptr.To(pubSub)
 	return a
 }
 

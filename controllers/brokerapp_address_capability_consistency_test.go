@@ -12,6 +12,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -143,7 +144,6 @@ var _ = Describe("brokerapp address capability consistency", func() {
 		ns := "default"
 		appName := "private-inherit"
 
-		pubSubTrue := true
 		app := &broker.BrokerApp{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      appName,
@@ -156,7 +156,7 @@ var _ = Describe("brokerapp address capability consistency", func() {
 				Addresses: []broker.AddressType{
 					{
 						Address: "notifications",
-						PubSub:  &pubSubTrue,
+						PubSub:  ptr.To(true),
 					},
 				},
 				Capabilities: []broker.AppCapabilityType{
@@ -200,7 +200,6 @@ var _ = Describe("brokerapp address capability consistency", func() {
 		ns := "default"
 		appName := "valid-multicast"
 
-		pubSubTrue := true
 		app := &broker.BrokerApp{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      appName,
@@ -221,7 +220,7 @@ var _ = Describe("brokerapp address capability consistency", func() {
 						ProducerOf: []broker.AddressRef{
 							{
 								Address: "events",
-								PubSub:  &pubSubTrue,
+								PubSub:  ptr.To(true),
 							},
 						},
 						ConsumerOf: []broker.AddressRef{
@@ -334,7 +333,6 @@ var _ = Describe("brokerapp address capability consistency", func() {
 		ns := "default"
 		appName := "mixed-addresses"
 
-		pubSubTrue := true
 		app := &broker.BrokerApp{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      appName,
@@ -358,7 +356,7 @@ var _ = Describe("brokerapp address capability consistency", func() {
 						ProducerOf: []broker.AddressRef{
 							{
 								Address: "events",
-								PubSub:  &pubSubTrue,
+								PubSub:  ptr.To(true),
 							},
 							{
 								Address: "orders",
@@ -437,7 +435,6 @@ var _ = Describe("brokerapp address capability consistency", func() {
 		ns := "default"
 		appName := "invalid-declaration"
 
-		pubSubFalse := false
 		app := &broker.BrokerApp{
 			ObjectMeta: v1.ObjectMeta{
 				Name:      appName,
@@ -450,7 +447,7 @@ var _ = Describe("brokerapp address capability consistency", func() {
 				Addresses: []broker.AddressType{
 					{
 						Address:       "events",
-						PubSub:        &pubSubFalse,
+						PubSub:        ptr.To(false),
 						Subscriptions: []string{"sub1"},
 					},
 				},

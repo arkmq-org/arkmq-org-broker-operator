@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -513,7 +514,7 @@ var _ = Describe("brokerapp capacity", func() {
 								ProducerOf: []brokerv1beta2.AddressRef{
 									{
 										Address:      "shared",
-										PubSub:       &[]bool{true}[0],
+										PubSub:       ptr.To(true),
 										AppNamespace: "test",
 										AppName:      "existing-app"},
 								},

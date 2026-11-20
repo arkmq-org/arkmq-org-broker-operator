@@ -40,6 +40,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
@@ -1857,12 +1858,12 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 			ownerApp := setupApp(ctx, ownerAppName, labels, broker.BrokerAppSpec{
 				Addresses: []broker.AddressType{{
 					Address:               "orders",
-					PubSub:                &boolTrue,
+					PubSub:                ptr.To(true),
 					ProducerOfAppSelector: fmt.Sprintf("app.metadata.name == '%s'", producerAppName),
 				}},
 				Capabilities: []broker.AppCapabilityType{
 					{
-						ProducerOf: []broker.AddressRef{{Address: "orders", PubSub: &boolTrue}},
+						ProducerOf: []broker.AddressRef{{Address: "orders", PubSub: ptr.To(true)}},
 						ConsumerOf: []broker.AddressRef{{
 							Address:       "orders",
 							Subscriptions: []string{drainSubName},
@@ -1877,7 +1878,7 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 					{
 						ProducerOf: []broker.AddressRef{{
 							Address:      "orders",
-							PubSub:       &boolTrue,
+							PubSub:       ptr.To(true),
 							AppNamespace: defaultNamespace,
 							AppName:      ownerAppName,
 						}},

@@ -5,6 +5,7 @@ import (
 	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/utils/ptr"
 )
 
 var _ = Describe("addressref subscriptions", func() {
@@ -114,7 +115,7 @@ var _ = Describe("addressref subscriptions", func() {
 
 		app := NewBrokerApp("producer-app", "test").
 			WithAddresses(NewAddressType("events").WithSubscriptions("sub1").Build()).
-			WithProducerOf(v1beta2.AddressRef{Address: "events", PubSub: &[]bool{true}[0]}).Build()
+			WithProducerOf(v1beta2.AddressRef{Address: "events", PubSub: ptr.To(true)}).Build()
 
 		tracker, err := reconciler.buildAddressTracker(app)
 		Expect(err).NotTo(HaveOccurred())

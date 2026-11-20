@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/environments"
@@ -731,8 +732,7 @@ var _ = Describe("broker-service address post-binding validation", Label("bsvc")
 				updatedOwner.Spec.Addresses[0].Subscriptions = []string{"sub1"}
 
 				// ProducerOf explicitly declares anycast, conflicting with the now-multicast address
-				pubSubFalse := false
-				updatedOwner.Spec.Capabilities[0].ProducerOf[0].PubSub = &pubSubFalse
+				updatedOwner.Spec.Capabilities[0].ProducerOf[0].PubSub = ptr.To(false)
 
 				g.Expect(k8sClient.Update(ctx, updatedOwner)).Should(Succeed())
 			}, timeout, interval).Should(Succeed())
@@ -779,9 +779,8 @@ var _ = Describe("broker-service address post-binding validation", Label("bsvc")
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: ownerAppName, Namespace: defaultNamespace}, updatedOwner)).Should(Succeed())
 
 				// change to valid producer - multicast with no queue names (producers declare intent, don't create queues)
-				pubSubTrue := true
 				updatedOwner.Spec.Capabilities[0].ProducerOf = []broker.AddressRef{
-					{Address: "events", PubSub: &pubSubTrue}, // multicast producer (no queue names)
+					{Address: "events", PubSub: ptr.To(true)}, // multicast producer (no queue names)
 				}
 
 				g.Expect(k8sClient.Update(ctx, updatedOwner)).Should(Succeed())
