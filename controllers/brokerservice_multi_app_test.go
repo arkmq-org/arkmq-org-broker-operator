@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
@@ -210,7 +211,7 @@ var _ = Describe("broker-service multi-app scenarios", Label("bsvc"), func() {
 					},
 					Capabilities: []broker.AppCapabilityType{
 						{
-							ProducerOf: []broker.AddressRef{{Address: "APP2.TOPIC", PubSub: &boolTrue}},
+							ProducerOf: []broker.AddressRef{{Address: "APP2.TOPIC", PubSub: ptr.To(true)}},
 							ConsumerOf: []broker.AddressRef{
 								{
 									Address:       "APP2.TOPIC",
@@ -643,7 +644,7 @@ var _ = Describe("broker-service multi-app scenarios", Label("bsvc"), func() {
 					},
 					Addresses: []broker.AddressType{{
 						Address:               "shared.address",
-						PubSub:                &[]bool{true}[0],
+						PubSub:                ptr.To(true),
 						ConsumerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", otherNamespace),
 						ProducerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", defaultNamespace),
 					}},
@@ -866,7 +867,7 @@ var _ = Describe("broker-service multi-app scenarios", Label("bsvc"), func() {
 				createdApp3.Spec.Resources.Requests[corev1.ResourceMemory] = resource.MustParse("256Mi")
 				createdApp3.Spec.Capabilities = []broker.AppCapabilityType{
 					{
-						ProducerOf: []broker.AddressRef{{Address: "shared.address", AppNamespace: defaultNamespace, AppName: app1Name, PubSub: &[]bool{true}[0]}},
+						ProducerOf: []broker.AddressRef{{Address: "shared.address", AppNamespace: defaultNamespace, AppName: app1Name, PubSub: ptr.To(true)}},
 						ConsumerOf: []broker.AddressRef{
 							{
 								Address:       "app3.address",

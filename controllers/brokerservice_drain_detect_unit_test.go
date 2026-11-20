@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -1624,11 +1625,10 @@ var _ = Describe("cross-app drain unit", Label(unitLabel), func() {
 	It("processCapabilities sets enabled=false on subscription when deleted app is draining", Label(unitLabel), func() {
 		ns := "default"
 
-		boolTrue := true
 		app := NewBrokerApp("drain-deleted-app", ns).
 			WithAddresses(NewAddressType("orders").WithPubSub(true).Build()).
 			WithCapabilities(broker.AppCapabilityType{
-				ProducerOf: []broker.AddressRef{{Address: "orders", PubSub: &boolTrue}},
+				ProducerOf: []broker.AddressRef{{Address: "orders", PubSub: ptr.To(true)}},
 				ConsumerOf: []broker.AddressRef{{
 					Address:       "orders",
 					Subscriptions: []string{"drain-client.orders"},

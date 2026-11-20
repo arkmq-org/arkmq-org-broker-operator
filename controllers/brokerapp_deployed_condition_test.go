@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -67,11 +68,11 @@ var _ = Describe("brokerapp deployed condition", func() {
 					MatchLabels: map[string]string{"app": "broker"},
 				},
 				Addresses: []v1beta2.AddressType{
-					{Address: "conflicting-address", PubSub: func() *bool { b := true; return &b }()},
+					{Address: "conflicting-address", PubSub: ptr.To(true)},
 				},
 				Capabilities: []v1beta2.AppCapabilityType{{
 					ConsumerOf: []v1beta2.AddressRef{
-						{Address: "conflicting-address", PubSub: func() *bool { b := false; return &b }()},
+						{Address: "conflicting-address", PubSub: ptr.To(false)},
 					},
 				}},
 			},
@@ -175,11 +176,11 @@ var _ = Describe("brokerapp deployed condition", func() {
 					MatchLabels: map[string]string{"app": "broker"},
 				},
 				Addresses: []v1beta2.AddressType{
-					{Address: "conflicting-address", PubSub: func() *bool { b := true; return &b }()},
+					{Address: "conflicting-address", PubSub: ptr.To(true)},
 				},
 				Capabilities: []v1beta2.AppCapabilityType{{
 					ConsumerOf: []v1beta2.AddressRef{
-						{Address: "conflicting-address", PubSub: func() *bool { b := false; return &b }()},
+						{Address: "conflicting-address", PubSub: ptr.To(false)},
 					},
 				}},
 			},
@@ -254,11 +255,11 @@ var _ = Describe("brokerapp deployed condition", func() {
 					MatchLabels: map[string]string{"app": "broker"},
 				},
 				Addresses: []v1beta2.AddressType{
-					{Address: "conflicting-address", PubSub: func() *bool { b := true; return &b }()},
+					{Address: "conflicting-address", PubSub: ptr.To(true)},
 				},
 				Capabilities: []v1beta2.AppCapabilityType{{
 					ConsumerOf: []v1beta2.AddressRef{
-						{Address: "conflicting-address", PubSub: func() *bool { b := false; return &b }()},
+						{Address: "conflicting-address", PubSub: ptr.To(false)},
 					},
 				}},
 			},

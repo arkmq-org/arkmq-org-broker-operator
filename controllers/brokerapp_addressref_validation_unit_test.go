@@ -23,10 +23,9 @@ import (
 	"github.com/go-logr/logr"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
-
-func boolPtr(b bool) *bool { return &b }
 
 var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 
@@ -62,7 +61,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 		It("rejects pubSub=false with subscriptions", Label(unitLabel), func() {
 			ref := broker.AddressRef{
 				Address:       "orders",
-				PubSub:        boolPtr(false),
+				PubSub:        ptr.To(false),
 				Subscriptions: []string{"sub1"},
 			}
 			err := validateAddressRef(ref, "ConsumerOf", 0)
@@ -94,7 +93,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 		It("rejects multicast producer with subscription queue names", Label(unitLabel), func() {
 			ref := broker.AddressRef{
 				Address:       "events",
-				PubSub:        boolPtr(true),
+				PubSub:        ptr.To(true),
 				Subscriptions: []string{"sub1"},
 			}
 			err := validateProducerOfRef(ref, 0)
@@ -105,7 +104,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 		It("accepts multicast producer with empty subscriptions", Label(unitLabel), func() {
 			ref := broker.AddressRef{
 				Address: "events",
-				PubSub:  boolPtr(true),
+				PubSub:  ptr.To(true),
 			}
 			Expect(validateProducerOfRef(ref, 0)).To(Succeed())
 		})
@@ -129,7 +128,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 		It("rejects pubSub consumer with zero subscriptions", Label(unitLabel), func() {
 			ref := broker.AddressRef{
 				Address: "events",
-				PubSub:  boolPtr(true),
+				PubSub:  ptr.To(true),
 			}
 			err := validateConsumerOfRef(ref, 0)
 			Expect(err).To(HaveOccurred())
@@ -139,7 +138,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 		It("rejects pubSub consumer with empty queue name", Label(unitLabel), func() {
 			ref := broker.AddressRef{
 				Address:       "events",
-				PubSub:        boolPtr(true),
+				PubSub:        ptr.To(true),
 				Subscriptions: []string{"valid-sub", ""},
 			}
 			err := validateConsumerOfRef(ref, 0)
@@ -150,7 +149,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 		It("rejects pubSub consumer with FQQN in subscription", Label(unitLabel), func() {
 			ref := broker.AddressRef{
 				Address:       "events",
-				PubSub:        boolPtr(true),
+				PubSub:        ptr.To(true),
 				Subscriptions: []string{"events::sub1"},
 			}
 			err := validateConsumerOfRef(ref, 0)
@@ -161,7 +160,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 		It("accepts pubSub consumer with valid subscriptions", Label(unitLabel), func() {
 			ref := broker.AddressRef{
 				Address:       "events",
-				PubSub:        boolPtr(true),
+				PubSub:        ptr.To(true),
 				Subscriptions: []string{"sub1", "sub2"},
 			}
 			Expect(validateConsumerOfRef(ref, 0)).To(Succeed())
@@ -178,7 +177,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 		It("rejects mixed routing for same address", Label(unitLabel), func() {
 			cap := broker.AppCapabilityType{
 				ProducerOf: []broker.AddressRef{
-					{Address: "orders", PubSub: boolPtr(true)},
+					{Address: "orders", PubSub: ptr.To(true)},
 				},
 				ConsumerOf: []broker.AddressRef{
 					{Address: "orders"},
@@ -193,10 +192,10 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 		It("accepts consistent multicast routing", Label(unitLabel), func() {
 			cap := broker.AppCapabilityType{
 				ProducerOf: []broker.AddressRef{
-					{Address: "events", PubSub: boolPtr(true)},
+					{Address: "events", PubSub: ptr.To(true)},
 				},
 				ConsumerOf: []broker.AddressRef{
-					{Address: "events", PubSub: boolPtr(true), Subscriptions: []string{"sub1"}},
+					{Address: "events", PubSub: ptr.To(true), Subscriptions: []string{"sub1"}},
 				},
 			}
 			Expect(validateCapabilityRoutingConsistency(cap, nil)).To(Succeed())
@@ -217,7 +216,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 		It("skips cross-app refs in consistency check", Label(unitLabel), func() {
 			cap := broker.AppCapabilityType{
 				ProducerOf: []broker.AddressRef{
-					{Address: "events", PubSub: boolPtr(true)},
+					{Address: "events", PubSub: ptr.To(true)},
 				},
 				ConsumerOf: []broker.AddressRef{
 					{Address: "events", AppNamespace: "other-ns", AppName: "other-app"},
@@ -243,7 +242,7 @@ var _ = Describe("addressref validation unit", Label(unitLabel), func() {
 			declared := map[string]bool{"events": true}
 			cap := broker.AppCapabilityType{
 				ProducerOf: []broker.AddressRef{
-					{Address: "events", PubSub: boolPtr(false)},
+					{Address: "events", PubSub: ptr.To(false)},
 				},
 				ConsumerOf: []broker.AddressRef{
 					{Address: "events", Subscriptions: []string{"sub1"}},

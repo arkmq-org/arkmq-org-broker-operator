@@ -40,6 +40,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	broker "github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
@@ -1432,11 +1433,11 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		ownerApp := setupApp(ctx, ownerName, map[string]string{"test": "fm-xns-drain"}, broker.BrokerAppSpec{
 			Addresses: []broker.AddressType{{
 				Address:               "events",
-				PubSub:                &boolTrue,
+				PubSub:                ptr.To(true),
 				ConsumerOfAppSelector: fmt.Sprintf("app.metadata.namespace == '%s'", otherNamespace),
 			}},
 			Capabilities: []broker.AppCapabilityType{{
-				ProducerOf: []broker.AddressRef{{Address: "events", PubSub: &boolTrue}},
+				ProducerOf: []broker.AddressRef{{Address: "events", PubSub: ptr.To(true)}},
 				ConsumerOf: []broker.AddressRef{{
 					Address:       "events",
 					Subscriptions: []string{"owner.events"},
