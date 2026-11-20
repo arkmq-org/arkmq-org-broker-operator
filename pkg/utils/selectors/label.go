@@ -24,8 +24,7 @@ const (
 	LabelAppKubernetesNameValue = "broker"
 
 	// Domain-specific label keys
-	LabelBrokerService   = "broker.arkmq.org/service"
-	LabelBrokerPeerIndex = "broker.arkmq.org/peer-index"
+	LabelBrokerService = "broker.arkmq.org/service"
 
 	// LabelMonitoring marks the scrape wiring the operator generates. It is the
 	// single selector a Prometheus instance needs, so nothing has to be
