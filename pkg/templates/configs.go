@@ -40,9 +40,6 @@ var pemcfgTmpl string
 //go:embed ssl_header.yaml.template
 var sslHeaderTmpl string
 
-//go:embed broker_prometheus.yaml.template
-var brokerPrometheusTmpl string
-
 //go:embed service_prometheus.yaml.template
 var servicePrometheusTmpl string
 
@@ -65,7 +62,6 @@ const (
 	AppCertRoles      = "app_cert_roles"
 	Jolokia           = "jolokia"
 	PemCfg            = "pemcfg"
-	BrokerPrometheus  = "broker_prometheus"
 	ServicePrometheus = "service_prometheus"
 )
 
@@ -78,7 +74,6 @@ var parsedTemplates = map[string]*template.Template{
 	AppCertRoles:      mustParseWith(certRolesTmpl, AppCertRoles, appCertRolesTmpl),
 	Jolokia:           template.Must(template.New(Jolokia).Parse(jolokiaTmpl)),
 	PemCfg:            template.Must(template.New(PemCfg).Parse(pemcfgTmpl)),
-	BrokerPrometheus:  mustParse(BrokerPrometheus, brokerPrometheusTmpl),
 	ServicePrometheus: mustParse(ServicePrometheus, servicePrometheusTmpl),
 }
 
@@ -128,12 +123,6 @@ type PemCfgConfig struct {
 	Alias       string
 	CertKeyPath string
 	CertCrtPath string
-}
-
-type BrokerPrometheusConfig struct {
-	PemCfgPath       string
-	CATrustStorePath string
-	BrokerName       string
 }
 
 type ServicePrometheusConfig struct {
