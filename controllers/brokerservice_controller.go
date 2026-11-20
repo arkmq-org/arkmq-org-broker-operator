@@ -368,8 +368,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 		selectors.LabelAppKubernetesComponent: "broker-service",
 		selectors.LabelAppKubernetesManagedBy: common.OperatorName,
 		// Domain-specific labels
-		selectors.LabelBrokerService:   reconciler.instance.Name,
-		selectors.LabelBrokerPeerIndex: "0",
+		selectors.LabelBrokerService: reconciler.instance.Name,
 	}
 	desired.Spec.Env = reconciler.instance.Spec.Env
 	desired.Spec.Resources = reconciler.instance.Spec.Resources
