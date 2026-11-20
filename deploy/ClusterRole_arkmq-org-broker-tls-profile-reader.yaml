@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: arkmq-org-broker-tls-profile-reader
+rules:
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - apiservers
+  verbs:
+  - get
+  - list
+  - watch
