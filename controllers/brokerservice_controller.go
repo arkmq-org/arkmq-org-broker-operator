@@ -52,10 +52,12 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
+	builder_opts "sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -409,8 +411,9 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts
 	if deployedSecret != nil {
 		desired = deployedSecret.(*corev1.Secret)
 	} else {
-		desired = secrets.NewSecret(resourceName, nil, nil)
+		desired = secrets.NewSecret(resourceName, nil, reconciler.dependentLabels())
 	}
+	reconciler.ensureDependentLabels(desired)
 
 	// find all apps that select this service
 	boundApps := &broker.BrokerAppList{}
@@ -860,6 +863,47 @@ func (h *appToServiceHandler) getServiceRequest(obj client.Object) *reconcile.Re
 	return nil
 }
 
+func (reconciler *BrokerServiceInstanceReconciler) dependentLabels() map[string]string {
+	return map[string]string{
+		selectors.LabelBrokerService: reconciler.instance.Name,
+	}
+}
+
+func (reconciler *BrokerServiceInstanceReconciler) ensureDependentLabels(obj client.Object) {
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels[selectors.LabelBrokerService] = reconciler.instance.Name
+	obj.SetLabels(labels)
+}
+
+func dependentToServiceMapper(_ context.Context, obj client.Object) []reconcile.Request {
+	svcName, ok := obj.GetLabels()[selectors.LabelBrokerService]
+	if !ok || svcName == "" {
+		return nil
+	}
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Namespace: obj.GetNamespace(),
+			Name:      svcName,
+		},
+	}}
+}
+
+func brokerServiceLabelPredicate() predicate.Predicate {
+	sel, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{
+			Key:      selectors.LabelBrokerService,
+			Operator: metav1.LabelSelectorOpExists,
+		}},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("invalid broker-service label selector: %v", err))
+	}
+	return sel
+}
+
 func (r *BrokerServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Note: Namespace informer is set up in main.go for CEL evaluation
 
@@ -874,12 +918,20 @@ func (r *BrokerServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
+	labelPred := brokerServiceLabelPredicate()
+
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&broker.BrokerService{}).
 		Watches(&broker.BrokerApp{}, &appToServiceHandler{}).
 		Watches(&broker.Broker{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
 			return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
-		}))
+		})).
+		Watches(&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(dependentToServiceMapper),
+			builder_opts.WithPredicates(labelPred)).
+		Watches(&corev1.Service{},
+			handler.EnqueueRequestsFromMapFunc(dependentToServiceMapper),
+			builder_opts.WithPredicates(labelPred))
 
 	return builder.Complete(r)
 }
@@ -1533,8 +1585,9 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 	if obj != nil {
 		desired = obj.(*corev1.Secret)
 	} else {
-		desired = secrets.NewSecret(resourceName, nil, nil)
+		desired = secrets.NewSecret(resourceName, nil, reconciler.dependentLabels())
 	}
+	reconciler.ensureDependentLabels(desired)
 
 	if desired.Data == nil {
 		desired.Data = make(map[string][]byte)
