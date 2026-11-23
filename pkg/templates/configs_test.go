@@ -252,9 +252,9 @@ var _ = Describe("ServicePrometheusConfigData", func() {
 		Expect(aIdx).To(BeNumerically("<", bIdx))
 	})
 
-	It("includes the broker_queue rules pattern", func() {
+	It("includes the broker_address rules pattern", func() {
 		data := mustRenderServicePrometheus(ServicePrometheusConfig{PemCfgPath: "/pem", CATrustStorePath: "/ca", BrokerName: "svc"}, nil)
-		Expect(data).To(ContainSubstring("broker_queue_$5"))
+		Expect(data).To(ContainSubstring("broker_address_$5"))
 	})
 
 	It("labels each app queue with its owner, ahead of the generic rule", func() {

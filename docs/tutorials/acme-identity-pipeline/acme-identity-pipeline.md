@@ -12,11 +12,11 @@ toc: true
 
 ## 1. What We're Building
 
-Acme ID verifies identities. Three teams build the pipeline, a platform team runs the brokers, and nobody files a ticket to get a queue. This tutorial builds that setup on a plain Kubernetes cluster and plays it **as the people involved**: every act starts by logging in as the team member who performs it, and the cluster answers with that person's rights. Identity comes from an OIDC provider (Keycloak) wired into the API server, so `alice` is a real user to Kubernetes, not an impersonation flag.
+Acme ID verifies identities. Three teams build the pipeline, a platform team runs the brokers, and nobody files a ticket to get an address. This tutorial builds that setup on a plain Kubernetes cluster and plays it **as the people involved**: every act starts by logging in as the team member who performs it, and the cluster answers with that person's rights. Identity comes from an OIDC provider (Keycloak) wired into the API server, so `alice` is a real user to Kubernetes, not an impersonation flag.
 
 The pipeline processes identity cases through four stages, capture, scoring, matching and notification, connected through two BrokerServices managed by the ArkMQ Operator. A sandbox BrokerService lets a team load-test with the same address names without touching production, and a CEL authority gate shows that what an app asks for is not the same as what the platform grants.
 
-Every queue metric the brokers export carries the namespace of the team that owns the queue. A tenancy proxy in front of Prometheus, the same two components OpenShift puts in front of its own monitoring, turns that label into access control: a team reads its queues, the platform reads everything. Grafana logs users in through the same provider and forwards each user's own token to that proxy, so a dashboard shows its viewer their queues and nothing else.
+Every address metric the brokers export carries the namespace of the team that owns the address. A tenancy proxy in front of Prometheus, the same two components OpenShift puts in front of its own monitoring, turns that label into access control: a team reads its addresses, the platform reads everything. Grafana logs users in through the same provider and forwards each user's own token to that proxy, so a dashboard shows its viewer their addresses and nothing else.
 
 Every command in this document is executable and asserts what the text claims. The whole file runs unattended with [markdown-runner](https://github.com/arkmq-org/markdown-runner), which is how the operator's CI validates it.
 
@@ -26,10 +26,10 @@ Six requirements drive the design, one per act:
 |---|-------------|---------------------|
 | R1 | The platform offers messaging as a service | `BrokerService` creation with CEL `appSelectorExpression` |
 | R2 | Each team declares its apps without filing tickets | `BrokerApp` creation in team namespaces |
-| R3 | One team hands a work stream to another | Cross-namespace anycast via `consumerOf` with `appNamespace`, guarded by the owner's `consumerOfAppSelector` CEL gate |
-| R4 | One result reaches several independent readers | Multicast (`pubSub: true`) with durable subscriptions |
+| R3 | One team hands a work stream to another | Cross-namespace shared addresses via `consumerOf` with `appNamespace`, guarded by the owner's `consumerOfAppSelector` CEL gate |
+| R4 | One result reaches several independent subscribers | Multicast (`pubSub: true`) with durable subscriptions |
 | R5 | Production only takes apps that explicitly ask for it | CEL reading the app's `spec.serviceSelector.matchLabels` |
-| R6 | Each team sees its own queues, the platform sees everything | Metrics labelled per owning namespace, served through a tenancy proxy, charted in Grafana as each user |
+| R6 | Each team sees its own addresses, the platform sees everything | Metrics labelled per owning namespace, served through a tenancy proxy, charted in Grafana as each user |
 
 ### Architecture
 
@@ -1483,7 +1483,7 @@ Switched to context "acme-identity-pipeline".
 
 ## 6. Observability Wiring: Metrics With a Tenant
 
-The brokers expose their metrics on port 8888 with the Prometheus Java agent; the operator generates one `ServiceMonitor` per BrokerService, scraping under the `prometheus` identity it issued a certificate for. Every queue series carries the labels of the queue's owner: `namespace` and `brokerapp` are the team's, not the broker's. That is the whole basis of R6, and it costs the teams nothing.
+The brokers expose their metrics on port 8888 with the Prometheus Java agent; the operator generates one `ServiceMonitor` per BrokerService, scraping under the `prometheus` identity it issued a certificate for. Every address series carries the labels of the addresse's owner: `namespace` and `brokerapp` are the team's, not the broker's.
 
 Labels are not access control. OpenShift gets from one to the other with two sidecars in front of its Thanos querier: [kube-rbac-proxy](https://github.com/brancz/kube-rbac-proxy) authenticates the caller's bearer token and asks the API server whether that user may `get pods.metrics.k8s.io` in the namespace the request names, then [prom-label-proxy](https://github.com/prometheus-community/prom-label-proxy) rewrites the PromQL so it can only ever match `namespace="<that namespace>"`. The same two containers in front of this Prometheus give the same semantics, with one difference: OpenShift's querier reads the namespace from a `?namespace=` query parameter, this proxy reads it from an `X-Namespace` header, because Grafana can attach a header to a datasource but not a query parameter. This is the endpoint the OpenShift console calls for every chart; here, Grafana will call it with each user's own token.
 
@@ -1770,7 +1770,7 @@ acme-notify -> https://tenancy-proxy.acme-platform.svc:9092
 acme-platform -> https://tenancy-proxy.acme-platform.svc:9092
 ```
 
-The dashboard's `Team` variable is that list of datasources. Its queue panels are the queries the ArkMQ console plugin sends on OpenShift; its `Broker memory` panel reads the broker pods through the `acme-platform` datasource, which only the platform user can open.
+The dashboard's `Team` variable is that list of datasources. Its address panels are the queries the ArkMQ console plugin sends on OpenShift; its `Broker memory` panel reads the broker pods through the `acme-platform` datasource, which only the platform user can open.
 
 ```bash {"stage":"observability", "label":"load the dashboard", "rootdir":"$initial_dir", "runtime":"bash"}
 kubectl apply -f docs/tutorials/acme-identity-pipeline/assets/acme-dashboard-configmap.yaml
@@ -2220,8 +2220,8 @@ acme-enroll/scorer@2
 
 Bob deploys two BrokerApps in `acme-ident`:
 
-- **`matcher`** — consumes from scorer's `IDENT.REQUEST` (cross-namespace, admitted by the gate Alice wrote for it), produces onto `IDENT.RESULTS` as a **multicast topic** (`pubSub: true`). Each message reaches every subscriber, as long as the subscriber passes Bob's gate: apps from `acme-ident` and `acme-notify`.
-- **`registry-sync`** — consumes from matcher's `IDENT.RESULTS` through a durable **subscription** named `registry`. The operator creates the subscription queue `IDENT.RESULTS::registry` on the broker.
+- **`matcher`** — consumes from scorer's `IDENT.REQUEST` (cross-namespace, admitted by the gate Alice wrote for it), produces onto `IDENT.RESULTS` with `pubSub: true`. Each message reaches every subscription, as long as the subscription passes Bob's gate: apps from `acme-ident` and `acme-notify`.
+- **`registry-sync`** — consumes from matcher's `IDENT.RESULTS` through a durable **subscription** named `registry`. The operator creates the subscription address `IDENT.RESULTS::registry` on the broker.
 
 Bob never asked Alice for credentials. The operator derives the broker's security roles from the declared contract.
 
@@ -2295,7 +2295,7 @@ EOF
 brokerapp.broker.arkmq.org/matcher created
 ```
 
-The `pubSub: true` on both the address and the `producerOf` capability tells the operator to configure `IDENT.RESULTS` as a multicast address (JMS topic). Every subscription gets its own durable queue. The gate admits whole namespaces rather than named apps: Bob grants the stream to the Notify team without knowing which apps Carol will build, and `registry-sync`, in his own namespace, passes the same gate.
+The `pubSub: true` on both the address and the `producerOf` capability tells the operator to configure `IDENT.RESULTS` as a multicast address. Every subscription gets its own durable address. The gate admits whole namespaces rather than named apps: Bob grants the stream to the Notify team without knowing which apps Carol will build, and `registry-sync`, in his own namespace, passes the same gate.
 
 ```bash {"stage":"deploy_ident", "label":"deploy registry-sync brokerapp", "runtime":"bash"}
 kubectl apply -f - <<'EOF'
@@ -2322,7 +2322,7 @@ EOF
 brokerapp.broker.arkmq.org/registry-sync created
 ```
 
-The `subscriptions: [registry]` field creates a durable subscription queue named `IDENT.RESULTS::registry` on the broker. The app consumes from this FQQN (fully qualified queue name), so it gets its own independent copy of every message published to `IDENT.RESULTS`.
+The `subscriptions: [registry]` field creates a durable subscription address named `IDENT.RESULTS::registry` on the broker. The app consumes from this fully qualified address name, so it gets its own independent copy of every message published to `IDENT.RESULTS`.
 
 ```bash {"stage":"deploy_ident", "label":"wait for ident brokerApps", "runtime":"bash"}
 kubectl wait brokerapp matcher registry-sync -n acme-ident --for=condition=Ready --timeout=300s
@@ -2538,7 +2538,7 @@ Error from server (Forbidden): secrets is forbidden: User "bob" cannot list reso
 
 ## 10. Act 4 — Notify: Independent Readers (R4)
 
-Carol deploys the `notifier` in `acme-notify`, subscribing to matcher's `IDENT.RESULTS` with subscription name `notifier`. Each subscriber — `registry-sync` and `notifier` — gets its own durable queue, so neither steals messages from the other. Every case reaches both.
+Carol deploys the `notifier` in `acme-notify`, subscribing to matcher's `IDENT.RESULTS` with subscription name `notifier`. Each subscriber — `registry-sync` and `notifier` — gets its own address, so neither steals messages from the other. Every case reaches both.
 
 Carol administers `acme-notify`. Her app subscribes to a topic another team owns, with a subscription name of her own.
 
@@ -2677,7 +2677,7 @@ deployment.apps/notifier condition met
 
 ### Verify
 
-Carol's subscription is bound to the production broker, and her consumer receives cases on her own queue of Ident's topic.
+Carol's subscription is bound to the production broker, and her consumer receives cases on her own stream of Ident's address.
 
 ```bash {"stage":"deploy_notify", "label":"verify notifier", "runtime":"bash"}
 test "$(kubectl get brokerapp notifier -n acme-notify -o jsonpath='{.status.service.namespace}/{.status.service.name}')" = acme-platform/core-prd
@@ -3110,13 +3110,13 @@ Error from server (Forbidden): namespaces "acme-ident-sim" is forbidden: User "b
 
 ---
 
-## 13. Act 7 — Every Team Sees Its Own Queues (R6)
+## 13. Act 7 — Every Team Sees Its Own Addresses (R6)
 
-Every chart of the ArkMQ console plugin is one Prometheus query sent with the viewer's token and the namespace of the resource on screen: `broker_queue_message_count{brokerapp="…"}` and `broker_queue_consumer_count{brokerapp="…"}` on a BrokerApp page, `sum by (brokerapp) (broker_queue_message_count{job="core-prd-metrics"})` per app namespace on a BrokerService page, and the broker pods' memory in the service namespace (the pod-level cAdvisor series, the one with an empty `container` label). This act sends exactly those requests to the tenancy proxy as each user, first with `curl`, then through Grafana, and makes the queues move so there is something to see.
+Every chart of the ArkMQ console plugin is one Prometheus query sent with the viewer's token and the namespace of the resource on screen: `broker_address_message_count{brokerapp="…"}` and `broker_address_consumer_count{brokerapp="…"}` on a BrokerApp page, `sum by (brokerapp) (broker_address_message_count{job="core-prd-metrics"})` per app namespace on a BrokerService page, and the broker pods' memory in the service namespace (the pod-level cAdvisor series, the one with an empty `container` label). This act sends exactly those requests to the tenancy proxy as each user, first with `curl`, then through Grafana, and makes the addresses move so there is something to see.
 
-The scenario is Carol's: she stops `notifier`, its subscription queue fills while `registry-sync`'s stays empty on the same topic, then she restarts it and the backlog drains. The brokers are scraped every 15 seconds, so each number below moves in steps.
+The scenario is Carol's: she stops `notifier`, its subscription fills while `registry-sync`'s stays empty on the same PubSub address, then she restarts it and the backlog drains. The brokers are scraped every 15 seconds, so each number below moves in steps.
 
-### Carol reads her queue
+### Carol reads her subscription address
 
 ```bash {"stage":"metrics", "label":"log in as carol", "runtime":"bash"}
 export TOKEN=$(curl -s --cacert "${ACME_CA}" "${ACME_ISSUER}/protocol/openid-connect/token" \
@@ -3139,13 +3139,13 @@ Groups                                              [system:authenticated]
 Extra: authentication.kubernetes.io/credential-id   [JTI=94f0f688-de4d-0484-e838-379dd22c3d63]
 ```
 
-What Carol's BrokerApp page shows: one consumer on her subscription queue, no backlog. The same query for Bob's namespace is refused: the proxy asked the API server whether `carol` may read metrics in `acme-ident`, and it said no.
+What Carol's BrokerApp page shows: one consumer on her subscription address, no backlog. The same query for Bob's namespace is refused: the proxy asked the API server whether `carol` may read metrics in `acme-ident`, and it said no.
 
 ```bash {"stage":"metrics", "label":"carol reads notifier metrics", "runtime":"bash"}
-timeout 180 bash -c 'until [ "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode '\''query=max(broker_queue_consumer_count{brokerapp="notifier"})'\'' | jq -r '\''.data.result[0].value[1] // empty'\'')" = 1 ]; do sleep 5; done'
-echo "notifier consumers: $(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode 'query=max(broker_queue_consumer_count{brokerapp="notifier"})' | jq -r '.data.result[0].value[1] // empty')"
-echo "notifier backlog:   $(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode 'query=max(broker_queue_message_count{brokerapp="notifier"})' | jq -r '.data.result[0].value[1] // empty')"
-test "$(curl -s -o /dev/null -w '%{http_code}' --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-ident" --data-urlencode 'query=max(broker_queue_message_count{brokerapp="registry-sync"})' )" = 403
+timeout 180 bash -c 'until [ "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode '\''query=max(broker_address_consumer_count{brokerapp="notifier"})'\'' | jq -r '\''.data.result[0].value[1] // empty'\'')" = 1 ]; do sleep 5; done'
+echo "notifier consumers: $(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode 'query=max(broker_address_consumer_count{brokerapp="notifier"})' | jq -r '.data.result[0].value[1] // empty')"
+echo "notifier backlog:   $(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode 'query=max(broker_address_message_count{brokerapp="notifier"})' | jq -r '.data.result[0].value[1] // empty')"
+test "$(curl -s -o /dev/null -w '%{http_code}' --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-ident" --data-urlencode 'query=max(broker_address_message_count{brokerapp="registry-sync"})' )" = 403
 echo "carol -> acme-ident: 403"
 ```
 ```shell markdown_runner
@@ -3154,16 +3154,16 @@ notifier backlog:   0
 carol -> acme-ident: 403
 ```
 
-![Carol's dashboard, Team = acme-notify: one consumer on notifier, an empty queue, and the broker row refused to her](assets/images/carol-notify-before.png)
+![Carol's dashboard, Team = acme-notify: one consumer on notifier, an empty address, and the broker row refused to her](assets/images/carol-notify-before.png)
 
 ### Carol stops her consumer
 
 ```bash {"stage":"metrics", "label":"carol scales notifier down", "runtime":"bash"}
 kubectl scale deploy/notifier -n acme-notify --replicas=0
-timeout 180 bash -c 'until [ "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode '\''query=max(broker_queue_consumer_count{brokerapp="notifier"})'\'' | jq -r '\''.data.result[0].value[1] // empty'\'')" = 0 ]; do sleep 5; done'
+timeout 180 bash -c 'until [ "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode '\''query=max(broker_address_consumer_count{brokerapp="notifier"})'\'' | jq -r '\''.data.result[0].value[1] // empty'\'')" = 0 ]; do sleep 5; done'
 echo "notifier has no consumer left"
-timeout 300 bash -c 'until [ "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode '\''query=max(broker_queue_message_count{brokerapp="notifier"})'\'' | jq -r '\''.data.result[0].value[1] // empty'\'' | cut -d. -f1)" -gt 30 ]; do sleep 5; done'
-echo "notifier backlog: $(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode 'query=max(broker_queue_message_count{brokerapp="notifier"})' | jq -r '.data.result[0].value[1] // empty')"
+timeout 300 bash -c 'until [ "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode '\''query=max(broker_address_message_count{brokerapp="notifier"})'\'' | jq -r '\''.data.result[0].value[1] // empty'\'' | cut -d. -f1)" -gt 30 ]; do sleep 5; done'
+echo "notifier backlog: $(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode 'query=max(broker_address_message_count{brokerapp="notifier"})' | jq -r '.data.result[0].value[1] // empty')"
 ```
 ```shell markdown_runner
 deployment.apps/notifier scaled
@@ -3171,11 +3171,11 @@ notifier has no consumer left
 notifier backlog: 49
 ```
 
-![A few minutes later on Carol's dashboard: no consumer, and the notifier queue past 400 messages](assets/images/carol-notify-backlog.png)
+![A few minutes later on Carol's dashboard: no consumer, and the notifier address past 400 messages](assets/images/carol-notify-backlog.png)
 
 ### Bob's subscription is unaffected
 
-Same topic, separate durable queue: `registry-sync` keeps up while `notifier`'s copy accumulates. Bob sees his, and nothing of Carol's.
+Same address, separate subscription stream: `registry-sync` keeps up while `notifier`'s copy accumulates. Bob sees his, and nothing of Carol's.
 
 ```bash {"stage":"metrics", "label":"log in as bob", "runtime":"bash"}
 export TOKEN=$(curl -s --cacert "${ACME_CA}" "${ACME_ISSUER}/protocol/openid-connect/token" \
@@ -3199,10 +3199,10 @@ Extra: authentication.kubernetes.io/credential-id   [JTI=ab6cd52a-36fd-3b37-7459
 ```
 
 ```bash {"stage":"metrics", "label":"bob reads registry-sync metrics", "runtime":"bash"}
-backlog=$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-ident" --data-urlencode 'query=max(broker_queue_message_count{brokerapp="registry-sync"})' | jq -r '.data.result[0].value[1] // empty' | cut -d. -f1)
+backlog=$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-ident" --data-urlencode 'query=max(broker_address_message_count{brokerapp="registry-sync"})' | jq -r '.data.result[0].value[1] // empty' | cut -d. -f1)
 echo "registry-sync backlog: ${backlog}"
 test "${backlog:-0}" -lt 10
-test "$(curl -s -o /dev/null -w '%{http_code}' --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode 'query=max(broker_queue_message_count{brokerapp="notifier"})' )" = 403
+test "$(curl -s -o /dev/null -w '%{http_code}' --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode 'query=max(broker_address_message_count{brokerapp="notifier"})' )" = 403
 echo "bob -> acme-notify: 403"
 ```
 ```shell markdown_runner
@@ -3212,7 +3212,7 @@ bob -> acme-notify: 403
 
 ### Alice opens the production broker's page
 
-A broker's page asks two kinds of questions. The broker's own memory lives in `acme-platform`, which no team reads: that panel is a refusal for Alice. The per-app queue panels ask each app namespace in turn: Alice gets Enroll's two apps and a refusal for the others.
+A broker's page asks two kinds of questions. The broker's own memory lives in `acme-platform`, which no team reads: that panel is a refusal for Alice. The per-app address panels ask each app namespace in turn: Alice gets Enroll's two apps and a refusal for the others.
 
 ```bash {"stage":"metrics", "label":"log in as alice", "runtime":"bash"}
 export TOKEN=$(curl -s --cacert "${ACME_CA}" "${ACME_ISSUER}/protocol/openid-connect/token" \
@@ -3238,16 +3238,16 @@ Extra: authentication.kubernetes.io/credential-id   [JTI=d3a26581-6bdb-786d-8005
 ```bash {"stage":"metrics", "label":"alice reads core-prd metrics", "runtime":"bash"}
 test "$(curl -s -o /dev/null -w '%{http_code}' --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-platform" --data-urlencode 'query=sum(container_memory_working_set_bytes{pod=~"core-prd-ss-.*",container=""})' )" = 403
 echo "alice -> acme-platform (broker memory): 403"
-apps=$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-enroll" --data-urlencode 'query=sum by (brokerapp) (broker_queue_message_count{job="core-prd-metrics"})'  | jq -r '.data.result[].metric.brokerapp' | sort | tr '\n' ' ')
-echo "alice -> acme-enroll (queue depth per app): ${apps}"
+apps=$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-enroll" --data-urlencode 'query=sum by (brokerapp) (broker_address_message_count{job="core-prd-metrics"})'  | jq -r '.data.result[].metric.brokerapp' | sort | tr '\n' ' ')
+echo "alice -> acme-enroll (address depth per app): ${apps}"
 test "${apps}" = "capture scorer "
-test "$(curl -s -o /dev/null -w '%{http_code}' --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-ident" --data-urlencode 'query=sum by (brokerapp) (broker_queue_message_count{job="core-prd-metrics"})' )" = 403
-test "$(curl -s -o /dev/null -w '%{http_code}' --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode 'query=sum by (brokerapp) (broker_queue_message_count{job="core-prd-metrics"})' )" = 403
+test "$(curl -s -o /dev/null -w '%{http_code}' --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-ident" --data-urlencode 'query=sum by (brokerapp) (broker_address_message_count{job="core-prd-metrics"})' )" = 403
+test "$(curl -s -o /dev/null -w '%{http_code}' --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode 'query=sum by (brokerapp) (broker_address_message_count{job="core-prd-metrics"})' )" = 403
 echo "alice -> acme-ident, acme-notify: 403"
 ```
 ```shell markdown_runner
 alice -> acme-platform (broker memory): 403
-alice -> acme-enroll (queue depth per app): capture scorer 
+alice -> acme-enroll (address depth per app): capture scorer
 alice -> acme-ident, acme-notify: 403
 ```
 
@@ -3274,7 +3274,7 @@ With that session, the dashboard's query goes through the `acme-enroll` datasour
 
 ```bash {"stage":"metrics", "label":"alice dashboard team by team", "runtime":"bash"}
 JAR="${ACME_WORK}/grafana-cookies-alice"
-body='{"from":"now-5m","to":"now","queries":[{"refId":"A","datasource":{"uid":"__DS__"},"expr":"sum by (brokerapp) (broker_queue_message_count)","instant":true}]}'
+body='{"from":"now-5m","to":"now","queries":[{"refId":"A","datasource":{"uid":"__DS__"},"expr":"sum by (brokerapp) (broker_address_message_count)","instant":true}]}'
 curl -s -b "${JAR}" -H 'Content-Type: application/json' "${GRAFANA_URL}/api/ds/query" -d "${body//__DS__/acme-enroll}" > "${ACME_WORK}/grafana-enroll.json"
 apps=$(jq -r '[.results.A.frames[].schema.fields[] | .labels.brokerapp // empty] | sort | join(" ")' "${ACME_WORK}/grafana-enroll.json")
 echo "alice, Team = acme-enroll: ${apps}"
@@ -3320,14 +3320,14 @@ Extra: authentication.kubernetes.io/credential-id   [JTI=226363cb-154a-4315-56a4
 
 ```bash {"stage":"metrics", "label":"platform reads every namespace", "runtime":"bash"}
 for ns in acme-enroll acme-ident acme-notify acme-ident-sim; do
-  series=$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: ${ns}" --data-urlencode 'query=sum by (brokerapp) (broker_queue_message_count)'  | jq -r '.data.result | length')
+  series=$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: ${ns}" --data-urlencode 'query=sum by (brokerapp) (broker_address_message_count)'  | jq -r '.data.result | length')
   echo "platform -> ${ns}: ${series} app(s)"
   test "${series}" -ge 1
 done
 test "$(curl -s -o /dev/null -w '%{http_code}' --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-platform" --data-urlencode 'query=sum(container_memory_working_set_bytes{pod=~"core-prd-ss-.*",container=""})' )" = 200
 echo "platform -> acme-platform (broker memory): 200"
-test "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-enroll" --data-urlencode 'query=max by (broker) (broker_queue_message_count{queue="IDENT.REQUEST"})'  | jq -r '.data.result[0].metric.broker')" = core-prd
-test "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-ident-sim" --data-urlencode 'query=max by (broker) (broker_queue_message_count{queue="IDENT.REQUEST"})'  | jq -r '.data.result[0].metric.broker')" = core-sim
+test "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-enroll" --data-urlencode 'query=max by (broker) (broker_address_message_count{queue="IDENT.REQUEST"})'  | jq -r '.data.result[0].metric.broker')" = core-prd
+test "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-ident-sim" --data-urlencode 'query=max by (broker) (broker_address_message_count{queue="IDENT.REQUEST"})'  | jq -r '.data.result[0].metric.broker')" = core-sim
 echo "IDENT.REQUEST: acme-enroll's copy is on core-prd, acme-ident-sim's on core-sim"
 ```
 ```shell markdown_runner
@@ -3351,7 +3351,7 @@ test "$(curl -s -b "${JAR}" "${GRAFANA_URL}/api/user" | jq -r '.login')" = platf
 role=$(curl -s -b "${JAR}" "${GRAFANA_URL}/api/user/orgs" | jq -r '.[0].role')
 echo "Grafana session: login platform, org role ${role}"
 test "${role}" = Admin
-body='{"from":"now-5m","to":"now","queries":[{"refId":"A","datasource":{"uid":"__DS__"},"expr":"sum by (brokerapp) (broker_queue_message_count)","instant":true}]}'
+body='{"from":"now-5m","to":"now","queries":[{"refId":"A","datasource":{"uid":"__DS__"},"expr":"sum by (brokerapp) (broker_address_message_count)","instant":true}]}'
 for ns in acme-enroll acme-ident acme-notify acme-ident-sim; do
   apps=$(curl -s -b "${JAR}" -H 'Content-Type: application/json' "${GRAFANA_URL}/api/ds/query" -d "${body//__DS__/${ns}}" | jq -r '[.results.A.frames[].schema.fields[] | .labels.brokerapp // empty] | sort | join(" ")')
   echo "platform, Team = ${ns}: ${apps}"
@@ -3399,9 +3399,9 @@ Extra: authentication.kubernetes.io/credential-id   [JTI=4a8db74a-5aa6-5938-f74b
 ```bash {"stage":"metrics", "label":"carol scales notifier back up", "runtime":"bash"}
 kubectl scale deploy/notifier -n acme-notify --replicas=1
 kubectl wait deployment notifier -n acme-notify --for=condition=Available --timeout=300s
-timeout 300 bash -c 'until [ "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode '\''query=max(broker_queue_consumer_count{brokerapp="notifier"})'\'' | jq -r '\''.data.result[0].value[1] // empty'\'')" = 1 ]; do sleep 5; done'
-timeout 300 bash -c 'until [ "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode '\''query=max(broker_queue_message_count{brokerapp="notifier"})'\'' | jq -r '\''.data.result[0].value[1] // empty'\'' | cut -d. -f1)" -lt 5 ]; do sleep 5; done'
-echo "notifier backlog drained: $(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode 'query=max(broker_queue_message_count{brokerapp="notifier"})' | jq -r '.data.result[0].value[1] // empty')"
+timeout 300 bash -c 'until [ "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode '\''query=max(broker_address_consumer_count{brokerapp="notifier"})'\'' | jq -r '\''.data.result[0].value[1] // empty'\'')" = 1 ]; do sleep 5; done'
+timeout 300 bash -c 'until [ "$(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode '\''query=max(broker_address_message_count{brokerapp="notifier"})'\'' | jq -r '\''.data.result[0].value[1] // empty'\'' | cut -d. -f1)" -lt 5 ]; do sleep 5; done'
+echo "notifier backlog drained: $(curl -s --cacert "${ACME_CA}" -H "Authorization: Bearer ${TOKEN}" -G "${TENANCY_URL}/api/v1/query" -H "X-Namespace: acme-notify" --data-urlencode 'query=max(broker_address_message_count{brokerapp="notifier"})' | jq -r '.data.result[0].value[1] // empty')"
 ```
 ```shell markdown_runner
 deployment.apps/notifier scaled

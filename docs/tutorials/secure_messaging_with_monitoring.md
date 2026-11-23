@@ -185,11 +185,11 @@ In this tutorial:
   * `CN=prometheus` → metrics read access (Prometheus scraping)
 
 You can use different CN values; the operator will extract them from your actual
-certificates. For `BrokerService`, the operator additionally generates per-queue
+certificates. For `BrokerService`, the operator additionally generates per-address
 Prometheus metrics for every address declared by bound `BrokerApp`s
 automatically via a control-plane-override secret. That secret also gives each
 bound app an identity in this realm, so an app can scrape the metrics of its own
-queues with its app certificate, and sees only those.
+addresses with its app certificate, and sees only those.
 
 **Messaging realm (AMQPS acceptor)**
 
@@ -1225,7 +1225,7 @@ echo "✓ Test 3: Broker metrics are available in Artemis-Prometheus"
 BROKER_METRICS=""
 for i in $(seq 1 24); do
   BROKER_METRICS=$(kubectl run test-broker-metrics-${i} --rm -i --restart=Never --image=curlimages/curl:latest --image-pull-policy=Always -n broker-tutorial -- \
-    curl -s 'http://artemis-prometheus-svc:9090/api/v1/query?query=broker_queue_message_count' --max-time 5 2>/dev/null | grep -o '"status":"success"' || echo "")
+    curl -s 'http://artemis-prometheus-svc:9090/api/v1/query?query=broker_address_message_count' --max-time 5 2>/dev/null | grep -o '"status":"success"' || echo "")
   [ -n "$BROKER_METRICS" ] && break
   echo "  Waiting for Artemis-Prometheus to scrape broker metrics (attempt $i/24)..."
   sleep 5
@@ -1234,7 +1234,7 @@ if [ -z "$BROKER_METRICS" ]; then
   echo "  ✗ FAILED: Broker metrics not found in Artemis-Prometheus after 2 minutes"
   exit 1
 fi
-echo "  broker_queue_message_count is present"
+echo "  broker_address_message_count is present"
 
 # Test 4: CPU/Memory metrics availability
 echo "✓ Test 4: Infrastructure metrics are available in Cluster-Prometheus"
@@ -1292,7 +1292,7 @@ Testing Prometheus and Grafana datasource configuration...
 ✓ Test 2: Cluster-Prometheus is reachable
   prometheus-kube-prometheus-prometheus:9090 is responding
 ✓ Test 3: Broker metrics are available in Artemis-Prometheus
-  broker_queue_message_count is present
+  broker_address_message_count is present
 ✓ Test 4: Infrastructure metrics are available in Cluster-Prometheus
   container_cpu_usage_seconds_total is queryable
 ✓ Test 5: Grafana has both datasources configured
@@ -1338,7 +1338,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "artemis-prometheus" },
           "targets": [{
             "datasource": { "type": "prometheus", "uid": "artemis-prometheus" },
-            "expr": "broker_queue_message_count{queue=\"APP.JOBS\"}",
+            "expr": "broker_address_message_count{queue=\"APP.JOBS\"}",
             "refId": "A"
           }]
         },
@@ -1349,7 +1349,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "artemis-prometheus" },
           "targets": [{
             "datasource": { "type": "prometheus", "uid": "artemis-prometheus" },
-            "expr": "broker_queue_delivering_count{queue=\"APP.JOBS\"}",
+            "expr": "broker_address_delivering_count{queue=\"APP.JOBS\"}",
             "refId": "A"
           }]
         },
@@ -1360,19 +1360,19 @@ data:
           "datasource": { "type": "prometheus", "uid": "artemis-prometheus" },
           "targets": [{
             "datasource": { "type": "prometheus", "uid": "artemis-prometheus" },
-            "expr": "broker_queue_consumer_count{queue=\"APP.JOBS\"}",
+            "expr": "broker_address_consumer_count{queue=\"APP.JOBS\"}",
             "refId": "A"
           }]
         },
         {
           "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-          "title": "Queue Size (bytes)",
+          "title": "Address Size (bytes)",
           "type": "timeseries",
           "datasource": { "type": "prometheus", "uid": "artemis-prometheus" },
           "targets": [
             {
               "datasource": { "type": "prometheus", "uid": "artemis-prometheus" },
-              "expr": "broker_queue_persistent_size{queue=\"APP.JOBS\"}",
+              "expr": "broker_address_persistent_size{queue=\"APP.JOBS\"}",
               "refId": "A",
               "legendFormat": "Persistent Size"
             }
@@ -1522,7 +1522,7 @@ pod "test-grafana-dashboard" deleted from broker-tutorial namespace
   Pending Messages → artemis-prometheus
   Delivering Messages → artemis-prometheus
   Active Consumers → artemis-prometheus
-  Queue Size (bytes) → artemis-prometheus
+  Address Size (bytes) → artemis-prometheus
 ✓ Test 4: Infrastructure metrics panels use prometheus datasource
   CPU Usage → prometheus
   Memory Usage → prometheus
@@ -1711,7 +1711,7 @@ While the jobs run, refresh the Grafana dashboard. You will see:
   the consumer catches up
 * **Delivering Messages** rising while the consumer is actively processing
 * **Active Consumers** showing the consumer job connection
-* **Queue Size (bytes)** reflecting the persistent storage consumed by enqueued messages
+* **Address Size (bytes)** reflecting the persistent storage consumed by enqueued messages
 * **CPU Usage** and **Memory Usage** reflecting the broker pod's resource
   consumption during message processing
 

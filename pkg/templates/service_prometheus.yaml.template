@@ -20,7 +20,7 @@ rules:
        the first matching rule, and only these carry the owner's namespace */ -}}
 {{- range .Queues}}
   - pattern: '{{.Pattern}}'
-    name: broker_queue_$5
+    name: broker_address_$5
     help: $5
     attrNameSnakeCase: true
     type: GAUGE
@@ -33,7 +33,7 @@ rules:
       brokerapp: "{{.OwnerApp}}"
 {{- end}}
   - pattern: "org.apache.activemq.artemis<broker=\"([^\"]+)\", component=addresses, address=\"([^\"]+)\", subcomponent=queues, routing-type=\"([^\"]+)\", queue=\"([^\"]+)\"><>([^:]+):"
-    name: broker_queue_$5
+    name: broker_address_$5
     help: $5
     attrNameSnakeCase: true
     type: GAUGE
