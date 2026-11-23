@@ -51,7 +51,7 @@ data:
         {
           "id": 1,
           "type": "row",
-          "title": "Queues of the selected team, filed under the BrokerApp that owns them",
+          "title": "Addresses of the selected team, filed under the BrokerApp that owns them",
           "collapsed": false,
           "gridPos": {
             "h": 1,
@@ -63,8 +63,8 @@ data:
         },
         {
           "id": 10,
-          "title": "Queue depth",
-          "description": "One series per queue of the selected team. The query is sent with the viewer's own token: a team member gets 403 on any other team's datasource.",
+          "title": "Address depth",
+          "description": "One series per adress of the selected team. The query is sent with the viewer's own token: a team member gets 403 on any other team's datasource.",
           "type": "timeseries",
           "datasource": {
             "type": "prometheus",
@@ -102,7 +102,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum by (namespace, brokerapp, queue) (broker_queue_message_count{job=~\"core-.*-metrics\"})",
+              "expr": "sum by (namespace, brokerapp, queue) (broker_address_message_count{job=~\"core-.*-metrics\"})",
               "legendFormat": "{{namespace}}/{{brokerapp}}/{{queue}}",
               "refId": "A",
               "datasource": {
@@ -114,8 +114,8 @@ data:
         },
         {
           "id": 11,
-          "title": "Consumers per queue",
-          "description": "Drops to zero when a team scales its consumer down; the queue above starts filling.",
+          "title": "Consumers per address",
+          "description": "Drops to zero when a team scales its consumer down; the address above starts filling.",
           "type": "timeseries",
           "datasource": {
             "type": "prometheus",
@@ -153,7 +153,7 @@ data:
           },
           "targets": [
             {
-              "expr": "max by (namespace, brokerapp, queue) (broker_queue_consumer_count{job=~\"core-.*-metrics\"})",
+              "expr": "max by (namespace, brokerapp, queue) (broker_address_consumer_count{job=~\"core-.*-metrics\"})",
               "legendFormat": "{{namespace}}/{{brokerapp}}/{{queue}}",
               "refId": "A",
               "datasource": {
@@ -165,8 +165,8 @@ data:
         },
         {
           "id": 12,
-          "title": "Current queues",
-          "description": "Every queue on every broker, with the team that owns it.",
+          "title": "Current addresses",
+          "description": "Every address on every broker, with the team that owns it.",
           "type": "table",
           "datasource": {
             "type": "prometheus",
@@ -180,7 +180,7 @@ data:
           },
           "targets": [
             {
-              "expr": "max by (broker, namespace, brokerapp, address, queue, routing_type) (broker_queue_message_count{job=~\"core-.*-metrics\"})",
+              "expr": "max by (broker, namespace, brokerapp, address, queue) (broker_address_message_count{job=~\"core-.*-metrics\"})",
               "format": "table",
               "instant": true,
               "refId": "A",
@@ -190,7 +190,7 @@ data:
               }
             },
             {
-              "expr": "max by (broker, namespace, brokerapp, address, queue, routing_type) (broker_queue_consumer_count{job=~\"core-.*-metrics\"})",
+              "expr": "max by (broker, namespace, brokerapp, address, queue) (broker_address_consumer_count{job=~\"core-.*-metrics\"})",
               "format": "table",
               "instant": true,
               "refId": "B",
@@ -200,7 +200,7 @@ data:
               }
             },
             {
-              "expr": "max by (broker, namespace, brokerapp, address, queue, routing_type) (broker_queue_persistent_size{job=~\"core-.*-metrics\"})",
+              "expr": "max by (broker, namespace, brokerapp, address, queue) (broker_address_persistent_size{job=~\"core-.*-metrics\"})",
               "format": "table",
               "instant": true,
               "refId": "C",
@@ -227,7 +227,6 @@ data:
                   "brokerapp": 2,
                   "address": 3,
                   "queue": 4,
-                  "routing_type": 5,
                   "Value #A": 6,
                   "Value #B": 7,
                   "Value #C": 8
@@ -237,8 +236,7 @@ data:
                   "namespace": "Team namespace",
                   "brokerapp": "BrokerApp",
                   "address": "Address",
-                  "queue": "Queue",
-                  "routing_type": "Routing",
+                  "queue": "Subscription",
                   "Value #A": "Messages",
                   "Value #B": "Consumers",
                   "Value #C": "Persistent data"

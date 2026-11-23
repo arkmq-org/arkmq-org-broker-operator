@@ -372,7 +372,7 @@ var _ = Describe("broker-service mqtt", Label("bsvc"), func() {
 			Eventually(func(g Gomega) {
 				bodyStr := scrapeMetrics(g, serverName, operatorClientCert)
 
-				g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="my-client\.mytopic"`), "should have MessageCount")
+				g.Expect(bodyStr).Should(MatchRegexp(`broker_address_message_count.*queue="my-client\.mytopic"`), "should have MessageCount")
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 
@@ -765,7 +765,7 @@ var _ = Describe("broker-service mqtt", Label("bsvc"), func() {
 					{sharedQueue, defaultNamespace},
 				} {
 					Eventually(func(g Gomega) {
-						g.Expect(prometheusSeriesLabel(g, fmt.Sprintf(`count by (namespace) (broker_queue_message_count{job=%q, queue=%q})`, job, owned.queue), "namespace")).
+						g.Expect(prometheusSeriesLabel(g, fmt.Sprintf(`count by (namespace) (broker_address_message_count{job=%q, queue=%q})`, job, owned.queue), "namespace")).
 							Should(ConsistOf(owned.namespace), "namespaces holding queue %s", owned.queue)
 					}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
 				}
@@ -884,7 +884,7 @@ func appClientCert(g Gomega, namespace, appName string) func(*tls.CertificateReq
 // queueSeriesLabels returns the labels of a queue's message count series in an
 // exposition body, or nil when the queue has none.
 func queueSeriesLabels(body, queue string) map[string]string {
-	series := regexp.MustCompile(`(?m)^broker_queue_message_count\{([^}]*)\}`)
+	series := regexp.MustCompile(`(?m)^broker_address_message_count\{([^}]*)\}`)
 	label := regexp.MustCompile(`(\w+)="([^"]*)"`)
 
 	for _, match := range series.FindAllStringSubmatch(body, -1) {

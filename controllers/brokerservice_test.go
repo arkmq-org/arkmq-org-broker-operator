@@ -836,16 +836,16 @@ var _ = Describe("broker-service-poc", Label("bsvc"), func() {
 					}
 
 					// Verify queue-level metrics for app queues are present
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.ONE"`), "should have MessageCount for METRICS.QUEUE.ONE")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.TWO"`), "should have MessageCount for METRICS.QUEUE.TWO")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.ONE"`), "should have ConsumerCount for METRICS.QUEUE.ONE")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.TWO"`), "should have ConsumerCount for METRICS.QUEUE.TWO")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.CONSUMER"`), "should have MessageCount for consumer queue")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.CONSUMER"`), "should have ConsumerCount for consumer queue")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_address_message_count.*queue="METRICS\.QUEUE\.ONE"`), "should have MessageCount for METRICS.QUEUE.ONE")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_address_message_count.*queue="METRICS\.QUEUE\.TWO"`), "should have MessageCount for METRICS.QUEUE.TWO")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_address_consumer_count.*queue="METRICS\.QUEUE\.ONE"`), "should have ConsumerCount for METRICS.QUEUE.ONE")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_address_consumer_count.*queue="METRICS\.QUEUE\.TWO"`), "should have ConsumerCount for METRICS.QUEUE.TWO")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_address_message_count.*queue="METRICS\.QUEUE\.CONSUMER"`), "should have MessageCount for consumer queue")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_address_consumer_count.*queue="METRICS\.QUEUE\.CONSUMER"`), "should have ConsumerCount for consumer queue")
 
 					// Producer-only queue metrics
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.PRODUCER\.ONLY"`), "should have MessageCount for producer-only queue")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.PRODUCER\.ONLY"`), "should have ConsumerCount for producer-only queue")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_address_message_count.*queue="METRICS\.QUEUE\.PRODUCER\.ONLY"`), "should have MessageCount for producer-only queue")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_address_consumer_count.*queue="METRICS\.QUEUE\.PRODUCER\.ONLY"`), "should have ConsumerCount for producer-only queue")
 				}
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
@@ -900,8 +900,8 @@ var _ = Describe("broker-service-poc", Label("bsvc"), func() {
 					}
 
 					// Verify queue-level metrics for app queues are present with app cert too
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_message_count.*queue="METRICS\.QUEUE\.ONE"`), "should have MessageCount for METRICS.QUEUE.ONE")
-					g.Expect(bodyStr).Should(MatchRegexp(`broker_queue_consumer_count.*queue="METRICS\.QUEUE\.ONE"`), "should have ConsumerCount for METRICS.QUEUE.ONE")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_address_message_count.*queue="METRICS\.QUEUE\.ONE"`), "should have MessageCount for METRICS.QUEUE.ONE")
+					g.Expect(bodyStr).Should(MatchRegexp(`broker_address_consumer_count.*queue="METRICS\.QUEUE\.ONE"`), "should have ConsumerCount for METRICS.QUEUE.ONE")
 				}
 
 			}, existingClusterTimeout, existingClusterInterval).Should(Succeed())
