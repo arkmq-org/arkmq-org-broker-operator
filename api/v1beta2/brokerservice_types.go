@@ -134,6 +134,7 @@ const (
 
 	ReadyConditionAddressesPendingEmpty      = "AddressesPendingEmpty"
 	DeployedConditionPortPoolExhaustedReason = "PortPoolExhausted"
+	DeployedConditionMissingCertReason       = "MissingCertificate"
 
 	// AddressesPendingEmptyFinalizer is applied to both BrokerApp and BrokerService
 	// resources to ensure pending messages are consumed before resources are removed.

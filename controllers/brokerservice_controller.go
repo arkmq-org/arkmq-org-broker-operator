@@ -672,9 +672,13 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 	}
 
 	if reconcilerError != nil {
-		// Check if error is a TransientError with a specific reason
+		// TransientError: preserve the existing Deployed status (the broker may
+		// still be running) but update reason/message to surface the issue.
 		if transErr, ok := reconcilerError.(*TransientError); ok {
-			deployedCondition.Status = metav1.ConditionFalse
+			existing := meta.FindStatusCondition(reconciler.status.Conditions, broker.DeployedConditionType)
+			if existing != nil {
+				deployedCondition.Status = existing.Status
+			}
 			deployedCondition.Reason = transErr.ConditionReason()
 			deployedCondition.Message = transErr.Error()
 		} else if _, ok := reconcilerError.(*ValidationError); ok {
@@ -1471,7 +1475,8 @@ func (reconciler *BrokerServiceInstanceReconciler) getTrustStorePath(_ *broker.B
 			return fmt.Sprintf("/amq/extra/secrets/%s/%s", caCertSecret.Name, caSecretKey), nil
 		}
 	}
-	return "", err
+	return "", NewTransientErrorWithCause(broker.DeployedConditionMissingCertReason,
+		fmt.Sprintf("operator CA secret %q not available", common.GetOperatorCASecretName()), err)
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) makePemCfgProps(service *broker.BrokerService) ([]byte, error) {
@@ -1610,7 +1615,8 @@ func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSe
 	cns, err := common.ResolveControlPlaneCNsWithLog(reconciler.Client,
 		common.GenerateBroker(reconciler.instance.Name, reconciler.instance.Namespace), reconciler.log)
 	if err != nil {
-		return err
+		return NewTransientErrorWithCause(broker.DeployedConditionMissingCertReason,
+			"control plane certificate not available", err)
 	}
 
 	certUsers, err := templates.Render(templates.AppCertUsers, templates.AppCertUsersConfig{
@@ -1667,7 +1673,8 @@ func (reconciler *BrokerServiceInstanceReconciler) appCertCN(app *broker.BrokerA
 
 	secret, err := common.GetNamespacedSecretWithLog(reconciler.Client, secretName, app.Namespace, reconciler.log)
 	if err != nil {
-		return "", err
+		return "", NewTransientErrorWithCause(broker.DeployedConditionMissingCertReason,
+			fmt.Sprintf("app cert secret %q not found in namespace %s", secretName, app.Namespace), err)
 	}
 
 	subject, err := common.ExtractCertSubjectFromSecret(secret)
