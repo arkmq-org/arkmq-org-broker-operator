@@ -719,7 +719,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 
 		app := setupApp(ctx, appName, labels, broker.BrokerAppSpec{
 			Capabilities: []broker.AppCapabilityType{{
-				ProducerOf: []broker.AddressRef{{Address: "orders"}},
+				ProducerOf: []broker.AddressRef{{Address: "orders", PubSub: ptrTo(true)}},
 				ConsumerOf: []broker.AddressRef{{
 					Address:       "orders",
 					Subscriptions: []string{"fm-a.orders", "fm-b.orders"},
@@ -785,7 +785,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 
 		app := setupApp(ctx, appName, labels, broker.BrokerAppSpec{
 			Capabilities: []broker.AppCapabilityType{{
-				ProducerOf: []broker.AddressRef{{Address: "events"}},
+				ProducerOf: []broker.AddressRef{{Address: "events", PubSub: ptrTo(true)}},
 				ConsumerOf: []broker.AddressRef{{
 					Address:       "events",
 					Subscriptions: []string{"kept.events", "removed.events"},

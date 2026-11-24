@@ -265,7 +265,7 @@ var _ = Describe("broker-service-poc", Label("bsvc"), func() {
 							ConsumerOf: []broker.AddressRef{{Address: "APP.JOBS"}},
 						},
 						{
-							ProducerOf: []broker.AddressRef{{Address: "APP.COMMANDS"}},
+							ProducerOf: []broker.AddressRef{{Address: "APP.COMMANDS", PubSub: ptrTo(true)}},
 							ConsumerOf: []broker.AddressRef{
 								{
 									Address: "APP.COMMANDS",

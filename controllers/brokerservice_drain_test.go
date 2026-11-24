@@ -496,7 +496,7 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 			app := setupApp(ctx, appName, labels, broker.BrokerAppSpec{
 				Capabilities: []broker.AppCapabilityType{
 					{
-						ProducerOf: []broker.AddressRef{{Address: "orders"}},
+						ProducerOf: []broker.AddressRef{{Address: "orders", PubSub: ptrTo(true)}},
 						ConsumerOf: []broker.AddressRef{{
 							Address:       "orders",
 							Subscriptions: []string{drainSubName},
@@ -622,7 +622,7 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 			app := setupApp(ctx, appName, labels, broker.BrokerAppSpec{
 				Capabilities: []broker.AppCapabilityType{
 					{
-						ProducerOf: []broker.AddressRef{{Address: "events"}},
+						ProducerOf: []broker.AddressRef{{Address: "events", PubSub: ptrTo(true)}},
 						ConsumerOf: []broker.AddressRef{{
 							Address:       "events",
 							Subscriptions: []string{drainSubName},
@@ -734,8 +734,8 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 				Capabilities: []broker.AppCapabilityType{
 					{
 						ProducerOf: []broker.AddressRef{
-							{Address: "orders"},
-							{Address: "events"},
+							{Address: "orders", PubSub: ptrTo(true)},
+							{Address: "events", PubSub: ptrTo(true)},
 						},
 						ConsumerOf: []broker.AddressRef{
 							{
@@ -792,7 +792,7 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appName, Namespace: defaultNamespace}, updatedApp)).Should(Succeed())
 			updatedApp.Spec.Capabilities = []broker.AppCapabilityType{
 				{
-					ProducerOf: []broker.AddressRef{{Address: "orders"}},
+					ProducerOf: []broker.AddressRef{{Address: "orders", PubSub: ptrTo(true)}},
 					ConsumerOf: []broker.AddressRef{
 						{
 							Address:       "orders",
@@ -899,8 +899,8 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 				Capabilities: []broker.AppCapabilityType{
 					{
 						ProducerOf: []broker.AddressRef{
-							{Address: "orders"},
-							{Address: "events"},
+							{Address: "orders", PubSub: ptrTo(true)},
+							{Address: "events", PubSub: ptrTo(true)},
 						},
 						ConsumerOf: []broker.AddressRef{
 							{
@@ -934,7 +934,7 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appName, Namespace: defaultNamespace}, updatedApp)).Should(Succeed())
 			updatedApp.Spec.Capabilities = []broker.AppCapabilityType{
 				{
-					ProducerOf: []broker.AddressRef{{Address: "orders"}},
+					ProducerOf: []broker.AddressRef{{Address: "orders", PubSub: ptrTo(true)}},
 					ConsumerOf: []broker.AddressRef{
 						{
 							Address:       "orders",
@@ -1005,8 +1005,8 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 				Capabilities: []broker.AppCapabilityType{
 					{
 						ProducerOf: []broker.AddressRef{
-							{Address: "orders"},
-							{Address: "events"},
+							{Address: "orders", PubSub: ptrTo(true)},
+							{Address: "events", PubSub: ptrTo(true)},
 						},
 						ConsumerOf: []broker.AddressRef{
 							{
@@ -1041,7 +1041,7 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appName, Namespace: defaultNamespace}, updatedApp)).Should(Succeed())
 			updatedApp.Spec.Capabilities = []broker.AppCapabilityType{
 				{
-					ProducerOf: []broker.AddressRef{{Address: "orders"}},
+					ProducerOf: []broker.AddressRef{{Address: "orders", PubSub: ptrTo(true)}},
 					ConsumerOf: []broker.AddressRef{
 						{
 							Address:       "orders",
@@ -1129,8 +1129,8 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 				Capabilities: []broker.AppCapabilityType{
 					{
 						ProducerOf: []broker.AddressRef{
-							{Address: "orders"},
-							{Address: "events"},
+							{Address: "orders", PubSub: ptrTo(true)},
+							{Address: "events", PubSub: ptrTo(true)},
 						},
 						ConsumerOf: []broker.AddressRef{
 							{
@@ -1165,7 +1165,7 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: appName, Namespace: defaultNamespace}, updatedApp)).Should(Succeed())
 			updatedApp.Spec.Capabilities = []broker.AppCapabilityType{
 				{
-					ProducerOf: []broker.AddressRef{{Address: "orders"}},
+					ProducerOf: []broker.AddressRef{{Address: "orders", PubSub: ptrTo(true)}},
 					ConsumerOf: []broker.AddressRef{
 						{
 							Address:       "orders",
@@ -1197,8 +1197,8 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 				updatedApp.Spec.Capabilities = []broker.AppCapabilityType{
 					{
 						ProducerOf: []broker.AddressRef{
-							{Address: "orders"},
-							{Address: "events"},
+							{Address: "orders", PubSub: ptrTo(true)},
+							{Address: "events", PubSub: ptrTo(true)},
 						},
 						ConsumerOf: []broker.AddressRef{
 							{
@@ -1280,7 +1280,7 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 			app := setupApp(ctx, appName, labels, broker.BrokerAppSpec{
 				Capabilities: []broker.AppCapabilityType{
 					{
-						ProducerOf: []broker.AddressRef{{Address: "events"}},
+						ProducerOf: []broker.AddressRef{{Address: "events", PubSub: ptrTo(true)}},
 						ConsumerOf: []broker.AddressRef{{
 							Address:       "events",
 							Subscriptions: []string{drainSubName},
@@ -1375,7 +1375,7 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 			app := setupApp(ctx, appName, labels, broker.BrokerAppSpec{
 				Capabilities: []broker.AppCapabilityType{
 					{
-						ProducerOf: []broker.AddressRef{{Address: "events"}},
+						ProducerOf: []broker.AddressRef{{Address: "events", PubSub: ptrTo(true)}},
 						ConsumerOf: []broker.AddressRef{{
 							Address:       "events",
 							Subscriptions: []string{drainSubName},
@@ -1474,7 +1474,7 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 			app1 := setupApp(ctx, app1Name, labels, broker.BrokerAppSpec{
 				Capabilities: []broker.AppCapabilityType{
 					{
-						ProducerOf: []broker.AddressRef{{Address: "orders"}},
+						ProducerOf: []broker.AddressRef{{Address: "orders", PubSub: ptrTo(true)}},
 						ConsumerOf: []broker.AddressRef{{
 							Address:       "orders",
 							Subscriptions: []string{app1SubName},
@@ -1490,7 +1490,7 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 			app2 := setupApp(ctx, app2Name, labels, broker.BrokerAppSpec{
 				Capabilities: []broker.AppCapabilityType{
 					{
-						ProducerOf: []broker.AddressRef{{Address: "events"}},
+						ProducerOf: []broker.AddressRef{{Address: "events", PubSub: ptrTo(true)}},
 						ConsumerOf: []broker.AddressRef{{
 							Address:       "events",
 							Subscriptions: []string{app2SubName},
@@ -1615,7 +1615,7 @@ var _ = Describe("broker-service address drain on removal", Label("verySlow", "b
 			app := setupApp(ctx, appName, labels, broker.BrokerAppSpec{
 				Capabilities: []broker.AppCapabilityType{
 					{
-						ProducerOf: []broker.AddressRef{{Address: "orders"}},
+						ProducerOf: []broker.AddressRef{{Address: "orders", PubSub: ptrTo(true)}},
 						ConsumerOf: []broker.AddressRef{{
 							Address:       "orders",
 							Subscriptions: []string{drainSubName},
