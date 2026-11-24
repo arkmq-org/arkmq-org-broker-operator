@@ -477,7 +477,7 @@ var _ = Describe("broker-service mqtt", Label("bsvc"), func() {
 							MatchLabels: map[string]string{"forMQTTMultiTenant": "true"},
 						},
 						Capabilities: []broker.AppCapabilityType{{
-							ProducerOf: []broker.AddressRef{{Address: topic}},
+							ProducerOf: []broker.AddressRef{{Address: topic, PubSub: ptrTo(true)}},
 							ConsumerOf: []broker.AddressRef{{
 								Address:       topic,
 								Subscriptions: []string{subscription},
