@@ -184,11 +184,14 @@ Set on every reconcile at the current generation.
 | True | ValidationSucceeded | Spec passes all checks |
 | False | ServiceSelectorError | `spec.serviceSelector` is nil or empty |
 | False | AddressTypeError | Address clash with another app, or structural error in addresses/capabilities |
+| False | MissingAppCert | TLS certificate not found or unreadable |
+| False | ResourceError | API error during reconciliation |
 
 #### Deployed
 
 Tracks whether broker configuration has been applied. **Never overwritten by
-a validation failure** — the previous condition is preserved.
+a validation failure, transient error, or API error** — the previous
+condition is preserved. The Valid condition carries those error details.
 
 | Status | Reason | ObservedGeneration | Meaning |
 |--------|--------|--------------------|---------|
@@ -199,9 +202,7 @@ a validation failure** — the previous condition is preserved.
 | False | NoMatchingService | current | No service matches `spec.serviceSelector` |
 | False | NoServiceCapacity | current | Matching services have no port capacity |
 | False | MatchedServiceNotFound | current | Bound service not in filtered list |
-| False | MissingAppCert | current | TLS certificate not found |
 | False | ValidationFailed | 0 | Never deployed, current spec invalid |
-| False | ResourceError | current | API error |
 
 #### Ready
 
@@ -279,6 +280,8 @@ Check conditions in order:
 1. **Valid=False**: read the message. If it says "reconcile blocked, app
    continues running at generation N", the app is deployed but the new spec
    is invalid — fix the spec.
+   - `MissingAppCert` — check cert-manager for the app's certificate.
+   - `ResourceError` — transient API error; the controller will retry.
 
 2. **Deployed=False**:
    - `NoMatchingService` — check `spec.serviceSelector` labels against
@@ -288,7 +291,6 @@ Check conditions in order:
      service's `AppsProvisioned` condition.
    - `Unbinding` — app is detaching. Check `Ready.message` for why. Check
      `status.pendingEmpty` on the service for drain progress.
-   - `MissingAppCert` — check cert-manager for the app's certificate.
 
 3. **Ready=True but Valid=False** — the app is running an older spec because
    the latest generation failed validation. Read the Valid message, fix the spec.

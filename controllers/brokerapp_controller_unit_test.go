@@ -793,7 +793,7 @@ var _ = Describe("brokerapp controller unit", func() {
 
 		transErr, ok := err.(*TransientError)
 		Expect(ok).To(BeTrue(), "must be transient so the app recovers when the cert appears")
-		Expect(transErr.ConditionReason()).To(Equal(v1beta2.DeployedConditionMissingAppCertReason))
+		Expect(transErr.ConditionReason()).To(Equal(v1beta2.ValidConditionMissingAppCertReason))
 		Expect(transErr.Error()).To(ContainSubstring("app-alpha" + common.AppCertSecretSuffix))
 	})
 
@@ -814,7 +814,7 @@ var _ = Describe("brokerapp controller unit", func() {
 
 		transErr, ok := err.(*TransientError)
 		Expect(ok).To(BeTrue())
-		Expect(transErr.ConditionReason()).To(Equal(v1beta2.DeployedConditionMissingAppCertReason))
+		Expect(transErr.ConditionReason()).To(Equal(v1beta2.ValidConditionMissingAppCertReason))
 	})
 
 	It("verify app cert accepts a valid cert", Label(unitLabel), func() {
@@ -1089,7 +1089,7 @@ var _ = Describe("brokerapp controller unit", func() {
 			validCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.ValidConditionType)
 			Expect(validCond).NotTo(BeNil())
 			Expect(validCond.Status).To(Equal(v1.ConditionFalse))
-			Expect(validCond.Reason).To(Equal(v1beta2.DeployedConditionMissingAppCertReason),
+			Expect(validCond.Reason).To(Equal(v1beta2.ValidConditionMissingAppCertReason),
 				"TransientError reason must propagate to Valid condition")
 		})
 

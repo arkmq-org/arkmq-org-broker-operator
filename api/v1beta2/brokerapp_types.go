@@ -187,11 +187,11 @@ const (
 	DeployedConditionBindingReason                = "Binding"
 	DeployedConditionBoundReason                  = "Bound"
 	DeployedConditionSelectorEvaluationError      = "AppSelectorEvaluationError"
-	DeployedConditionMissingAppCertReason         = "MissingAppCert"
 	DeployedConditionUnbindingReason              = "Unbinding"
 
 	ValidConditionServiceSelectorError = "ServiceSelectorError"
 	ValidConditionAddressTypeError     = "AddressTypeError"
+	ValidConditionMissingAppCertReason = "MissingAppCert"
 
 	ReadyConditionUnbindingReason = "Unbinding"
 )

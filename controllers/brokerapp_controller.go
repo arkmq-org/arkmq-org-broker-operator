@@ -204,13 +204,13 @@ func (reconciler BrokerAppInstanceReconciler) verifyAppCert() error {
 	secret, err := common.GetNamespacedSecretWithLog(reconciler.Client, secretName, reconciler.instance.Namespace, reconciler.log)
 	if err != nil {
 		return NewTransientErrorWithCause(
-			broker.DeployedConditionMissingAppCertReason,
+			broker.ValidConditionMissingAppCertReason,
 			fmt.Sprintf("app certificate secret %s not found", secretName), err)
 	}
 
 	if _, err := common.ExtractCertSubjectFromSecret(secret); err != nil {
 		return NewTransientErrorWithCause(
-			broker.DeployedConditionMissingAppCertReason,
+			broker.ValidConditionMissingAppCertReason,
 			fmt.Sprintf("app certificate secret %s is not a readable key pair", secretName), err)
 	}
 
