@@ -565,10 +565,19 @@ func (reconciler *BrokerServiceInstanceReconciler) setValidCondition(err error) 
 		ObservedGeneration: reconciler.instance.Generation,
 	}
 
-	if validErr, ok := err.(*ValidationError); ok {
+	if err != nil {
 		condition.Status = metav1.ConditionFalse
-		condition.Reason = validErr.ConditionReason()
-		condition.Message = validErr.Error()
+		switch typedErr := err.(type) {
+		case *ValidationError:
+			condition.Reason = typedErr.ConditionReason()
+			condition.Message = typedErr.Error()
+		case *TransientError:
+			condition.Reason = typedErr.ConditionReason()
+			condition.Message = typedErr.Error()
+		default:
+			condition.Reason = broker.ValidConditionResourceErrorReason
+			condition.Message = fmt.Sprintf("error on resource crud %v", err)
+		}
 	}
 
 	meta.SetStatusCondition(&reconciler.status.Conditions, condition)
@@ -657,48 +666,21 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 
 	generation := reconciler.instance.Generation
 
-	var deployedCondition = metav1.Condition{
-		Type:               broker.DeployedConditionType,
-		Status:             metav1.ConditionFalse,
-		Reason:             broker.DeployedConditionNotReadyReason,
-		ObservedGeneration: generation,
-	}
-
-	var appsProvisionedCondition = metav1.Condition{
-		Type:               broker.AppsProvisionedConditionType,
-		Status:             metav1.ConditionFalse,
-		Reason:             broker.AppsProvisionedConditionWaitingReason,
-		ObservedGeneration: generation,
-	}
-
-	if reconcilerError != nil {
-		// TransientError: preserve the existing Deployed status (the broker may
-		// still be running) but update reason/message to surface the issue.
-		if transErr, ok := reconcilerError.(*TransientError); ok {
-			existing := meta.FindStatusCondition(reconciler.status.Conditions, broker.DeployedConditionType)
-			if existing != nil {
-				deployedCondition.Status = existing.Status
-			}
-			deployedCondition.Reason = transErr.ConditionReason()
-			deployedCondition.Message = transErr.Error()
-		} else if _, ok := reconcilerError.(*ValidationError); ok {
-			existing := meta.FindStatusCondition(reconciler.status.Conditions, broker.DeployedConditionType)
-			if existing != nil {
-				deployedCondition = *existing
-			} else {
-				deployedCondition.Status = metav1.ConditionFalse
-				deployedCondition.Reason = broker.DeployedConditionValidationFailedReason
-				deployedCondition.Message = "Cannot deploy due to validation failure"
-				deployedCondition.ObservedGeneration = 0
-			}
-		} else {
-			// Generic error (API errors, update errors, etc.)
-			deployedCondition.Status = metav1.ConditionUnknown
-			deployedCondition.Reason = broker.DeployedConditionCrudKindErrorReason
-			deployedCondition.Message = fmt.Sprintf("error on resource crud %v", reconcilerError)
+	if reconcilerError == nil {
+		deployedCondition := metav1.Condition{
+			Type:               broker.DeployedConditionType,
+			Status:             metav1.ConditionFalse,
+			Reason:             broker.DeployedConditionNotReadyReason,
+			ObservedGeneration: generation,
 		}
-		appsProvisionedCondition.Reason = broker.AppsProvisionedConditionNotReadyReason
-	} else {
+
+		appsProvisionedCondition := metav1.Condition{
+			Type:               broker.AppsProvisionedConditionType,
+			Status:             metav1.ConditionFalse,
+			Reason:             broker.AppsProvisionedConditionWaitingReason,
+			ObservedGeneration: generation,
+		}
+
 		obj := reconciler.CloneOfDeployed(reflect.TypeOf(broker.Broker{}), reconciler.instance.Name)
 		if obj != nil {
 			deployed := obj.(*broker.Broker)
@@ -714,9 +696,10 @@ func (reconciler *BrokerServiceInstanceReconciler) processStatus(reconcilerError
 		} else {
 			appsProvisionedCondition.Message = "broker not found"
 		}
+
+		meta.SetStatusCondition(&reconciler.status.Conditions, deployedCondition)
+		meta.SetStatusCondition(&reconciler.status.Conditions, appsProvisionedCondition)
 	}
-	meta.SetStatusCondition(&reconciler.status.Conditions, deployedCondition)
-	meta.SetStatusCondition(&reconciler.status.Conditions, appsProvisionedCondition)
 
 	reconciler.setReadyCondition(generation)
 
