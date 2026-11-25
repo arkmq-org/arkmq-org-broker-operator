@@ -50,24 +50,14 @@ var _ = Describe("condition errors", func() {
 
 	Context("NewTransientError", func() {
 		It("creates error with reason and message", Label(unitLabel), func() {
-			reason := broker.DeployedConditionNoMatchingServiceReason
+			reason := broker.DeployedConditionMissingCertReason
 
-			err := NewTransientError(reason, "no matching services available")
-
-			Expect(err).NotTo(BeNil())
-			Expect(err.ConditionReason()).To(Equal(reason))
-			Expect(err.Message).To(Equal("no matching services available"))
-			Expect(err.Error()).To(Equal("no matching services available"))
-		})
-
-		It("supports formatted message", Label(unitLabel), func() {
-			reason := broker.DeployedConditionNoServiceCapacityReason
-
-			err := NewTransientError(reason, "no service with capacity: required 1Gi, available 512Mi")
+			err := NewTransientError(reason, "cert secret not found")
 
 			Expect(err).NotTo(BeNil())
 			Expect(err.ConditionReason()).To(Equal(reason))
-			Expect(err.Message).To(Equal("no service with capacity: required 1Gi, available 512Mi"))
+			Expect(err.Message).To(Equal("cert secret not found"))
+			Expect(err.Error()).To(Equal("cert secret not found"))
 		})
 	})
 
@@ -86,13 +76,35 @@ var _ = Describe("condition errors", func() {
 		})
 
 		It("works without cause", Label(unitLabel), func() {
-			reason := broker.DeployedConditionNoMatchingServiceReason
+			reason := broker.DeployedConditionCrudKindErrorReason
 
-			err := NewTransientError(reason, "no matching services")
+			err := NewTransientError(reason, "API error")
 
 			Expect(err).NotTo(BeNil())
-			Expect(err.Error()).To(Equal("no matching services"))
+			Expect(err.Error()).To(Equal("API error"))
 			Expect(errors.Unwrap(err)).To(BeNil())
+		})
+	})
+
+	Context("NewDeploymentStateError", func() {
+		It("creates error with reason and message", Label(unitLabel), func() {
+			reason := broker.DeployedConditionNoMatchingServiceReason
+
+			err := NewDeploymentStateError(reason, "no matching services available")
+
+			Expect(err).NotTo(BeNil())
+			Expect(err.ConditionReason()).To(Equal(reason))
+			Expect(err.Message).To(Equal("no matching services available"))
+			Expect(err.Error()).To(Equal("no matching services available"))
+		})
+
+		It("supports capacity reasons", Label(unitLabel), func() {
+			reason := broker.DeployedConditionNoServiceCapacityReason
+
+			err := NewDeploymentStateError(reason, "no service with capacity")
+
+			Expect(err).NotTo(BeNil())
+			Expect(err.ConditionReason()).To(Equal(reason))
 		})
 	})
 
@@ -147,13 +159,27 @@ var _ = Describe("condition errors", func() {
 		})
 
 		It("can distinguish TransientError", Label(unitLabel), func() {
-			var err error = NewTransientError(broker.DeployedConditionNoMatchingServiceReason, "test")
+			var err error = NewTransientError(broker.DeployedConditionMissingCertReason, "test")
 
 			_, isValidation := err.(*ValidationError)
 			_, isTransient := err.(*TransientError)
+			_, isDeployState := err.(*DeploymentStateError)
 
 			Expect(isValidation).To(BeFalse())
 			Expect(isTransient).To(BeTrue())
+			Expect(isDeployState).To(BeFalse())
+		})
+
+		It("can distinguish DeploymentStateError", Label(unitLabel), func() {
+			var err error = NewDeploymentStateError(broker.DeployedConditionNoMatchingServiceReason, "test")
+
+			_, isValidation := err.(*ValidationError)
+			_, isTransient := err.(*TransientError)
+			_, isDeployState := err.(*DeploymentStateError)
+
+			Expect(isValidation).To(BeFalse())
+			Expect(isTransient).To(BeFalse())
+			Expect(isDeployState).To(BeTrue())
 		})
 
 		It("regular errors are neither", Label(unitLabel), func() {

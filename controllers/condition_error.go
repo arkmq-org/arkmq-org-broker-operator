@@ -46,13 +46,38 @@ func NewValidationError(reason string, format string, args ...interface{}) *Vali
 	}
 }
 
-// TransientError represents a runtime issue that may resolve on retry.
-// Used for: capacity issues, routing issues, API errors, network failures.
-// Controller-runtime will retry these with exponential backoff.
+// TransientError represents an external dependency failure that blocked
+// reconciliation (missing certs, API errors). The controller could not
+// determine the deployment state, so Deployed is left untouched and
+// Valid is set to False. Controller-runtime retries with exponential backoff.
 type TransientError struct {
 	Reason  string
 	Message string
 	Cause   error // Optional: wrapped underlying error
+}
+
+// DeploymentStateError represents a binding lifecycle state that the
+// controller successfully determined (no matching service, no capacity,
+// selector mismatch). The Deployed condition is updated with the state,
+// Valid stays True. Controller-runtime retries with exponential backoff.
+type DeploymentStateError struct {
+	Reason  string
+	Message string
+}
+
+func (e *DeploymentStateError) Error() string {
+	return e.Message
+}
+
+func (e *DeploymentStateError) ConditionReason() string {
+	return e.Reason
+}
+
+func NewDeploymentStateError(reason, message string) *DeploymentStateError {
+	return &DeploymentStateError{
+		Reason:  reason,
+		Message: message,
+	}
 }
 
 func (e *TransientError) Error() string {

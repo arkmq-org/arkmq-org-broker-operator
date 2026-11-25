@@ -218,9 +218,8 @@ var _ = Describe("brokerapp deployed condition", func() {
 		Expect(validCond.Status).To(Equal(metav1.ConditionFalse), "Valid should be False due to address conflict")
 
 		deployedCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
-		Expect(deployedCond).NotTo(BeNil())
-		Expect(deployedCond.Status).To(Equal(metav1.ConditionFalse),
-			"Deployed should be False - never deployed and validation failed")
+		Expect(deployedCond).To(BeNil(),
+			"Deployed should not be set — validation error leaves it untouched, Valid carries the error")
 	})
 
 	It("validation error with previous deployed false stays false", Label(unitLabel), func() {
