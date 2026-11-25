@@ -127,11 +127,6 @@ func (reconciler *BrokerServiceReconciler) Reconcile(ctx context.Context, reques
 		return ctrl.Result{}, err
 	}
 
-	// protect our deletion till we know all apps have finalized
-	if err := reconciler.addPendingEmptyFinalizer(ctx, instance); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	localLoop := &ReconcilerLoop{
 		KubeBits: &KubeBits{
 			Client: reconciler.Client,
@@ -192,6 +187,9 @@ func (processor *BrokerServiceInstanceReconciler) reconcileService(ctx context.C
 	if err = processor.processSpec(); err != nil {
 		return false, err
 	}
+	if err = processor.ensurePendingEmptyFinalizer(ctx, processor.instance); err != nil {
+		return false, err
+	}
 	if err = processor.handlePendingEmptyFinalizerRemovalOnDelete(ctx, processor.instance); err != nil {
 		return false, err
 	}
@@ -231,7 +229,7 @@ func (reconciler *BrokerServiceReconciler) handlePendingEmptyFinalizerRemovalOnD
 	return nil
 }
 
-func (reconciler *BrokerServiceReconciler) addPendingEmptyFinalizer(ctx context.Context, brokerService *broker.BrokerService) (err error) {
+func (reconciler *BrokerServiceReconciler) ensurePendingEmptyFinalizer(ctx context.Context, brokerService *broker.BrokerService) (err error) {
 	if brokerService.DeletionTimestamp == nil && controllerutil.AddFinalizer(brokerService, broker.AddressesPendingEmptyFinalizer) {
 		if updateErr := reconciler.Update(ctx, brokerService); updateErr != nil {
 			err = fmt.Errorf("failed to add pending-empty finalizer to service %s: %v", brokerService.Name, updateErr)
