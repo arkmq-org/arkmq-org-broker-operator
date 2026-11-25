@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -166,6 +167,50 @@ var _ = Describe("brokerservice missing certificate conditions", Label(unitLabel
 
 			deployedCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.DeployedConditionType)
 			Expect(deployedCond).To(BeNil(), "Deployed should not be set on first reconcile with error")
+		})
+	})
+
+	Context("deletion with missing operand cert", func() {
+
+		It("completes deletion when operand cert was never present", func() {
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
+			}
+			oc := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "op_ca", Namespace: ns},
+				Data:       map[string][]byte{"ca.pem": []byte("test")},
+			}
+			objects := []client.Object{
+				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
+				oc, svc, boundApp(),
+				NewCertSecret(common.GetOperatorCertSecretName(), ns, "operator"),
+				NewAppCertSecret(appName, ns),
+			}
+			cl := newClient(objects...)
+
+			By("first reconcile reports missing cert without adding the finalizer")
+			updatedSvc := reconcileAndGetStatus(cl)
+
+			Expect(updatedSvc.Finalizers).NotTo(ContainElement(v1beta2.AddressesPendingEmptyFinalizer),
+				"finalizer should not be added when processSpec fails")
+
+			validCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCond).NotTo(BeNil())
+			Expect(validCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(validCond.Reason).To(Equal(v1beta2.DeployedConditionMissingCertReason))
+
+			By("deleting the service")
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: svcName, Namespace: ns}, updatedSvc)).To(Succeed())
+			Expect(cl.Delete(context.TODO(), updatedSvc)).To(Succeed())
+
+			By("reconcile after deletion completes without the finalizer blocking it")
+			r := NewBrokerServiceReconciler(cl, cl.Scheme(), nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+			_, _ = r.Reconcile(context.TODO(), req)
+
+			getErr := cl.Get(context.TODO(), req.NamespacedName, &v1beta2.BrokerService{})
+			Expect(errors.IsNotFound(getErr)).To(BeTrue(),
+				"service should be fully deleted — no finalizer was added so nothing blocks GC")
 		})
 	})
 
