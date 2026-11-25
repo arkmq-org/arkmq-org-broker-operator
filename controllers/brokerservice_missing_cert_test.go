@@ -89,7 +89,7 @@ var _ = Describe("brokerservice missing certificate conditions", Label(unitLabel
 
 	Context("never deployed - cert missing on first reconcile", func() {
 
-		It("reports MissingCertificate with Deployed=False when operator CA is absent", func() {
+		It("reports MissingCertificate on Valid condition when operator CA is absent", func() {
 			svc := &v1beta2.BrokerService{
 				ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
 			}
@@ -101,15 +101,18 @@ var _ = Describe("brokerservice missing certificate conditions", Label(unitLabel
 
 			updatedSvc := reconcileAndGetStatus(cl)
 
+			validCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCond).NotTo(BeNil())
+			Expect(validCond.Status).To(Equal(metav1.ConditionFalse),
+				"Valid should be False when cert is missing")
+			Expect(validCond.Reason).To(Equal(v1beta2.DeployedConditionMissingCertReason))
+			Expect(validCond.Message).To(ContainSubstring("op_ca"))
+
 			deployedCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.DeployedConditionType)
-			Expect(deployedCond).NotTo(BeNil())
-			Expect(deployedCond.Status).To(Equal(metav1.ConditionFalse),
-				"never-deployed service should be Deployed=False when cert is missing")
-			Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionMissingCertReason))
-			Expect(deployedCond.Message).To(ContainSubstring("op_ca"))
+			Expect(deployedCond).To(BeNil(), "Deployed should not be set on first reconcile with error")
 		})
 
-		It("reports MissingCertificate with Deployed=False when app cert is absent", func() {
+		It("reports MissingCertificate on Valid condition when app cert is absent", func() {
 			svc := &v1beta2.BrokerService{
 				ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
 			}
@@ -125,15 +128,18 @@ var _ = Describe("brokerservice missing certificate conditions", Label(unitLabel
 
 			updatedSvc := reconcileAndGetStatus(cl)
 
+			validCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCond).NotTo(BeNil())
+			Expect(validCond.Status).To(Equal(metav1.ConditionFalse),
+				"Valid should be False when app cert is missing")
+			Expect(validCond.Reason).To(Equal(v1beta2.DeployedConditionMissingCertReason))
+			Expect(validCond.Message).To(ContainSubstring(appName + common.AppCertSecretSuffix))
+
 			deployedCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.DeployedConditionType)
-			Expect(deployedCond).NotTo(BeNil())
-			Expect(deployedCond.Status).To(Equal(metav1.ConditionFalse),
-				"never-deployed service should be Deployed=False when app cert is missing")
-			Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionMissingCertReason))
-			Expect(deployedCond.Message).To(ContainSubstring(appName + common.AppCertSecretSuffix))
+			Expect(deployedCond).To(BeNil(), "Deployed should not be set on first reconcile with error")
 		})
 
-		It("reports MissingCertificate with Deployed=False when operand cert is absent", func() {
+		It("reports MissingCertificate on Valid condition when operand cert is absent", func() {
 			svc := &v1beta2.BrokerService{
 				ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
 			}
@@ -151,12 +157,15 @@ var _ = Describe("brokerservice missing certificate conditions", Label(unitLabel
 
 			updatedSvc := reconcileAndGetStatus(cl)
 
+			validCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCond).NotTo(BeNil())
+			Expect(validCond.Status).To(Equal(metav1.ConditionFalse),
+				"Valid should be False when operand cert is missing")
+			Expect(validCond.Reason).To(Equal(v1beta2.DeployedConditionMissingCertReason))
+			Expect(validCond.Message).To(ContainSubstring("broker-cert"))
+
 			deployedCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.DeployedConditionType)
-			Expect(deployedCond).NotTo(BeNil())
-			Expect(deployedCond.Status).To(Equal(metav1.ConditionFalse),
-				"never-deployed service should be Deployed=False when operand cert is missing")
-			Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionMissingCertReason))
-			Expect(deployedCond.Message).To(ContainSubstring("broker-cert"))
+			Expect(deployedCond).To(BeNil(), "Deployed should not be set on first reconcile with error")
 		})
 	})
 
@@ -208,14 +217,20 @@ var _ = Describe("brokerservice missing certificate conditions", Label(unitLabel
 			deployedCond = meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.DeployedConditionType)
 			Expect(deployedCond).NotTo(BeNil())
 			Expect(deployedCond.Status).To(Equal(metav1.ConditionTrue),
-				"Deployed should stay True — the broker is still running, only operator management is impaired")
-			Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionMissingCertReason),
-				"reason should indicate the cert issue")
-			Expect(deployedCond.Message).To(ContainSubstring("op_ca"),
+				"Deployed should stay True — the broker is still running")
+			Expect(deployedCond.Reason).To(Equal(v1beta2.ReadyConditionReason),
+				"Deployed should preserve its original reason")
+
+			validCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCond).NotTo(BeNil())
+			Expect(validCond.Status).To(Equal(metav1.ConditionFalse),
+				"Valid should report the cert issue")
+			Expect(validCond.Reason).To(Equal(v1beta2.DeployedConditionMissingCertReason))
+			Expect(validCond.Message).To(ContainSubstring("op_ca"),
 				"message should name the missing secret")
 		})
 
-		It("recovers to normal reason when cert is restored", func() {
+		It("Valid recovers when cert is restored", func() {
 			svc := &v1beta2.BrokerService{
 				ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
 			}
@@ -249,10 +264,15 @@ var _ = Describe("brokerservice missing certificate conditions", Label(unitLabel
 			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: "op_ca", Namespace: ns}, caSecret)).To(Succeed())
 			Expect(cl.Delete(context.TODO(), caSecret)).To(Succeed())
 
-			// Reconcile — should report MissingCertificate but stay deployed
+			// Reconcile — Valid should report MissingCertificate, Deployed stays untouched
 			updatedSvc = reconcileAndGetStatus(cl)
+			validCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(validCond.Reason).To(Equal(v1beta2.DeployedConditionMissingCertReason))
+
 			deployedCond = meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.DeployedConditionType)
-			Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionMissingCertReason))
+			Expect(deployedCond.Status).To(Equal(metav1.ConditionTrue),
+				"Deployed should stay True — broker is still running")
 
 			// Restore the CA
 			restoredCA := &corev1.Secret{
@@ -271,13 +291,17 @@ var _ = Describe("brokerservice missing certificate conditions", Label(unitLabel
 			})
 			Expect(cl.Status().Update(context.TODO(), brokerCR)).To(Succeed())
 
-			// Reconcile after restore — should recover
+			// Reconcile after restore — Valid should recover
 			updatedSvc = reconcileAndGetStatus(cl)
+			validCond = meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCond).NotTo(BeNil())
+			Expect(validCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(validCond.Reason).To(Equal(v1beta2.ValidConditionSuccessReason),
+				"Valid should recover after cert is restored")
+
 			deployedCond = meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.DeployedConditionType)
 			Expect(deployedCond).NotTo(BeNil())
 			Expect(deployedCond.Status).To(Equal(metav1.ConditionTrue))
-			Expect(deployedCond.Reason).To(Equal(v1beta2.ReadyConditionReason),
-				"should recover to normal reason after cert is restored")
 		})
 	})
 })

@@ -219,6 +219,7 @@ const (
 	ValidConditionSuccessReason          = "ValidationSucceded"
 	ValidConditionFailureReason          = "ValidationFailed"
 	ValidConditionUnknownReason          = "NonFatalValidationFailure"
+	ValidConditionResourceErrorReason    = "ResourceError"
 	ValidConditionMissingResourcesReason = "MissingDependentResources"
 	ValidConditionInvalidVersionReason   = "SpecVersionInvalid"
 	ValidConditionInvalidResourceName    = "InvalidResourceName"

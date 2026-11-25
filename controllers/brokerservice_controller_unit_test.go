@@ -843,10 +843,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 			Expect(validCondition.Message).NotTo(BeEmpty())
 
 			deployedCondition := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.DeployedConditionType)
-			Expect(deployedCondition).NotTo(BeNil())
-			Expect(deployedCondition.Status).To(Equal(metav1.ConditionFalse))
-			Expect(deployedCondition.Reason).To(Equal(v1beta2.DeployedConditionValidationFailedReason))
-			Expect(deployedCondition.ObservedGeneration).To(Equal(int64(0)))
+			Expect(deployedCondition).To(BeNil(), "Deployed should not be set on first reconcile with validation error")
 		})
 
 		It("preserves Deployed=True on validation failure", Label(unitLabel), func() {
@@ -1032,7 +1029,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 	})
 
-	It("valid persists through runtime errors", Label(unitLabel), func() {
+	It("valid reports runtime errors, deployed untouched", Label(unitLabel), func() {
 		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
@@ -1071,13 +1068,11 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 
 		validCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.ValidConditionType)
 		Expect(validCond).NotTo(BeNil())
-		Expect(validCond.Status).To(Equal(metav1.ConditionTrue))
-		Expect(validCond.Reason).To(Equal(v1beta2.ValidConditionSuccessReason))
+		Expect(validCond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(validCond.Reason).To(Equal(v1beta2.ValidConditionResourceErrorReason))
 
 		deployedCond := meta.FindStatusCondition(updatedSvc.Status.Conditions, v1beta2.DeployedConditionType)
-		Expect(deployedCond).NotTo(BeNil())
-		Expect(deployedCond.Status).To(Equal(metav1.ConditionUnknown))
-		Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionCrudKindErrorReason))
+		Expect(deployedCond).To(BeNil(), "Deployed should not be set on first reconcile with runtime error")
 	})
 
 	It("condition transitions on recovery", Label(unitLabel), func() {
