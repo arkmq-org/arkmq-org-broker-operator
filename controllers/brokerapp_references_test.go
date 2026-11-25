@@ -455,7 +455,8 @@ var _ = Describe("address references validation", func() {
 
 			validCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.ValidConditionType)
 			Expect(validCond).NotTo(BeNil())
-			Expect(validCond.Status).To(Equal(v1.ConditionTrue))
+			Expect(validCond.Reason).NotTo(Equal(v1beta2.ValidConditionAddressTypeError),
+				"CEL expressions should not cause address type validation errors")
 		})
 	})
 

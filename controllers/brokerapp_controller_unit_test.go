@@ -993,6 +993,162 @@ var _ = Describe("brokerapp controller unit", func() {
 				"reconcile error should take priority over status update error")
 		})
 
+		It("valid reports runtime errors, deployed untouched", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+
+			ns := "default"
+			namespace := &corev1.Namespace{ObjectMeta: v1.ObjectMeta{Name: ns}}
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: v1.ObjectMeta{Name: "svc", Namespace: ns, Labels: map[string]string{"type": "broker"}},
+				Status: v1beta2.BrokerServiceStatus{
+					Conditions: []v1.Condition{
+						{Type: v1beta2.DeployedConditionType, Status: v1.ConditionTrue, Reason: v1beta2.ReadyConditionReason},
+					},
+				},
+			}
+			app := NewBrokerApp("app", ns).
+				WithServiceBinding("svc", ns, "app-binding-secret", 61616).
+				Build()
+
+			interceptorFuncs := interceptor.Funcs{
+				List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if _, ok := list.(*corev1.SecretList); ok {
+						return fmt.Errorf("simulated API list Secret error")
+					}
+					return cl.List(ctx, list, opts...)
+				},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(namespace, svc, app)...).
+				WithStatusSubresource(app).
+				WithInterceptorFuncs(interceptorFuncs)).
+				Build()
+
+			r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app", Namespace: ns}}
+
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).To(HaveOccurred())
+
+			updatedApp := &v1beta2.BrokerApp{}
+			err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+			Expect(err).NotTo(HaveOccurred())
+
+			validCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCond).NotTo(BeNil())
+			Expect(validCond.Status).To(Equal(v1.ConditionFalse))
+			Expect(validCond.Reason).To(Equal(v1beta2.ValidConditionResourceErrorReason))
+
+			deployedCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
+			Expect(deployedCond).To(BeNil(), "Deployed should not be set on first reconcile with runtime error")
+		})
+
+		It("valid reports transient error reason", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+
+			ns := "default"
+			namespace := &corev1.Namespace{ObjectMeta: v1.ObjectMeta{Name: ns}}
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: v1.ObjectMeta{Name: "svc", Namespace: ns, Labels: map[string]string{"type": "broker"}},
+				Status: v1beta2.BrokerServiceStatus{
+					Conditions: []v1.Condition{
+						{Type: v1beta2.DeployedConditionType, Status: v1.ConditionTrue, Reason: v1beta2.ReadyConditionReason},
+					},
+				},
+			}
+			app := &v1beta2.BrokerApp{
+				ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: ns},
+				Spec: v1beta2.BrokerAppSpec{
+					ServiceSelector: &v1.LabelSelector{MatchLabels: map[string]string{"type": "broker"}},
+				},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(namespace, svc)...).
+				WithObjects(app).
+				WithStatusSubresource(app)).
+				Build()
+
+			r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app", Namespace: ns}}
+
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).To(HaveOccurred())
+
+			updatedApp := &v1beta2.BrokerApp{}
+			err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+			Expect(err).NotTo(HaveOccurred())
+
+			validCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.ValidConditionType)
+			Expect(validCond).NotTo(BeNil())
+			Expect(validCond.Status).To(Equal(v1.ConditionFalse))
+			Expect(validCond.Reason).To(Equal(v1beta2.DeployedConditionMissingAppCertReason),
+				"TransientError reason must propagate to Valid condition")
+		})
+
+		It("unbinding with blocked reconcile preserves deployed status", Label(unitLabel), func() {
+			scheme := runtime.NewScheme()
+			_ = v1beta2.AddToScheme(scheme)
+			_ = corev1.AddToScheme(scheme)
+
+			ns := "default"
+			namespace := &corev1.Namespace{ObjectMeta: v1.ObjectMeta{Name: ns}}
+			app := &v1beta2.BrokerApp{
+				ObjectMeta: v1.ObjectMeta{
+					Name:       "app",
+					Namespace:  ns,
+					Finalizers: []string{v1beta2.AddressesPendingEmptyFinalizer},
+				},
+				Spec: v1beta2.BrokerAppSpec{
+					ServiceSelector: &v1.LabelSelector{MatchLabels: map[string]string{"type": "broker"}},
+				},
+				Status: v1beta2.BrokerAppStatus{
+					Service: &v1beta2.BrokerServiceBindingStatus{
+						Name: "gone-svc", Namespace: ns,
+						Secret: "app-binding-secret", AssignedPort: 61616,
+					},
+					Conditions: []v1.Condition{
+						{
+							Type:   v1beta2.DeployedConditionType,
+							Status: v1.ConditionTrue,
+							Reason: v1beta2.DeployedConditionBoundReason,
+						},
+					},
+				},
+			}
+
+			cl := SetupBrokerAppIndexer(fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(WithCerts(namespace)...).
+				WithObjects(app).
+				WithStatusSubresource(app)).
+				Build()
+
+			r := NewBrokerAppReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "app", Namespace: ns}}
+
+			result, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+
+			updatedApp := &v1beta2.BrokerApp{}
+			err = cl.Get(context.TODO(), req.NamespacedName, updatedApp)
+			Expect(err).NotTo(HaveOccurred())
+
+			deployedCond := meta.FindStatusCondition(updatedApp.Status.Conditions, v1beta2.DeployedConditionType)
+			Expect(deployedCond).NotTo(BeNil())
+			Expect(deployedCond.Status).To(Equal(v1.ConditionTrue),
+				"Deployed must stay True while unbinding — broker still serves the app config")
+			Expect(deployedCond.Reason).To(Equal(v1beta2.DeployedConditionUnbindingReason))
+		})
+
 		It("pending-empty requeues to monitor drain", Label(unitLabel), func() {
 			ns := "default"
 			// App bound to a service that no longer exists, with finalizer
