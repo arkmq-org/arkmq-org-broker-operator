@@ -855,8 +855,6 @@ func MakeContainerPortsForBroker(cr *v1beta2.Broker) []corev1.ContainerPort {
 
 func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1beta2.Broker, namer common.Namers, currentStatefulSet *appsv1.StatefulSet, client rtclient.Client) (*corev1.PodTemplateSpec, error) {
 
-	reqLogger := reconciler.log.WithName(customResource.Name)
-
 	namespacedName := types.NamespacedName{
 		Name:      customResource.Name,
 		Namespace: customResource.Namespace,
@@ -889,11 +887,11 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 	containerPorts := MakeContainerPortsForBroker(customResource)
 	if len(containerPorts) > 0 {
-		reqLogger.V(1).Info("Adding new ports to main", "len", len(containerPorts))
+		reconciler.log.V(1).Info("Adding new ports to main", "len", len(containerPorts))
 		container.Ports = containerPorts
 	}
 
-	reqLogger.V(2).Info("Checking out extraMounts", "extra config", customResource.Spec.ExtraMounts)
+	reconciler.log.V(2).Info("Checking out extraMounts", "extra config", customResource.Spec.ExtraMounts)
 
 	configMapsToMount := customResource.Spec.ExtraMounts.ConfigMaps
 	secretsToMount := customResource.Spec.ExtraMounts.Secrets
@@ -923,8 +921,8 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	}
 	extraVolumes, extraVolumeMounts := reconciler.createExtraConfigmapsAndSecretsVolumeMounts(configMapsToMount, secretsToMount)
 
-	reqLogger.V(2).Info("Extra volumes", "volumes", extraVolumes)
-	reqLogger.V(2).Info("Extra mounts", "mounts", extraVolumeMounts)
+	reconciler.log.V(2).Info("Extra volumes", "volumes", extraVolumes)
+	reconciler.log.V(2).Info("Extra mounts", "mounts", extraVolumeMounts)
 
 	container.VolumeMounts = brokervolumes.MakeVolumeMounts(customResource.Name, customResource.Spec.ExtraVolumes, customResource.Spec.ExtraVolumeMounts, customResource.Spec.ExtraVolumeClaimTemplates)
 	if len(extraVolumeMounts) > 0 {
@@ -935,14 +933,14 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	container.ReadinessProbe = reconciler.configureReadinessProbe(container, customResource.Spec.ReadinessProbe)
 
 	if len(customResource.Spec.NodeSelector) > 0 {
-		reqLogger.V(1).Info("Adding Node Selectors", "len", len(customResource.Spec.NodeSelector))
+		reconciler.log.V(1).Info("Adding Node Selectors", "len", len(customResource.Spec.NodeSelector))
 		podSpec.NodeSelector = customResource.Spec.NodeSelector
 	}
 
 	reconciler.configureAffinity(podSpec, &customResource.Spec.Affinity)
 
 	if len(customResource.Spec.Tolerations) > 0 {
-		reqLogger.V(1).Info("Adding Tolerations", "len", len(customResource.Spec.Tolerations))
+		reconciler.log.V(1).Info("Adding Tolerations", "len", len(customResource.Spec.Tolerations))
 		podSpec.Tolerations = customResource.Spec.Tolerations
 	}
 
@@ -980,7 +978,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 
 	compactVersionToUse, verr := brokerversion.DetermineCompactVersionToUse(customResource)
 	if verr != nil {
-		reqLogger.Error(verr, "failed to get compact version", "Spec.Version", customResource.Spec.Version)
+		reconciler.log.Error(verr, "failed to get compact version", "Spec.Version", customResource.Spec.Version)
 		return nil, verr
 	}
 	yacfgProfileVersion = version.YacfgProfileVersionFromFullVersion[version.FullVersionFromCompactVersion[compactVersionToUse]]
@@ -1039,7 +1037,7 @@ func (reconciler *BrokerReconcilerImpl) PodTemplateSpecForCR(customResource *v1b
 	reconciler.configureContainerSecurityContext(sidecarContainer, customResource.Spec.ContainerSecurityContext)
 	pts.Spec.InitContainers = []corev1.Container{*sidecarContainer}
 
-	reqLogger.V(2).Info("Final Init spec", "Detail", pts.Spec.InitContainers)
+	reconciler.log.V(2).Info("Final Init spec", "Detail", pts.Spec.InitContainers)
 
 	return pts, nil
 }
