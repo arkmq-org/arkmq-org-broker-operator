@@ -599,14 +599,14 @@ func (reconciler *BrokerServiceInstanceReconciler) resolveAppsProvisioned(deploy
 	}
 
 	appPropsSecretName := AppPropertiesSecretName(reconciler.instance.Name)
-	var appliedSecretVersion string
+	var appliedChecksum string
 	for _, ec := range deployed.Status.ExternalConfigs {
 		if ec.Name == appPropsSecretName {
-			appliedSecretVersion = ec.ResourceVersion
+			appliedChecksum = ec.DataChecksum
 			break
 		}
 	}
-	if appliedSecretVersion == "" {
+	if appliedChecksum == "" {
 		condition.Message = fmt.Sprintf("pending externalConfig, broker status: %v", deployed.Status)
 		return
 	}
@@ -617,9 +617,10 @@ func (reconciler *BrokerServiceInstanceReconciler) resolveAppsProvisioned(deploy
 		return
 	}
 
-	if secret.ResourceVersion != appliedSecretVersion {
-		condition.Message = fmt.Sprintf("externalConfig version mismatch, expected: %s, current: %s, broker status: %v",
-			secret.ResourceVersion, appliedSecretVersion, deployed.Status)
+	currentChecksum := brokerproperties.DataChecksum(secret.Data)
+	if currentChecksum != appliedChecksum {
+		condition.Message = fmt.Sprintf("externalConfig data checksum mismatch, expected: %s, applied: %s, broker status: %v",
+			currentChecksum, appliedChecksum, deployed.Status)
 		return
 	}
 

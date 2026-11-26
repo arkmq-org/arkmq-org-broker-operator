@@ -1998,7 +1998,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			proj := newProjectionFromStringValues(resourceMeta, data)
 
 			Expect(proj.Name).To(Equal("test-config"))
-			Expect(proj.ResourceVersion).To(Equal("12345"))
+			Expect(proj.Version).To(Equal("12345"))
 			Expect(proj.Generation).To(Equal(int64(3)))
 			Expect(proj.Files).To(HaveKey("address.properties"))
 			Expect(proj.Files["address.properties"].Alder32).NotTo(BeEmpty())
@@ -2060,7 +2060,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			projBytes := newProjectionFromByteValues(resourceMeta, byteData)
 
 			Expect(projBytes.Name).To(Equal(projString.Name))
-			Expect(projBytes.ResourceVersion).To(Equal(projString.ResourceVersion))
+			Expect(projBytes.Version).To(Equal(projString.Version))
 			Expect(projBytes.Generation).To(Equal(projString.Generation))
 
 			for fileName := range stringData {
@@ -2082,7 +2082,7 @@ var _ = Describe("brokercluster reconciler", func() {
 			)
 
 			Expect(proj.Name).To(Equal("test-config"))
-			Expect(proj.ResourceVersion).To(Equal("12345"))
+			Expect(proj.Version).To(Equal("12345"))
 			Expect(proj.Generation).To(Equal(int64(3)))
 			Expect(proj.Files).To(BeEmpty())
 		})

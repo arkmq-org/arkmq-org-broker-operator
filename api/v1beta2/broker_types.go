@@ -155,7 +155,7 @@ type BrokerStatus struct {
 
 	// Current state of external referenced resources
 	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="External Configurations Status"
-	ExternalConfigs []ExternalConfigStatus `json:"externalConfigs,omitempty"`
+	ExternalConfigs []BrokerExternalConfigStatus `json:"externalConfigs,omitempty"`
 
 	//+operator-sdk:csv:customresourcedefinitions:type=status,displayName="Version Status"
 	Version VersionStatus `json:"version,omitempty"`
@@ -189,6 +189,11 @@ type Broker struct {
 
 	Spec   BrokerSpec   `json:"spec,omitempty"`
 	Status BrokerStatus `json:"status,omitempty"`
+}
+
+type BrokerExternalConfigStatus struct {
+	Name         string `json:"name"`
+	DataChecksum string `json:"dataChecksum"`
 }
 
 //+kubebuilder:object:root=true

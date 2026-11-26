@@ -441,9 +441,9 @@ var _ = Describe("broker controller unit", func() {
 
 		It("all synced returns nil", Label(unitLabel), func() {
 			proj := &projection{
-				Name:            "test-props",
-				ResourceVersion: "1",
-				Files:           map[string]propertyFile{"broker.properties": {Alder32: checksum}},
+				Name:    "test-props",
+				Version: "1",
+				Files:   map[string]propertyFile{"broker.properties": {Alder32: checksum}},
 			}
 			ri, cr, fakeClient := newReconcilerWithStatus(map[string]propertiesStatus{
 				"broker.properties": {Alder32: checksum},
@@ -454,9 +454,9 @@ var _ = Describe("broker controller unit", func() {
 
 		It("checksum mismatch returns OutOfSync", Label(unitLabel), func() {
 			proj := &projection{
-				Name:            "test-props",
-				ResourceVersion: "1",
-				Files:           map[string]propertyFile{"broker.properties": {Alder32: checksum}},
+				Name:    "test-props",
+				Version: "1",
+				Files:   map[string]propertyFile{"broker.properties": {Alder32: checksum}},
 			}
 			ri, cr, fakeClient := newReconcilerWithStatus(map[string]propertiesStatus{
 				"broker.properties": {Alder32: "99999"},
@@ -469,9 +469,9 @@ var _ = Describe("broker controller unit", func() {
 
 		It("synced with apply errors returns InSyncApplyError", Label(unitLabel), func() {
 			proj := &projection{
-				Name:            "test-props",
-				ResourceVersion: "1",
-				Files:           map[string]propertyFile{"broker.properties": {Alder32: checksum}},
+				Name:    "test-props",
+				Version: "1",
+				Files:   map[string]propertyFile{"broker.properties": {Alder32: checksum}},
 			}
 			ri, cr, fakeClient := newReconcilerWithStatus(map[string]propertiesStatus{
 				"broker.properties": {
@@ -490,8 +490,8 @@ var _ = Describe("broker controller unit", func() {
 
 		It("unchecked prefix files are ignored when missing", Label(unitLabel), func() {
 			proj := &projection{
-				Name:            "test-props",
-				ResourceVersion: "1",
+				Name:    "test-props",
+				Version: "1",
 				Files: map[string]propertyFile{
 					"broker.properties":         {Alder32: checksum},
 					"_jolokia.config":           {Alder32: "ignored"},
@@ -507,8 +507,8 @@ var _ = Describe("broker controller unit", func() {
 
 		It("missing file returns OutOfSyncMissingKey", Label(unitLabel), func() {
 			proj := &projection{
-				Name:            "test-props",
-				ResourceVersion: "1",
+				Name:    "test-props",
+				Version: "1",
 				Files: map[string]propertyFile{
 					"broker.properties": {Alder32: checksum},
 					"other.properties":  {Alder32: "other"},

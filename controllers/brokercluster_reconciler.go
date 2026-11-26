@@ -3295,11 +3295,11 @@ func trapErrorAsCondition(err ArtemisError, conditionType string) metav1.Conditi
 }
 
 type projection struct {
-	Name            string
-	ResourceVersion string
-	Generation      int64
-	Files           map[string]propertyFile
-	Ordinals        []string
+	Name       string
+	Version    string
+	Generation int64
+	Files      map[string]propertyFile
+	Ordinals   []string
 }
 
 type propertyFile struct {
@@ -3615,7 +3615,7 @@ func updateExtraConfigStatus(cr *v1beta2.BrokerCluster, Projection *projection) 
 	if len(cr.Status.ExternalConfigs) > 0 {
 		for index, s := range cr.Status.ExternalConfigs {
 			if s.Name == Projection.Name {
-				cr.Status.ExternalConfigs[index].ResourceVersion = Projection.ResourceVersion
+				cr.Status.ExternalConfigs[index].ResourceVersion = Projection.Version
 				return // update complete
 			}
 		}
@@ -3623,7 +3623,7 @@ func updateExtraConfigStatus(cr *v1beta2.BrokerCluster, Projection *projection) 
 
 	// add an entry
 	cr.Status.ExternalConfigs = append(cr.Status.ExternalConfigs,
-		v1beta2.ExternalConfigStatus{Name: Projection.Name, ResourceVersion: Projection.ResourceVersion})
+		v1beta2.ExternalConfigStatus{Name: Projection.Name, ResourceVersion: Projection.Version})
 }
 
 func (reconciler *BrokerClusterReconcilerImpl) getSecretProjection(secretName types.NamespacedName, client rtclient.Client) (*projection, error) {
@@ -3666,7 +3666,7 @@ func (reconciler *BrokerClusterReconcilerImpl) getConfigMappedJaasProperties(cr 
 }
 
 func newProjectionFromStringValues(resourceMeta metav1.ObjectMeta, configKeyValue map[string]string) *projection {
-	projection := projection{Name: resourceMeta.Name, ResourceVersion: resourceMeta.ResourceVersion, Generation: resourceMeta.Generation, Files: map[string]propertyFile{}}
+	projection := projection{Name: resourceMeta.Name, Version: resourceMeta.ResourceVersion, Generation: resourceMeta.Generation, Files: map[string]propertyFile{}}
 	for prop_file_name, data := range configKeyValue {
 		byteData := []byte(data)
 		if strings.HasSuffix(prop_file_name, JsonSuffix) {
@@ -3690,7 +3690,7 @@ func newProjectionFromStringValues(resourceMeta metav1.ObjectMeta, configKeyValu
 }
 
 func newProjectionFromByteValues(resourceMeta metav1.ObjectMeta, configKeyValue map[string][]byte) *projection {
-	projection := projection{Name: resourceMeta.Name, ResourceVersion: resourceMeta.ResourceVersion, Generation: resourceMeta.Generation, Files: map[string]propertyFile{}}
+	projection := projection{Name: resourceMeta.Name, Version: resourceMeta.ResourceVersion, Generation: resourceMeta.Generation, Files: map[string]propertyFile{}}
 	for prop_file_name, data := range configKeyValue {
 		if strings.HasSuffix(prop_file_name, JsonSuffix) {
 			dataMap := map[string]interface{}{}

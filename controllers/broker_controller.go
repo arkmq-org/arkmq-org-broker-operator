@@ -283,13 +283,11 @@ func EqualBrokerCRStatus(s1, s2 *v1beta2.BrokerStatus) bool {
 	return true
 }
 
-func brokerExternalConfigsModified(desiredExternalConfigs []v1beta2.ExternalConfigStatus, currentExternalConfigs []v1beta2.ExternalConfigStatus) bool {
-	if len(desiredExternalConfigs) >= 0 {
-		for _, cfg := range desiredExternalConfigs {
-			for _, curCfg := range currentExternalConfigs {
-				if curCfg.Name == cfg.Name && curCfg.ResourceVersion != cfg.ResourceVersion {
-					return true
-				}
+func brokerExternalConfigsModified(desiredExternalConfigs []v1beta2.BrokerExternalConfigStatus, currentExternalConfigs []v1beta2.BrokerExternalConfigStatus) bool {
+	for _, cfg := range desiredExternalConfigs {
+		for _, curCfg := range currentExternalConfigs {
+			if curCfg.Name == cfg.Name && curCfg.DataChecksum != cfg.DataChecksum {
+				return true
 			}
 		}
 	}
@@ -1715,7 +1713,7 @@ func updateExtraConfigStatusForBroker(cr *v1beta2.Broker, Projection *projection
 	if len(cr.Status.ExternalConfigs) > 0 {
 		for index, s := range cr.Status.ExternalConfigs {
 			if s.Name == Projection.Name {
-				cr.Status.ExternalConfigs[index].ResourceVersion = Projection.ResourceVersion
+				cr.Status.ExternalConfigs[index].DataChecksum = Projection.Version
 				return // update complete
 			}
 		}
@@ -1723,7 +1721,7 @@ func updateExtraConfigStatusForBroker(cr *v1beta2.Broker, Projection *projection
 
 	// add an entry
 	cr.Status.ExternalConfigs = append(cr.Status.ExternalConfigs,
-		v1beta2.ExternalConfigStatus{Name: Projection.Name, ResourceVersion: Projection.ResourceVersion})
+		v1beta2.BrokerExternalConfigStatus{Name: Projection.Name, DataChecksum: Projection.Version})
 }
 
 func (reconciler *BrokerReconcilerImpl) getSecretProjection(secretName types.NamespacedName, client rtclient.Client) (*projection, error) {
@@ -1739,7 +1737,9 @@ func (reconciler *BrokerReconcilerImpl) getSecretProjection(secretName types.Nam
 			return nil, errors.Wrap(err, "unable to retrieve secret projection")
 		}
 	}
-	return newProjectionFromByteValues(resource.ObjectMeta, resource.Data), nil
+	p := newProjectionFromByteValues(resource.ObjectMeta, resource.Data)
+	p.Version = brokerproperties.DataChecksum(resource.Data)
+	return p, nil
 }
 
 func (reconciler *BrokerReconcilerImpl) getConfigMappedJaasProperties(cr *v1beta2.Broker, client rtclient.Client) (*projection, error) {

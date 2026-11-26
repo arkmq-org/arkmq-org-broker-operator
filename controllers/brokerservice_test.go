@@ -234,7 +234,7 @@ var _ = Describe("broker-service-poc", Label("bsvc"), func() {
 
 				for _, externalConfig := range brokerCrd.Status.ExternalConfigs {
 					if externalConfig.Name == AppPropertiesSecretName(brokerCrd.Name) {
-						appPropsRv = externalConfig.ResourceVersion
+						appPropsRv = externalConfig.DataChecksum
 					}
 				}
 				g.Expect(appPropsRv).ShouldNot(BeEmpty())
@@ -328,7 +328,7 @@ var _ = Describe("broker-service-poc", Label("bsvc"), func() {
 
 				for _, externalConfig := range brokerCrd.Status.ExternalConfigs {
 					if externalConfig.Name == AppPropertiesSecretName(brokerCrd.Name) {
-						appPropsRvUpdated = externalConfig.ResourceVersion
+						appPropsRvUpdated = externalConfig.DataChecksum
 					}
 				}
 				g.Expect(appPropsRvUpdated).ShouldNot(BeEmpty())
@@ -557,7 +557,7 @@ var _ = Describe("broker-service-poc", Label("bsvc"), func() {
 
 				for _, externalConfig := range brokerCrd.Status.ExternalConfigs {
 					if externalConfig.Name == AppPropertiesSecretName(brokerCrd.Name) {
-						appPropsRvUpdated = externalConfig.ResourceVersion
+						appPropsRvUpdated = externalConfig.DataChecksum
 					}
 				}
 				g.Expect(appPropsRvUpdated).ShouldNot(BeEmpty())
@@ -580,7 +580,7 @@ var _ = Describe("broker-service-poc", Label("bsvc"), func() {
 
 				for _, externalConfig := range brokerCrd.Status.ExternalConfigs {
 					if externalConfig.Name == AppPropertiesSecretName(brokerCrd.Name) {
-						appPropsRvUpdated = externalConfig.ResourceVersion
+						appPropsRvUpdated = externalConfig.DataChecksum
 					}
 				}
 				g.Expect(appPropsRvUpdated).ShouldNot(BeEmpty())

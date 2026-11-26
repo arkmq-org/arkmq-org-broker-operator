@@ -463,7 +463,7 @@ var _ = Describe("broker-service status conditions", Label("bsvc"), func() {
 				g.Expect(k8sClient.Get(ctx, brokerKey, brokerCrd)).Should(Succeed())
 				for _, externalConfig := range brokerCrd.Status.ExternalConfigs {
 					if externalConfig.Name == AppPropertiesSecretName(brokerCrd.Name) {
-						initialConfigRV = externalConfig.ResourceVersion
+						initialConfigRV = externalConfig.DataChecksum
 					}
 				}
 				g.Expect(initialConfigRV).ShouldNot(BeEmpty())
@@ -489,7 +489,7 @@ var _ = Describe("broker-service status conditions", Label("bsvc"), func() {
 				g.Expect(k8sClient.Get(ctx, brokerKey, brokerCrd)).Should(Succeed())
 				for _, externalConfig := range brokerCrd.Status.ExternalConfigs {
 					if externalConfig.Name == AppPropertiesSecretName(brokerCrd.Name) {
-						updatedConfigRV = externalConfig.ResourceVersion
+						updatedConfigRV = externalConfig.DataChecksum
 					}
 				}
 				if verbose {

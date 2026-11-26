@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/api/v1beta2"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -218,8 +219,8 @@ var _ = Describe("brokerservice finalizer unit", Label(unitLabel), func() {
 				{Type: v1beta2.ReadyConditionType, Status: metav1.ConditionTrue, Reason: "Ready"},
 				{Type: v1beta2.DeployedConditionType, Status: metav1.ConditionTrue, Reason: "Ready"},
 			}
-			brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
-				{Name: secretName, ResourceVersion: appSecret.ResourceVersion},
+			brokerCR.Status.ExternalConfigs = []v1beta2.BrokerExternalConfigStatus{
+				{Name: secretName, DataChecksum: brokerproperties.DataChecksum(appSecret.Data)},
 			}
 			Expect(cl.Status().Update(context.TODO(), brokerCR)).To(Succeed())
 
@@ -251,8 +252,8 @@ var _ = Describe("brokerservice finalizer unit", Label(unitLabel), func() {
 			By("keeping broker in sync with latest secret version")
 			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, appSecret)).To(Succeed())
 			Expect(cl.Get(context.TODO(), req.NamespacedName, brokerCR)).To(Succeed())
-			brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
-				{Name: secretName, ResourceVersion: appSecret.ResourceVersion},
+			brokerCR.Status.ExternalConfigs = []v1beta2.BrokerExternalConfigStatus{
+				{Name: secretName, DataChecksum: brokerproperties.DataChecksum(appSecret.Data)},
 			}
 			Expect(cl.Status().Update(context.TODO(), brokerCR)).To(Succeed())
 
@@ -466,8 +467,8 @@ var _ = Describe("brokerservice finalizer unit", Label(unitLabel), func() {
 			brokerCR.Status.Conditions = []metav1.Condition{
 				{Type: v1beta2.ReadyConditionType, Status: metav1.ConditionTrue, Reason: "Ready"},
 			}
-			brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
-				{Name: secretName, ResourceVersion: appSecret.ResourceVersion},
+			brokerCR.Status.ExternalConfigs = []v1beta2.BrokerExternalConfigStatus{
+				{Name: secretName, DataChecksum: brokerproperties.DataChecksum(appSecret.Data)},
 			}
 			Expect(cl.Status().Update(context.TODO(), brokerCR)).To(Succeed())
 
