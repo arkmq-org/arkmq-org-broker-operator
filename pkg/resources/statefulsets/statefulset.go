@@ -21,6 +21,7 @@ import (
 	"reflect"
 
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/common"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 
 	"github.com/RHsyseng/operator-utils/pkg/resource/read"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/pods"
@@ -118,6 +119,11 @@ func GetDeployedStatefulSetNames(client rtclient.Client, ns string, filter []typ
 	)
 
 	for _, ssObject := range resourceMap[reflect.TypeOf(appsv1.StatefulSet{})] {
+
+		if selectors.IsForKind(ssObject, selectors.BrokerLabelAppKubernetesNameValue) {
+			// skip any ss created by the broker cr
+			continue
+		}
 		// track if a match
 		if len(filter) == 0 {
 			result = append(result, buildStatefulSetInfo(ssObject.(*appsv1.StatefulSet)))

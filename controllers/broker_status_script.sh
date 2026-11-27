@@ -27,7 +27,7 @@ signal_reconcile() {
     "$PATCH_URL" > /dev/null
 }
 
-tail -F "$RELOAD_LOG_PATH" 2>/dev/null | grep -E --line-buffered 'AMQ221007|AMQ221087' | while read -r; do
+tail -F -q -n +1 "$RELOAD_LOG_PATH" "${RELOAD_LOG_PATH}.1" 2>/dev/null | grep -E --line-buffered 'AMQ221007|AMQ221087' | while read -r; do
   signal_reconcile
 done &
 

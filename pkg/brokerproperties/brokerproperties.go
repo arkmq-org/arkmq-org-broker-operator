@@ -102,6 +102,20 @@ func Alder32StringValue(alder32Bytes []byte) string {
 	return fmt.Sprintf("%d", binary.BigEndian.Uint32(alder32Bytes))
 }
 
+func DataChecksum(data map[string][]byte) string {
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	digest := adler32.New()
+	for _, k := range keys {
+		digest.Write([]byte(k))
+		digest.Write(data[k])
+	}
+	return fmt.Sprintf("%d", digest.Sum32())
+}
+
 func Alder32FromData(data []byte) string {
 	return Alder32StringValue(Alder32Of(ReadReplaceEscapes(KeyValuePairs(data))))
 }

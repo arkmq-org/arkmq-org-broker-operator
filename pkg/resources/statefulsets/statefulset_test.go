@@ -2,6 +2,7 @@ package statefulsets_test
 
 import (
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/statefulsets"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/utils/selectors"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
@@ -29,6 +30,16 @@ var _ = Describe("Statefulset", func() {
 		})
 		Context("with deployed statefulsets", func() {
 			objs := []client.Object{
+				// ignored brokerService broker cr
+				&appsv1.StatefulSet{
+					ObjectMeta: v1.ObjectMeta{
+						Name:      "sts-100-ss",
+						Namespace: "some-ns",
+						Labels: map[string]string{
+							selectors.LabelAppKubernetesName: selectors.BrokerLabelAppKubernetesNameValue,
+						},
+					},
+				},
 				&appsv1.StatefulSet{
 					ObjectMeta: v1.ObjectMeta{
 						Name:      "sts-0-ss",

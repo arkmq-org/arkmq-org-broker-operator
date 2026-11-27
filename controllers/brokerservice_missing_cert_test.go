@@ -94,10 +94,13 @@ var _ = Describe("brokerservice missing certificate conditions", Label(unitLabel
 			svc := &v1beta2.BrokerService{
 				ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
 			}
-			objects := WithCerts(
+			objects := []client.Object{
 				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
 				svc, boundApp(),
-			)
+				NewCertSecret(common.GetOperatorCertSecretName(), ns, "operator"),
+				NewAppCertSecret(appName, ns),
+				NewCertSecret(svcName+"-"+common.DefaultOperandCertSecretName, ns, svcName),
+			}
 			cl := newClient(objects...)
 
 			updatedSvc := reconcileAndGetStatus(cl)

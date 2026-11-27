@@ -34,6 +34,7 @@ import (
 	brokerproperties "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/brokerproperties"
 	servicemetrics "github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/metrics"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources"
+	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/environments"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/networkpolicies"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/resources/secrets"
 	"github.com/arkmq-org/arkmq-org-broker-operator/v2/pkg/templates"
@@ -257,7 +258,7 @@ func (r *BrokerServiceReconciler) getOrderedTypeList() []reflect.Type {
 func (r *BrokerServiceInstanceReconciler) getOrderedResources() []client.Object {
 	list := []client.Object{
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: r.appPropertiesSecretName()}},
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: r.controlPlaneOverrideSecretName()}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: r.controlPlaneSecretName()}},
 		&broker.Broker{ObjectMeta: metav1.ObjectMeta{Name: r.instance.Name}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: r.instance.Name}},
 	}
@@ -370,23 +371,37 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 		// Domain-specific labels
 		selectors.LabelBrokerService: reconciler.instance.Name,
 	}
-	desired.Spec.Env = reconciler.instance.Spec.Env
 	desired.Spec.Resources = reconciler.instance.Spec.Resources
 
 	if reconciler.instance.Spec.Image != nil {
 		desired.Spec.Image = *reconciler.instance.Spec.Image
 	}
 
+	operandCertSecretName := common.GetOperandCertSecretName(desired, reconciler.Client, reconciler.log)
+	caSecretName := common.GetOperatorCASecretName()
+
 	desired.Spec.ExtraMounts.Secrets = []string{
 		reconciler.appPropertiesSecretName(),
+		reconciler.controlPlaneSecretName(),
+		operandCertSecretName,
+		caSecretName,
 	}
 
-	appPorts, err := reconciler.processAppSecrets()
+	appPorts, validApps, err := reconciler.processAppSecrets()
 	if err != nil {
 		return err
 	}
 
-	if common.BrokerNetworkPolicyEnabled() {
+	controlPlane, err := reconciler.processControlPlaneSecret(desired, validApps, operandCertSecretName, caSecretName)
+	if err != nil {
+		return err
+	}
+
+	desired.Spec.Env = controlPlaneEnv(reconciler.instance.Spec.Env, controlPlane.systemProps)
+	desired.Spec.LivenessProbe = controlPlane.livenessProbe
+
+	desired.Spec.ResourceTemplates = nil
+	if common.BrokerNetworkPolicyEnabled() && len(appPorts) > 0 {
 		desired.Spec.ResourceTemplates = appendNetworkPolicyTemplate(desired.Spec.ResourceTemplates, appPorts)
 	}
 
@@ -395,7 +410,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processBroker() (err error) {
 	return nil
 }
 
-func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts []int32, err error) {
+func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts []int32, validApps []broker.BrokerApp, err error) {
 	// avoid restart for app onboarding with existing mount points
 	// TODO potentially N app-secrets to overcome 1Mb size limit
 	resourceName := types.NamespacedName{
@@ -417,14 +432,14 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts
 	boundApps := &broker.BrokerAppList{}
 	bindingKey := reconciler.instance.Namespace + ":" + reconciler.instance.Name
 	if err = reconciler.List(context.TODO(), boundApps, client.MatchingFields{common.AppServiceBindingField: bindingKey}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// snapshot old data before reset — used to detect removed addresses pending empty
 	previousSecretData := desired.Data
 	desired.Data = make(map[string][]byte)
 	appIdentities := make([]string, 0, len(boundApps.Items))
-	provisionedApps := make([]broker.BrokerApp, 0, len(boundApps.Items))
+	validApps = make([]broker.BrokerApp, 0, len(boundApps.Items))
 	reconciler.status.PendingEmpty = nil
 
 	type appWithTracker struct {
@@ -481,7 +496,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts
 				break
 			}
 			appIdentities = append(appIdentities, reconciler.provisionedAppIdentity(app))
-			provisionedApps = append(provisionedApps, activeAppTrackers[i].app)
+			validApps = append(validApps, activeAppTrackers[i].app)
 			if app.Status.Service != nil && app.Status.Service.AssignedPort != UnassignedPort {
 				appPorts = append(appPorts, app.Status.Service.AssignedPort)
 			}
@@ -496,12 +511,7 @@ func (reconciler *BrokerServiceInstanceReconciler) processAppSecrets() (appPorts
 
 	reconciler.TrackDesired(desired)
 
-	// Update prometheus config in control-plane-override secret with queue-level metrics
-	if err == nil {
-		err = reconciler.processControlPlaneOverrideSecret(provisionedApps)
-	}
-
-	return appPorts, err
+	return appPorts, validApps, err
 }
 
 func (reconciler *BrokerServiceInstanceReconciler) appPropertiesSecretName() string {
@@ -589,14 +599,14 @@ func (reconciler *BrokerServiceInstanceReconciler) resolveAppsProvisioned(deploy
 	}
 
 	appPropsSecretName := AppPropertiesSecretName(reconciler.instance.Name)
-	var appliedSecretVersion string
+	var appliedChecksum string
 	for _, ec := range deployed.Status.ExternalConfigs {
 		if ec.Name == appPropsSecretName {
-			appliedSecretVersion = ec.ResourceVersion
+			appliedChecksum = ec.DataChecksum
 			break
 		}
 	}
-	if appliedSecretVersion == "" {
+	if appliedChecksum == "" {
 		condition.Message = fmt.Sprintf("pending externalConfig, broker status: %v", deployed.Status)
 		return
 	}
@@ -607,9 +617,10 @@ func (reconciler *BrokerServiceInstanceReconciler) resolveAppsProvisioned(deploy
 		return
 	}
 
-	if secret.ResourceVersion != appliedSecretVersion {
-		condition.Message = fmt.Sprintf("externalConfig version mismatch, expected: %s, current: %s, broker status: %v",
-			secret.ResourceVersion, appliedSecretVersion, deployed.Status)
+	currentChecksum := brokerproperties.DataChecksum(secret.Data)
+	if currentChecksum != appliedChecksum {
+		condition.Message = fmt.Sprintf("externalConfig data checksum mismatch, expected: %s, applied: %s, broker status: %v",
+			currentChecksum, appliedChecksum, deployed.Status)
 		return
 	}
 
@@ -1553,79 +1564,194 @@ func SlashPrefixValue(prefix, value string) string {
 	return fmt.Sprintf("%s/%s", prefix, value)
 }
 
-func (reconciler *BrokerServiceInstanceReconciler) controlPlaneOverrideSecretName() string {
-	return reconciler.instance.Name + "-control-plane-override"
+const podNameEnvVarName = "POD_NAME"
+
+func (reconciler *BrokerServiceInstanceReconciler) controlPlaneSecretName() string {
+	return reconciler.instance.Name + "-control-plane" + common.BrokerPropsSuffix
 }
 
-func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneOverrideSecret(validApps []broker.BrokerApp) error {
-	appQueues := queueOwners(validApps, reconciler.log)
+// controlPlane is what the broker needs on its command line and in its pod
+// to run the control-plane config rendered into the control-plane secret.
+type controlPlane struct {
+	systemProps   []string
+	livenessProbe *corev1.Probe
+}
 
-	// Get or create the control-plane-override secret
+func (reconciler *BrokerServiceInstanceReconciler) processControlPlaneSecret(brokerCr *broker.Broker, validApps []broker.BrokerApp, operandCertSecretName, caSecretName string) (*controlPlane, error) {
 	resourceName := types.NamespacedName{
 		Namespace: reconciler.instance.Namespace,
-		Name:      reconciler.controlPlaneOverrideSecretName(),
+		Name:      reconciler.controlPlaneSecretName(),
+	}
+
+	// Give each app an identity on the metrics endpoint, next to the control plane.
+	appEntries, err := reconciler.appIdentityEntries(validApps)
+	if err != nil {
+		return nil, err
+	}
+
+	data, cp, err := renderControlPlane(reconciler.Client, brokerCr, reconciler.instance.Spec.Env, resourceName.Name, operandCertSecretName, caSecretName, appEntries, queueOwners(validApps, reconciler.log), reconciler.log)
+	if err != nil {
+		return nil, err
 	}
 
 	var desired *corev1.Secret
 	obj := reconciler.CloneOfDeployed(reflect.TypeOf(corev1.Secret{}), resourceName.Name)
 	if obj != nil {
 		desired = obj.(*corev1.Secret)
+		desired.Data = data
 	} else {
-		desired = secrets.NewSecret(resourceName, nil, reconciler.dependentLabels())
+		desired = secrets.NewSecret(resourceName, data, reconciler.dependentLabels())
 	}
 	reconciler.ensureDependentLabels(desired)
+	reconciler.TrackDesired(desired)
 
-	if desired.Data == nil {
-		desired.Data = make(map[string][]byte)
+	return cp, nil
+}
+
+// renderControlPlane renders the control-plane config of a broker, mounted
+// from secretName: the jolokia and prometheus agents secured with mTLS, the
+// realm that authenticates their clients, the operator, prometheus and each
+// app, and the RBAC guarding the mbeans they read.
+func renderControlPlane(cl client.Client, brokerCr *broker.Broker, env []corev1.EnvVar, secretName, operandCertSecretName, caSecretName string, appEntries []templates.AppIdentityEntry, appQueues map[string]templates.QueueOwner, logger logr.Logger) (map[string][]byte, *controlPlane, error) {
+	caCertSecret, err := common.GetOperatorCASecret(cl, logger)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get operator ca secret, %w", err)
+	}
+	caSecretKey, err := common.GetOperatorCASecretKey(cl, caCertSecret, logger)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get operator ca secret key, %w", err)
 	}
 
-	// Generate prometheus exporter yaml with queue-level metrics
-	prometheusConfig, err := reconciler.generatePrometheusConfig(appQueues)
-	if err != nil {
-		return err
-	}
-	desired.Data[PrometheusConfigFileName] = prometheusConfig
+	mountPathRoot := path.Join(common.SecretPathBase, secretName)
+	certSecretPath := path.Join(common.SecretPathBase, operandCertSecretName)
+	caCertPath := path.Join(common.SecretPathBase, caSecretName, caSecretKey)
+	brokerName := environments.ResolveBrokerNameFromEnvs(env, brokerCr.Name)
 
-	// Give each app an identity on the metrics endpoint. applyControlPlaneOverridesForBroker
-	// replaces whole keys, so these are rendered complete, control-plane entries included.
-	appEntries, err := reconciler.appIdentityEntries(validApps)
-	if err != nil {
-		return err
+	data := make(map[string][]byte)
+
+	if data["_security.config"], err = templates.Render(templates.Security, templates.SecurityConfig{
+		MountPathRoot: mountPathRoot,
+	}); err != nil {
+		return nil, nil, err
 	}
 
-	cns, err := common.ResolveControlPlaneCNsWithLog(reconciler.Client,
-		common.GenerateBroker(reconciler.instance.Name, reconciler.instance.Namespace), reconciler.log)
+	if data[brokerproperties.JaasConfigKey], err = templates.Render(templates.Login, templates.LoginConfig{
+		Realm:         common.HttpAuthenticatorRealm,
+		MountPathRoot: mountPathRoot,
+		CertUsersKey:  common.GetCertUsersKey(common.HttpAuthenticatorRealm),
+		CertRolesKey:  common.GetCertRolesKey(common.HttpAuthenticatorRealm),
+	}); err != nil {
+		return nil, nil, err
+	}
+
+	cns, err := common.ResolveControlPlaneCNsWithLog(cl, brokerCr, logger)
 	if err != nil {
-		return NewTransientErrorWithCause(broker.DeployedConditionMissingCertReason,
+		return nil, nil, NewTransientErrorWithCause(broker.DeployedConditionMissingCertReason,
 			"control plane certificate not available", err)
 	}
 
-	certUsers, err := templates.Render(templates.AppCertUsers, templates.AppCertUsersConfig{
+	if data[common.GetCertUsersKey(common.HttpAuthenticatorRealm)], err = templates.Render(templates.AppCertUsers, templates.AppCertUsersConfig{
 		CertUsersConfig: templates.CertUsersConfig(cns),
 		Apps:            appEntries,
-	})
-	if err != nil {
-		return err
+	}); err != nil {
+		return nil, nil, err
 	}
-	desired.Data[common.GetCertUsersKey(common.HttpAuthenticatorRealm)] = certUsers
 
-	certRoles, err := templates.Render(templates.AppCertRoles, templates.AppCertRolesConfig{
+	if data[common.GetCertRolesKey(common.HttpAuthenticatorRealm)], err = templates.Render(templates.AppCertRoles, templates.AppCertRolesConfig{
 		Apps: appEntries,
-	})
-	if err != nil {
-		return err
+	}); err != nil {
+		return nil, nil, err
 	}
-	desired.Data[common.GetCertRolesKey(common.HttpAuthenticatorRealm)] = certRoles
 
-	for k := range desired.Data {
-		reconciler.log.V(2).Info("Override", "Key", k)
+	if data["aa_restricted.json"], err = brokerproperties.RestrictedConfigData(brokerName); err != nil {
+		return nil, nil, err
 	}
-	reconciler.TrackDesired(desired)
-	return nil
+	if data["aa_rbac.json"], err = brokerproperties.RBACConfigData(); err != nil {
+		return nil, nil, err
+	}
+
+	if data["_jolokia.config"], err = templates.Render(templates.Jolokia, templates.JolokiaConfig{
+		CACertPath:     caCertPath,
+		ServerCertPath: path.Join(certSecretPath, "tls.crt"),
+		ServerKeyPath:  path.Join(certSecretPath, "tls.key"),
+	}); err != nil {
+		return nil, nil, err
+	}
+
+	if data["_cert.pemcfg"], err = templates.Render(templates.PemCfg, templates.PemCfgConfig{
+		Alias:       "alias",
+		CertKeyPath: path.Join(certSecretPath, "tls.key"),
+		CertCrtPath: path.Join(certSecretPath, "tls.crt"),
+	}); err != nil {
+		return nil, nil, err
+	}
+
+	// Generate prometheus exporter yaml with queue-level metrics
+	if data[PrometheusConfigFileName], err = templates.RenderServicePrometheus(templates.ServicePrometheusConfig{
+		PemCfgPath:       path.Join(mountPathRoot, "_cert.pemcfg"),
+		CATrustStorePath: caCertPath,
+		BrokerName:       brokerCr.Name,
+	}, appQueues); err != nil {
+		return nil, nil, err
+	}
+
+	terminationGracePeriodSeconds := int64(60)
+	return data, &controlPlane{
+		systemProps: []string{
+			fmt.Sprintf("-Djava.security.properties=%s/_security.config", mountPathRoot),
+			// adapt jolokia and prometheus authentication
+			"-DhttpServerAuthenticator.requestSubjectAttribute=org.jolokia.jaasSubject",
+			// install mbean server guard
+			"-Dlog4j2.disableJmx=true -Djavax.management.builder.initial=org.apache.activemq.artemis.core.server.management.ArtemisRbacMBeanServerBuilder",
+			fmt.Sprintf("-javaagent:/opt/agents/jolokia.jar=host=$(%s),config=%s/_jolokia.config", podNameEnvVarName, mountPathRoot),
+			fmt.Sprintf("-javaagent:/opt/agents/prometheus.jar=$(%s):8888:%s/%s", podNameEnvVarName, mountPathRoot, PrometheusConfigFileName),
+		},
+		livenessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{
+						"/bin/bash",
+						"-c",
+						// use curl with mtls as the broker-cert to pull the status to find start state using dns
+						fmt.Sprintf(`export STATEFUL_SET_ORDINAL=${HOSTNAME##*-};curl --cacert %s --cert %s/tls.crt --key %s/tls.key  https://%s:8778/jolokia/read/org.apache.activemq.artemis:broker=%%22%s%%22/Status | grep -w -P "(START|STOPP)(ED|ING)"`, caCertPath, certSecretPath, certSecretPath, common.OrdinalStringFQDNS(brokerCr.Name, brokerCr.Namespace, "$STATEFUL_SET_ORDINAL"), brokerName),
+					},
+				},
+			},
+			InitialDelaySeconds:           1,
+			TimeoutSeconds:                5,
+			PeriodSeconds:                 5,
+			SuccessThreshold:              1,
+			FailureThreshold:              2,
+			TerminationGracePeriodSeconds: &terminationGracePeriodSeconds,
+		},
+	}, nil
+}
+
+// controlPlaneEnv puts the control-plane system properties ahead of any the
+// user appends. Kubernetes expands $(POD_NAME) in them, bash would not.
+func controlPlaneEnv(userEnv []corev1.EnvVar, systemProps []string) []corev1.EnvVar {
+	env := []corev1.EnvVar{{
+		Name: podNameEnvVarName,
+		ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{APIVersion: "v1", FieldPath: "metadata.name"},
+		},
+	}}
+	javaArgs := strings.Join(systemProps, " ")
+	for _, e := range userEnv {
+		// TODO a JAVA_ARGS_APPEND set with valueFrom is dropped here; keep it under
+		// another name and reference it as $(NAME) in ours, or reject it on the service
+		// TODO a user POD_NAME declared after ours overrides it in the $(POD_NAME) expansion
+		if e.Name == javaArgsAppendEnvVarName {
+			javaArgs += " " + e.Value
+			continue
+		}
+		env = append(env, e)
+	}
+	return append(env, corev1.EnvVar{Name: javaArgsAppendEnvVarName, Value: javaArgs})
 }
 
 // appIdentityEntries maps the provisioned apps to their control-plane
-// identities, sorted so the rendered override is stable.
+// identities, sorted so the rendered secret is stable.
 func (reconciler *BrokerServiceInstanceReconciler) appIdentityEntries(validApps []broker.BrokerApp) ([]templates.AppIdentityEntry, error) {
 	entries := make([]templates.AppIdentityEntry, 0, len(validApps))
 	for i := range validApps {
@@ -2064,20 +2190,4 @@ func claimQueuesForRef(addressRef broker.AddressRef, self templates.QueueOwner, 
 		}
 	}
 	claim(addressRef.Address, owner)
-}
-
-func (reconciler *BrokerServiceInstanceReconciler) generatePrometheusConfig(appQueues map[string]templates.QueueOwner) ([]byte, error) {
-	var caSecret, caSecretKey string
-	if caCertSecret, err := common.GetOperatorCASecret(reconciler.Client, reconciler.log); err == nil {
-		caSecret = caCertSecret.Name
-		if key, err := common.GetOperatorCASecretKey(reconciler.Client, caCertSecret, reconciler.log); err == nil {
-			caSecretKey = key
-		}
-	}
-	mountPathRoot := path.Join(common.SecretPathBase, reconciler.instance.Name+"-props")
-	return templates.RenderServicePrometheus(templates.ServicePrometheusConfig{
-		PemCfgPath:       path.Join(mountPathRoot, "_cert.pemcfg"),
-		CATrustStorePath: path.Join(common.SecretPathBase, caSecret, caSecretKey),
-		BrokerName:       reconciler.instance.Name,
-	}, appQueues)
 }

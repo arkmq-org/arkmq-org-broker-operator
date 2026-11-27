@@ -38,7 +38,7 @@ var _ = Describe("Labeler", func() {
 	It("builds recommended labels for Broker directly", func() {
 		generated := BrokerLabels("my-broker")
 
-		Expect(generated).To(HaveKeyWithValue(LabelAppKubernetesName, LabelAppKubernetesNameValue))
+		Expect(generated).To(HaveKeyWithValue(LabelAppKubernetesName, BrokerLabelAppKubernetesNameValue))
 		Expect(generated).To(HaveKeyWithValue(LabelAppKubernetesInstance, "my-broker"))
 		Expect(generated).To(HaveKeyWithValue(LabelPartOfKey, LabelPartOfValue))
 		Expect(generated).NotTo(HaveKey(LabelBrokerKey))
@@ -70,7 +70,7 @@ var _ = Describe("Labeler", func() {
 		})).To(BeTrue())
 		Expect(selector.Matches(k8slabels.Set{
 			LabelPartOfKey:             LabelPartOfValue,
-			LabelAppKubernetesName:     LabelAppKubernetesNameValue,
+			LabelAppKubernetesName:     BrokerLabelAppKubernetesNameValue,
 			LabelAppKubernetesInstance: "my-broker",
 		})).To(BeTrue())
 		Expect(selector.Matches(k8slabels.Set{

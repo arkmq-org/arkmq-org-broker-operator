@@ -429,8 +429,8 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		brokerCR.Status.Conditions = []metav1.Condition{
 			{Type: v1beta2.ReadyConditionType, Status: metav1.ConditionTrue, Reason: "Ready"},
 		}
-		brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
-			{Name: secretName, ResourceVersion: secret.ResourceVersion},
+		brokerCR.Status.ExternalConfigs = []v1beta2.BrokerExternalConfigStatus{
+			{Name: secretName, DataChecksum: brokerproperties.DataChecksum(secret.Data)},
 		}
 		err = cl.Status().Update(context.TODO(), brokerCR)
 		Expect(err).NotTo(HaveOccurred())
@@ -499,7 +499,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		secret := &corev1.Secret{}
 		err = cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, secret)
 		Expect(err).NotTo(HaveOccurred())
-		secretV1 := secret.ResourceVersion
+		secretChecksum := brokerproperties.DataChecksum(secret.Data)
 
 		brokerCR := &v1beta2.Broker{}
 		err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
@@ -507,8 +507,8 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		brokerCR.Status.Conditions = []metav1.Condition{
 			{Type: v1beta2.ReadyConditionType, Status: metav1.ConditionTrue, Reason: "Ready"},
 		}
-		brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
-			{Name: secretName, ResourceVersion: secretV1},
+		brokerCR.Status.ExternalConfigs = []v1beta2.BrokerExternalConfigStatus{
+			{Name: secretName, DataChecksum: secretChecksum},
 		}
 		err = cl.Status().Update(context.TODO(), brokerCR)
 		Expect(err).NotTo(HaveOccurred())
@@ -540,8 +540,8 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 
 		err = cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, secret)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(secret.ResourceVersion).NotTo(Equal(secretV1))
-		secretV2 := secret.ResourceVersion
+		secretChecksumV2 := brokerproperties.DataChecksum(secret.Data)
+		Expect(secretChecksumV2).NotTo(Equal(secretChecksum))
 
 		err = cl.Get(context.TODO(), req.NamespacedName, updatedSvc)
 		Expect(err).NotTo(HaveOccurred())
@@ -549,8 +549,8 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 
 		err = cl.Get(context.TODO(), req.NamespacedName, brokerCR)
 		Expect(err).NotTo(HaveOccurred())
-		brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
-			{Name: secretName, ResourceVersion: secretV2},
+		brokerCR.Status.ExternalConfigs = []v1beta2.BrokerExternalConfigStatus{
+			{Name: secretName, DataChecksum: secretChecksumV2},
 		}
 		err = cl.Status().Update(context.TODO(), brokerCR)
 		Expect(err).NotTo(HaveOccurred())
@@ -618,8 +618,8 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		brokerCR.Status.Conditions = []metav1.Condition{
 			{Type: v1beta2.ReadyConditionType, Status: metav1.ConditionTrue, Reason: "Ready"},
 		}
-		brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
-			{Name: secretName, ResourceVersion: secret.ResourceVersion},
+		brokerCR.Status.ExternalConfigs = []v1beta2.BrokerExternalConfigStatus{
+			{Name: secretName, DataChecksum: brokerproperties.DataChecksum(secret.Data)},
 		}
 		err = cl.Status().Update(context.TODO(), brokerCR)
 		Expect(err).NotTo(HaveOccurred())
@@ -642,7 +642,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		Expect(cond.Reason).To(Equal(v1beta2.AppsProvisionedConditionSyncedReason))
 	})
 
-	It("prometheus override secret", Label(unitLabel), func() {
+	It("prometheus control-plane secret", Label(unitLabel), func() {
 		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
@@ -705,12 +705,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		_, err := r.Reconcile(context.TODO(), req)
 		Expect(err).NotTo(HaveOccurred())
 
-		overrideSecretName := svcName + "-control-plane-override"
-		overrideSecret := &corev1.Secret{}
-		err = cl.Get(context.TODO(), types.NamespacedName{Name: overrideSecretName, Namespace: ns}, overrideSecret)
-		Expect(err).NotTo(HaveOccurred(), "control-plane-override secret should exist")
-
-		prometheusYaml, ok := overrideSecret.Data[PrometheusConfigFileName]
+		prometheusYaml, ok := controlPlaneData(cl, svcName, ns)[PrometheusConfigFileName]
 		Expect(ok).To(BeTrue(), "should have prometheus key")
 		Expect(prometheusYaml).NotTo(BeEmpty())
 
@@ -723,7 +718,7 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		Expect(prometheusConfig).To(ContainSubstring("DeliveringCount"))
 	})
 
-	It("prometheus override no apps", Label(unitLabel), func() {
+	It("prometheus control-plane secret no apps", Label(unitLabel), func() {
 		scheme := NewServiceUnitTestScheme()
 
 		ns := "default"
@@ -763,17 +758,76 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 		_, err := r.Reconcile(context.TODO(), req)
 		Expect(err).NotTo(HaveOccurred())
 
-		overrideSecretName := svcName + "-control-plane-override"
-		overrideSecret := &corev1.Secret{}
-		err = cl.Get(context.TODO(), types.NamespacedName{Name: overrideSecretName, Namespace: ns}, overrideSecret)
-		Expect(err).NotTo(HaveOccurred(), "control-plane-override secret should exist even without apps")
-
-		prometheusYaml, ok := overrideSecret.Data[PrometheusConfigFileName]
+		prometheusYaml, ok := controlPlaneData(cl, svcName, ns)[PrometheusConfigFileName]
 		Expect(ok).To(BeTrue(), "should have prometheus key")
 		Expect(prometheusYaml).NotTo(BeEmpty())
 
 		prometheusConfig := string(prometheusYaml)
 		Expect(prometheusConfig).To(ContainSubstring("component=addresses,address=*,subcomponent=queues"))
+	})
+
+	It("broker runs the control plane it is given", Label(unitLabel), func() {
+		scheme := NewServiceUnitTestScheme()
+
+		ns := "default"
+		svcName := "my-service"
+
+		common.SetOperatorCASecretName("op_ca")
+		DeferCleanup(common.UnsetOperatorCASecretName)
+
+		common.SetOperatorNameSpace(ns)
+		DeferCleanup(common.UnsetOperatorNameSpace)
+
+		namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+		oc := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "op_ca", Namespace: ns},
+			Data:       map[string][]byte{"ca.pem": []byte("bla")},
+		}
+		svc := &v1beta2.BrokerService{
+			ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns},
+			Spec: v1beta2.BrokerServiceSpec{
+				Image: StringToPtr("placeholder"),
+				Env:   []corev1.EnvVar{{Name: "JAVA_ARGS_APPEND", Value: "-Duser.flag=true"}},
+			},
+		}
+
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(WithCerts(namespace, oc, svc)...).
+			WithStatusSubresource(svc, &v1beta2.Broker{}).
+			WithIndex(&v1beta2.BrokerApp{}, common.AppServiceBindingField, func(rawObj client.Object) []string {
+				app := rawObj.(*v1beta2.BrokerApp)
+				if app.Status.Service != nil {
+					return []string{app.Status.Service.Key()}
+				}
+				return nil
+			}).Build()
+
+		r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+
+		_, err := r.Reconcile(context.TODO(), req)
+		Expect(err).NotTo(HaveOccurred())
+
+		data := controlPlaneData(cl, svcName, ns)
+		for _, key := range []string{"_security.config", "login.config", "_jolokia.config", "_cert.pemcfg", PrometheusConfigFileName, "aa_restricted.json", "aa_rbac.json"} {
+			Expect(data).To(HaveKey(key))
+		}
+
+		brokerCr := &v1beta2.Broker{}
+		Expect(cl.Get(context.TODO(), req.NamespacedName, brokerCr)).To(Succeed())
+
+		Expect(brokerCr.Spec.ExtraMounts.Secrets).To(ContainElements(svcName+"-control-plane-bp", common.GetOperandCertSecretName(brokerCr, cl, logr.Discard()), "op_ca"))
+		Expect(brokerCr.Spec.LivenessProbe).NotTo(BeNil())
+		Expect(brokerCr.Spec.LivenessProbe.Exec.Command[2]).To(ContainSubstring("/jolokia/read/"))
+
+		env := brokerCr.Spec.Env
+		Expect(env[0].Name).To(Equal("POD_NAME"), "kubernetes only expands $(POD_NAME) when it is declared first")
+		javaArgs := env[len(env)-1]
+		Expect(javaArgs.Name).To(Equal("JAVA_ARGS_APPEND"))
+		Expect(javaArgs.Value).To(ContainSubstring("-javaagent:/opt/agents/jolokia.jar=host=$(POD_NAME),config=/amq/extra/secrets/" + svcName + "-control-plane-bp/_jolokia.config"))
+		Expect(javaArgs.Value).To(ContainSubstring("-javaagent:/opt/agents/prometheus.jar=$(POD_NAME):8888:"))
+		Expect(javaArgs.Value).To(HaveSuffix(" -Duser.flag=true"), "the user's own flags come last")
 	})
 
 	Context("valid condition", func() {
@@ -1425,8 +1479,8 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 			{Type: v1beta2.DeployedConditionType, Status: metav1.ConditionTrue, Reason: "AllPodsReady"},
 			{Type: v1beta2.ReadyConditionType, Status: metav1.ConditionTrue, Reason: "ResourceReady"},
 		}
-		brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
-			{Name: secretName, ResourceVersion: "stale-version-that-wont-match"},
+		brokerCR.Status.ExternalConfigs = []v1beta2.BrokerExternalConfigStatus{
+			{Name: secretName, DataChecksum: "stale-version-that-wont-match"},
 		}
 		err = cl.Status().Update(context.TODO(), brokerCR)
 		Expect(err).NotTo(HaveOccurred())
@@ -1512,8 +1566,8 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 			{Type: v1beta2.DeployedConditionType, Status: metav1.ConditionTrue, Reason: "AllPodsReady"},
 			{Type: v1beta2.ReadyConditionType, Status: metav1.ConditionTrue, Reason: "ResourceReady"},
 		}
-		brokerCR.Status.ExternalConfigs = []v1beta2.ExternalConfigStatus{
-			{Name: secretName, ResourceVersion: secret.ResourceVersion},
+		brokerCR.Status.ExternalConfigs = []v1beta2.BrokerExternalConfigStatus{
+			{Name: secretName, DataChecksum: brokerproperties.DataChecksum(secret.Data)},
 		}
 		err = cl.Status().Update(context.TODO(), brokerCR)
 		Expect(err).NotTo(HaveOccurred())
@@ -1747,4 +1801,176 @@ var _ = Describe("brokerservice controller unit", Label(unitLabel), func() {
 			Expect(validCondition.Reason).To(Equal(v1beta2.ValidConditionSuccessReason))
 		})
 	})
+
+	Context("app generation bump without config change", func() {
+
+		It("annotation generation bump does not change the data checksum", Label(unitLabel), func() {
+			ns := "default"
+			svcName := "gen-bump-svc"
+			appName := "gen-bump-app"
+
+			common.SetOperatorCASecretName("op_ca")
+			DeferCleanup(common.UnsetOperatorCASecretName)
+			common.SetOperatorNameSpace(ns)
+			DeferCleanup(common.UnsetOperatorNameSpace)
+
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns, UID: types.UID("uid-svc")},
+			}
+			app := &v1beta2.BrokerApp{
+				ObjectMeta: metav1.ObjectMeta{Name: appName, Namespace: ns, UID: types.UID("uid-app"), Generation: 1},
+				Spec: v1beta2.BrokerAppSpec{
+					Addresses:    []v1beta2.AddressType{{Address: "orders"}},
+					Capabilities: []v1beta2.AppCapabilityType{{ProducerOf: []v1beta2.AddressRef{{Address: "orders"}}}},
+				},
+				Status: v1beta2.BrokerAppStatus{
+					Service: &v1beta2.BrokerServiceBindingStatus{
+						Name: svcName, Namespace: ns, Secret: "binding-secret", AssignedPort: 61616,
+					},
+				},
+			}
+			WithBoundSpec(app)
+
+			scheme := NewServiceUnitTestScheme()
+			builder := fake.NewClientBuilder().WithScheme(scheme).
+				WithObjects(WithCerts(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
+					&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "op_ca", Namespace: ns}, Data: map[string][]byte{"ca.pem": []byte("test")}},
+					svc, app)...).
+				WithStatusSubresource(svc, app, &v1beta2.Broker{})
+			builder = SetupBrokerAppIndexer(builder)
+			cl := builder.Build()
+
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+
+			By("first reconcile provisions the app at generation 1")
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			secretName := AppPropertiesSecretName(svcName)
+			secret := &corev1.Secret{}
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, secret)).To(Succeed())
+
+			initialChecksum := brokerproperties.DataChecksum(secret.Data)
+			Expect(secret.Annotations[common.ProvisionedAppsAnnotation]).To(ContainSubstring("@1"),
+				"annotation should contain generation 1")
+
+			By("bumping the app bound generation without changing the spec content")
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: appName, Namespace: ns}, app)).To(Succeed())
+			app.Generation = 2
+			app.Status.BoundSpec.Generation = 2
+			Expect(cl.Status().Update(context.TODO(), app)).To(Succeed())
+
+			By("second reconcile with bumped generation")
+			_, err = r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, secret)).To(Succeed())
+
+			Expect(secret.Annotations[common.ProvisionedAppsAnnotation]).To(ContainSubstring("@2"),
+				"annotation should advance to generation 2")
+			Expect(brokerproperties.DataChecksum(secret.Data)).To(Equal(initialChecksum),
+				"data checksum should be unchanged — the annotation bump does not affect "+
+					"resolveAppsProvisioned because it compares data checksums, not ResourceVersion")
+		})
+
+		It("external metadata change on the app-bp secret breaks AppsProvisioned", Label(unitLabel), func() {
+			ns := "default"
+			svcName := "meta-bump-svc"
+			appName := "meta-bump-app"
+
+			common.SetOperatorCASecretName("op_ca")
+			DeferCleanup(common.UnsetOperatorCASecretName)
+			common.SetOperatorNameSpace(ns)
+			DeferCleanup(common.UnsetOperatorNameSpace)
+
+			svc := &v1beta2.BrokerService{
+				ObjectMeta: metav1.ObjectMeta{Name: svcName, Namespace: ns, UID: types.UID("uid-svc")},
+			}
+			app := &v1beta2.BrokerApp{
+				ObjectMeta: metav1.ObjectMeta{Name: appName, Namespace: ns, UID: types.UID("uid-app"), Generation: 1},
+				Spec: v1beta2.BrokerAppSpec{
+					Addresses:    []v1beta2.AddressType{{Address: "orders"}},
+					Capabilities: []v1beta2.AppCapabilityType{{ProducerOf: []v1beta2.AddressRef{{Address: "orders"}}}},
+				},
+				Status: v1beta2.BrokerAppStatus{
+					Service: &v1beta2.BrokerServiceBindingStatus{
+						Name: svcName, Namespace: ns, Secret: "binding-secret", AssignedPort: 61616,
+					},
+				},
+			}
+			WithBoundSpec(app)
+
+			scheme := NewServiceUnitTestScheme()
+			builder := fake.NewClientBuilder().WithScheme(scheme).
+				WithObjects(WithCerts(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
+					&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "op_ca", Namespace: ns}, Data: map[string][]byte{"ca.pem": []byte("test")}},
+					svc, app)...).
+				WithStatusSubresource(svc, app, &v1beta2.Broker{})
+			builder = SetupBrokerAppIndexer(builder)
+			cl := builder.Build()
+
+			r := NewBrokerServiceReconciler(cl, scheme, nil, logr.New(log.NullLogSink{}))
+			req := ctrl.Request{NamespacedName: types.NamespacedName{Name: svcName, Namespace: ns}}
+
+			By("reconcile and reach provisioned state")
+			_, err := r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			secretName := AppPropertiesSecretName(svcName)
+			secret := &corev1.Secret{}
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, secret)).To(Succeed())
+			appliedChecksum := brokerproperties.DataChecksum(secret.Data)
+
+			brokerCR := &v1beta2.Broker{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, brokerCR)).To(Succeed())
+			brokerCR.Status.Conditions = []metav1.Condition{
+				{Type: v1beta2.ReadyConditionType, Status: metav1.ConditionTrue, Reason: "Ready"},
+			}
+			brokerCR.Status.ExternalConfigs = []v1beta2.BrokerExternalConfigStatus{
+				{Name: secretName, DataChecksum: appliedChecksum},
+			}
+			Expect(cl.Status().Update(context.TODO(), brokerCR)).To(Succeed())
+
+			_, err = r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedSvc := &v1beta2.BrokerService{}
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedSvc)).To(Succeed())
+			Expect(meta.IsStatusConditionTrue(updatedSvc.Status.Conditions, v1beta2.AppsProvisionedConditionType)).To(BeTrue(),
+				"precondition: AppsProvisioned should be True")
+
+			By("external actor adds a label to the secret — bumps ResourceVersion without changing data")
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, secret)).To(Succeed())
+			labels := secret.GetLabels()
+			if labels == nil {
+				labels = make(map[string]string)
+			}
+			labels["external-controller"] = "touched"
+			secret.SetLabels(labels)
+			Expect(cl.Update(context.TODO(), secret)).To(Succeed())
+
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Name: secretName, Namespace: ns}, secret)).To(Succeed())
+			Expect(secret.ResourceVersion).NotTo(Equal(appliedChecksum),
+				"ResourceVersion should have changed from the label update")
+			Expect(brokerproperties.DataChecksum(secret.Data)).To(Equal(appliedChecksum),
+				"data checksum should be unchanged — only metadata was modified")
+
+			By("reconcile after external metadata change")
+			_, err = r.Reconcile(context.TODO(), req)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cl.Get(context.TODO(), req.NamespacedName, updatedSvc)).To(Succeed())
+			Expect(meta.IsStatusConditionTrue(updatedSvc.Status.Conditions, v1beta2.AppsProvisionedConditionType)).To(BeTrue(),
+				"AppsProvisioned should stay True after a metadata-only change because "+
+					"resolveAppsProvisioned compares data checksums, not ResourceVersion")
+		})
+	})
 })
+
+// controlPlaneData returns the control-plane config a service renders for its broker
+func controlPlaneData(cl client.Client, name, ns string) map[string][]byte {
+	secret := &corev1.Secret{}
+	Expect(cl.Get(context.TODO(), types.NamespacedName{Name: name + "-control-plane-bp", Namespace: ns}, secret)).To(Succeed())
+	return secret.Data
+}

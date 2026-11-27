@@ -346,9 +346,13 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		var consumed int32
 		Eventually(func(g Gomega) {
 			atomic.StoreInt32(&consumed, 0)
+			var lastActivity atomic.Int64
+			lastActivity.Store(time.Now().UnixMilli())
+
 			router := paho.NewStandardRouter()
 			router.RegisterHandler(topic, func(p *paho.Publish) {
 				atomic.AddInt32(&consumed, 1)
+				lastActivity.Store(time.Now().UnixMilli())
 				if verbose {
 					fmt.Printf("Consumed message: '%s'\n", p.Payload)
 				}
@@ -376,7 +380,20 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 			})
 			g.Expect(err).Should(BeNil())
 
-			time.Sleep(10 * time.Second)
+			// wait until no messages arrive for 3 seconds, up to 30 seconds total
+			deadline := time.After(30 * time.Second)
+			for {
+				select {
+				case <-deadline:
+					goto done
+				case <-time.After(1 * time.Second):
+					if time.Since(time.UnixMilli(lastActivity.Load())) >= 3*time.Second &&
+						atomic.LoadInt32(&consumed) >= int32(expectedMin) {
+						goto done
+					}
+				}
+			}
+		done:
 
 			g.Expect(conn.Disconnect(ctx)).Should(Succeed())
 			g.Expect(atomic.LoadInt32(&consumed)).Should(BeNumerically(">=", int32(expectedMin)),
@@ -1169,7 +1186,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupAppCerts, consumerName, defaultNamespace)
 
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(ForceRemove, ctx, &service)
+		DeferCleanup(GracefulRemove, ctx, &service)
 
 		By("creating owner app with shared address 'orders'")
 		owner := setupApp(ctx, ownerName, labels, broker.BrokerAppSpec{
@@ -1246,7 +1263,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupAppCerts, app2Name, defaultNamespace)
 
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(ForceRemove, ctx, &service)
+		DeferCleanup(GracefulRemove, ctx, &service)
 
 		By("creating app1 with addresses 'alpha' and 'beta'")
 		app1 := setupApp(ctx, app1Name, labels, broker.BrokerAppSpec{

@@ -4587,13 +4587,13 @@ spec:
                 description: Current state of external referenced resources
                 items:
                   properties:
+                    dataChecksum:
+                      type: string
                     name:
                       type: string
-                    resourceVersion:
-                      type: string
                   required:
+                  - dataChecksum
                   - name
-                  - resourceVersion
                   type: object
                 type: array
               observedGeneration:

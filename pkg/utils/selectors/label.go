@@ -2,6 +2,7 @@ package selectors
 
 import (
 	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -20,8 +21,8 @@ const (
 	LabelAppKubernetesComponent = "app.kubernetes.io/component"
 	LabelAppKubernetesManagedBy = "app.kubernetes.io/managed-by"
 
-	// LabelAppKubernetesNameValue is the recommended application name for Broker CR resources.
-	LabelAppKubernetesNameValue = "broker"
+	// BrokerLabelAppKubernetesNameValue is the recommended application name for Broker CR resources.
+	BrokerLabelAppKubernetesNameValue = "broker"
 
 	// Domain-specific label keys
 	LabelBrokerService = "broker.arkmq.org/service"
@@ -64,7 +65,7 @@ func NewStaticLabeler(labels map[string]string) LabelerData {
 // BrokerLabels returns Kubernetes recommended labels for Broker CR managed resources.
 func BrokerLabels(crName string) map[string]string {
 	return map[string]string{
-		LabelAppKubernetesName:     LabelAppKubernetesNameValue,
+		LabelAppKubernetesName:     BrokerLabelAppKubernetesNameValue,
 		LabelAppKubernetesInstance: crName,
 		LabelPartOfKey:             LabelPartOfValue,
 	}
@@ -115,4 +116,8 @@ func IsBrokerReservedLabelKey(key string) bool {
 	default:
 		return false
 	}
+}
+
+func IsForKind(obj client.Object, kindId string) bool {
+	return obj.GetLabels()[LabelAppKubernetesName] == kindId
 }
