@@ -24,6 +24,10 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// BrokerServiceSpec defines the desired state of a BrokerService.
+// Changing pod-template fields (resources, env, image, scheduling) triggers a
+// broker pod restart. Because persistence is currently disabled for
+// service-managed brokers, in-flight messages will be lost during the restart.
 type BrokerServiceSpec struct {
 
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Resources"
@@ -34,6 +38,22 @@ type BrokerServiceSpec struct {
 
 	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Broker image"
 	Image *string `json:"image,omitempty"`
+
+	// Specifies the node selector for broker pods.
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Node Selector"
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// Specifies affinity rules (node, pod, pod anti) for the broker pods.
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Affinity"
+	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+
+	// Specifies tolerations for broker pods.
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Tolerations"
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+
+	// Specifies topology spread constraints for broker pods.
+	//+operator-sdk:csv:customresourcedefinitions:type=spec,displayName="Topology Spread Constraints"
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
 
 	// AppSelectorExpression is a CEL expression that determines which BrokerApps
 	// can deploy to this service.
