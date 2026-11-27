@@ -3773,6 +3773,8 @@ var _ = Describe("artemis controller", func() {
 					g.Expect(*content).Should(ContainSubstring("JMS Message ID:"))
 
 				}, timeout, interval).Should(Succeed())
+
+				Expect(k8sClient.Delete(ctx, newCreatedCrd)).Should(Succeed())
 			}
 		})
 	})

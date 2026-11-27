@@ -183,7 +183,7 @@ var _ = Describe("broker controller unit", func() {
 		namer := MakeNamersForBroker(cr)
 		labels := namer.LabelBuilder.Labels()
 
-		Expect(labels[selectors.LabelAppKubernetesName]).To(Equal(selectors.LabelAppKubernetesNameValue))
+		Expect(labels[selectors.LabelAppKubernetesName]).To(Equal(selectors.BrokerLabelAppKubernetesNameValue))
 		Expect(labels[selectors.LabelAppKubernetesInstance]).To(Equal("my-broker"))
 		Expect(labels[selectors.LabelPartOfKey]).To(Equal(selectors.LabelPartOfValue))
 		_, hasBroker := labels[selectors.LabelBrokerKey]

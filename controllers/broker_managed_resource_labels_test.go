@@ -47,7 +47,7 @@ func assertActiveMQArtemisManagedResourceTrackingLabels(g Gomega, labels map[str
 }
 
 func assertBrokerRecommendedManagedResourceLabels(g Gomega, labels map[string]string, crName string) {
-	g.Expect(labels).To(HaveKeyWithValue(selectors.LabelAppKubernetesName, selectors.LabelAppKubernetesNameValue))
+	g.Expect(labels).To(HaveKeyWithValue(selectors.LabelAppKubernetesName, selectors.BrokerLabelAppKubernetesNameValue))
 	g.Expect(labels).To(HaveKeyWithValue(selectors.LabelAppKubernetesInstance, crName))
 	g.Expect(labels).To(HaveKeyWithValue(selectors.LabelPartOfKey, selectors.LabelPartOfValue))
 	_, hasBroker := labels[selectors.LabelBrokerKey]

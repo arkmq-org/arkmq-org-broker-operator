@@ -1186,7 +1186,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupAppCerts, consumerName, defaultNamespace)
 
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(ForceRemove, ctx, &service)
+		DeferCleanup(GracefulRemove, ctx, &service)
 
 		By("creating owner app with shared address 'orders'")
 		owner := setupApp(ctx, ownerName, labels, broker.BrokerAppSpec{
@@ -1263,7 +1263,7 @@ var _ = Describe("broker-service drain failure modes", Label("verySlow", "failur
 		DeferCleanup(CleanupAppCerts, app2Name, defaultNamespace)
 
 		service := setupService(ctx, serviceName, labels)
-		DeferCleanup(ForceRemove, ctx, &service)
+		DeferCleanup(GracefulRemove, ctx, &service)
 
 		By("creating app1 with addresses 'alpha' and 'beta'")
 		app1 := setupApp(ctx, app1Name, labels, broker.BrokerAppSpec{
